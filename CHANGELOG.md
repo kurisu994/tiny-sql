@@ -12,6 +12,7 @@
 
 - 更新 tiny-sql 专属应用图标，以数据库与多跳连接为主体，并重新生成 Tauri 桌面与平台图标资源。
 - 左上角品牌区从文本 `tiny-sql` 替换为简化像素风 SVG logo（数据库方块 + 多跳节点）。
+- 拓扑图改为纯 CSS 只读紧凑样式：无画布缩放/拖拽状态，避免连线穿节点和节点被自动放大。
 
 ### 🏗️ 工程脚手架
 
@@ -40,6 +41,7 @@
 
 - 基于 `sqlx 0.8`（`runtime-tokio-rustls`）。v0.1 是具体 `struct MySqlDriver`，**不抽 `trait Driver`**；v0.2 加 PostgreSQL 时再 extract trait（避免抽象提前）。
 - `MySqlDriver`：`connect` / `connect_url` / `ping` / `list_databases` / `list_tables` / `list_columns` / `query`；动态结果集按列类型分派解码为字符串（`chrono` 解日期、`bigdecimal` 解 DECIMAL，NULL → None）。
+- MySQL 连接默认禁用 `ssl-mode`（v0.1 不启用 MySQL TLS），避免 sqlx 默认 `PREFERRED` 在部分内网 MySQL 上触发 rustls `HandshakeFailure`；URL 显式传 `ssl-mode` 时仍尊重该配置。
 - SQL 执行护栏：拒绝空 SQL / 多语句；`SELECT` / `WITH` 统一后端子查询包装并外层注入 LIMIT；表浏览传 1000 行上限，SQL 编辑器传 10w 行硬上限。
 - SQL 取消：每次执行记录 MySQL `CONNECTION_ID()`，主 pool 外维护 max=1 control pool，取消时发 `KILL QUERY <id>`，不从主 pool 借连接。
 - 写操作 best-effort 二次确认：非 `SELECT` / `WITH` 语句需前端传 `allowWrite=true`，否则后端返回稳定 i18n key `error.driver.write_requires_confirmation`。
@@ -49,7 +51,7 @@
 - 命令 `connection_create` / `connection_list` / `connection_update` / `connection_delete` / `connection_test`；配置整体加密落盘，`connection_test` 走完整链路（可选多跳 SSH + `SELECT 1`），错误以稳定 i18n key 回传。
 - **持久连接**：`connection_open` / `connection_close` 把（可选）SSH 隧道 + MySQL 连接池存入 `AppState` 活跃注册表，生命周期绑定（先关 pool 后关隧道）；私钥 passphrase 首次输入后**会话内缓存**（NFR-011），下次打开静默。
 - 前端：左侧连接列表 + 右侧编辑表单（`zustand`），SSH 跳板折叠区可配 N 跳（增删 / 调序）；TOFU 指纹确认、passphrase、隧道断开提示弹窗。
-- 拓扑图：引入 `@xyflow/react`，按“本机 → hop[0..N-1] → MySQL”绘制静态链路，节点状态支持 `pending` / `connected` / `failed` / `lost`；运行期 lost 继续来自 `ssh:hop-status`，连接阶段 pending/connected/failed 由 Tauri command 补齐。
+- 拓扑图：按“本机 → hop[0..N-1] → MySQL”绘制纯 CSS 静态链路，节点状态支持 `pending` / `connected` / `failed` / `lost`；运行期 lost 继续来自 `ssh:hop-status`，连接阶段 pending/connected/failed 由 Tauri command 补齐。
 
 #### 数据浏览（src-tauri + 前端）
 

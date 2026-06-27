@@ -11,7 +11,9 @@
 - ✅ SQL 执行护栏：拒空 SQL / 多语句；`SELECT` / `WITH` 后端子查询包装；表浏览 `rowLimit=1000`，SQL 编辑器 `rowLimit=100000`。
 - ✅ SQL 取消：每次执行取 MySQL `CONNECTION_ID()`；`MySqlDriver` 主 pool 外新增 max=1 control pool，取消时发 `KILL QUERY <id>`。
 - ✅ 写操作 best-effort 二次确认：前端 `needsWriteConfirmation` 忽略字符串/注释/反引号标识符，后端仍强制 `allowWrite=true` 才执行非 SELECT。
-- ✅ 拓扑图：`@xyflow/react` 画本机 → N 跳 → MySQL；Tauri 连接阶段补 `pending/connected/failed`，运行期 keepalive 继续上报 `lost`。
+- ✅ 拓扑图：纯 CSS 线性布局画本机 → N 跳 → MySQL；Tauri 连接阶段补 `pending/connected/failed`，运行期 keepalive 继续上报 `lost`。
+- ✅ 拓扑图视觉修正：移除 React Flow 画布，避免缩放/拖拽状态、默认控制点、attribution 和自动放大；只保留固定尺寸节点与直线连接。
+- ✅ MySQL 连接默认禁用 TLS：修复 sqlx 默认 `ssl-mode=PREFERRED` 在内网 MySQL 上触发 rustls `HandshakeFailure` 的问题；真实 `TINY_SQL_TEST_MYSQL_URL` integration 全部通过。
 - ✅ 结果表格：`react-virtuoso` 虚拟滚动，表浏览与 SQL 编辑器复用。
 - ✅ 品牌区：首屏左上角 `tiny-sql` 文本已替换为简化像素风 `public/logo.svg`（数据库方块 + 多跳节点）。
 - ✅ 打包：`pnpm tauri build` 产出 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`。
@@ -34,6 +36,7 @@
 - **passphrase 单值应用到全部私钥跳**（v0.1 简化），按 connection_id 会话缓存（NFR-011）。
 - **表浏览和 SQL 编辑器共用 `db_query`**：通过 `rowLimit` 区分 1000 行预览与 10w SQL 编辑器硬上限，不再由前端拼临时 `LIMIT 1000`。
 - **control pool 不从主 pool 借连接**：v0.1 用同一 host/port（SSH 时同一本地 listener）开独立 max=1 pool，满足 pool 满时仍可发 KILL；“独立本地端口”留后续按 dogfooding 反馈再强化。
+- **v0.1 不启用 MySQL TLS**：`db-driver` 默认把 sqlx `ssl-mode` 设为 `Disabled`；`connect_url` 在 URL 显式传 `ssl-mode` 时仍尊重配置，避免内网 MySQL 声明 SSL 能力但 rustls 握手失败。
 - **普通 Web 预览不报 Tauri IPC 错误**：无 `window.__TAURI_INTERNALS__` 时连接列表降级为空，Tauri 事件监听跳过；Vitest 仍走 mock invoke。
 - 沿用：整体文件加密、playwright 推迟、移除 test_select_1。
 

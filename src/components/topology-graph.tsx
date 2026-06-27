@@ -2,18 +2,18 @@
 
 import { useMemo } from "react";
 
-import {
-  Background,
-  MarkerType,
-  ReactFlow,
-  type Edge,
-  type Node,
-} from "@xyflow/react";
-
 import { translateError, type StoredConnection } from "@/lib/tauri-api";
 import type { TopologyHopStatus } from "@/stores/session-store";
 
 type NodeStatus = "pending" | "connected" | "failed" | "lost";
+
+type TopologyNode = {
+  id: string;
+  title: string;
+  subtitle: string;
+  status: NodeStatus;
+  reason: string | null;
+};
 
 const STATUS_LABEL: Record<NodeStatus, string> = {
   pending: "连接中",
@@ -22,11 +22,18 @@ const STATUS_LABEL: Record<NodeStatus, string> = {
   lost: "断开",
 };
 
-const STATUS_CLASS: Record<NodeStatus, string> = {
+const NODE_CLASS: Record<NodeStatus, string> = {
   pending: "border-neutral-300 bg-white text-neutral-600 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300",
   connected: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
   failed: "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200",
   lost: "border-red-400 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100",
+};
+
+const LINE_CLASS: Record<NodeStatus, string> = {
+  pending: "bg-neutral-300 dark:bg-neutral-700",
+  connected: "bg-emerald-500",
+  failed: "bg-red-500",
+  lost: "bg-red-500",
 };
 
 export function TopologyGraph({
@@ -38,146 +45,107 @@ export function TopologyGraph({
   sessionStatus: "idle" | "connecting" | "connected" | "error";
   hopStatuses: Record<number, TopologyHopStatus>;
 }) {
-  const { nodes, edges } = useMemo(
-    () => buildGraph(connection, sessionStatus, hopStatuses),
+  const nodes = useMemo(
+    () => buildNodes(connection, sessionStatus, hopStatuses),
     [connection, sessionStatus, hopStatuses],
   );
 
   return (
-    <div className="h-40 border-b border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        fitView
-        fitViewOptions={{ padding: 0.16 }}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable={false}
-        panOnDrag={false}
-        zoomOnScroll={false}
-        zoomOnPinch={false}
-        zoomOnDoubleClick={false}
-        preventScrolling={false}
-      >
-        <Background gap={18} size={1} color="rgba(120, 120, 120, 0.16)" />
-      </ReactFlow>
+    <div className="border-b border-neutral-200 bg-neutral-50 px-5 py-3 dark:border-neutral-800 dark:bg-neutral-950">
+      <div className="flex h-16 items-center overflow-x-auto overflow-y-hidden">
+        {nodes.map((node, index) => (
+          <TopologySegment
+            key={node.id}
+            node={node}
+            nextStatus={nodes[index + 1]?.status ?? null}
+            isLast={index === nodes.length - 1}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-function buildGraph(
+function buildNodes(
   connection: StoredConnection,
   sessionStatus: "idle" | "connecting" | "connected" | "error",
   hopStatuses: Record<number, TopologyHopStatus>,
-): { nodes: Node[]; edges: Edge[] } {
+): TopologyNode[] {
   const hops = connection.ssh.enabled ? connection.ssh.hops : [];
-  const statuses: NodeStatus[] = [
-    "connected",
-    ...hops.map((_, index) => {
-      const tracked = hopStatuses[index]?.status;
-      if (tracked) return tracked;
-      return sessionStatus === "connected" ? "connected" : "pending";
-    }),
+  const hasFailedHop = Object.values(hopStatuses).some((s) => s.status === "failed");
+  const mysqlStatus: NodeStatus =
     sessionStatus === "connected"
       ? "connected"
-      : sessionStatus === "error" && !Object.values(hopStatuses).some((s) => s.status === "failed")
+      : sessionStatus === "error" && !hasFailedHop
         ? "failed"
-        : "pending",
-  ];
+        : "pending";
 
-  const nodeDefs = [
+  return [
     {
       id: "local",
       title: "本机",
       subtitle: "127.0.0.1",
-      status: statuses[0],
+      status: "connected",
       reason: null,
     },
-    ...hops.map((hop, index) => ({
-      id: `hop-${index}`,
-      title: `第 ${index + 1} 跳`,
-      subtitle: `${hop.host}:${hop.port}`,
-      status: statuses[index + 1],
-      reason: hopStatuses[index]?.reason ?? null,
-    })),
+    ...hops.map((hop, index) => {
+      const tracked = hopStatuses[index];
+      return {
+        id: `hop-${index}`,
+        title: `第 ${index + 1} 跳`,
+        subtitle: `${hop.host}:${hop.port}`,
+        status: tracked?.status ?? (sessionStatus === "connected" ? "connected" : "pending"),
+        reason: tracked?.reason ?? null,
+      } satisfies TopologyNode;
+    }),
     {
       id: "mysql",
       title: "MySQL",
       subtitle: `${connection.host}:${connection.port}`,
-      status: statuses[statuses.length - 1],
+      status: mysqlStatus,
       reason: null,
     },
   ];
-
-  const nodes: Node[] = nodeDefs.map((node, index) => ({
-    id: node.id,
-    type: "default",
-    position: { x: index * 190, y: 34 },
-    data: {
-      label: (
-        <TopologyLabel
-          title={node.title}
-          subtitle={node.subtitle}
-          status={node.status}
-          reason={node.reason}
-        />
-      ),
-    },
-    style: {
-      width: 156,
-      border: "none",
-      borderRadius: 8,
-      padding: 0,
-      background: "transparent",
-      boxShadow: "none",
-    },
-  }));
-
-  const edges: Edge[] = nodeDefs.slice(0, -1).map((node, index) => {
-    const target = nodeDefs[index + 1];
-    const targetStatus = target.status;
-    const connected = node.status === "connected" && targetStatus === "connected";
-    const broken = targetStatus === "failed" || targetStatus === "lost";
-    return {
-      id: `${node.id}-${target.id}`,
-      source: node.id,
-      target: target.id,
-      type: "bezier",
-      markerEnd: { type: MarkerType.ArrowClosed },
-      style: {
-        strokeWidth: 2,
-        stroke: broken ? "#dc2626" : connected ? "#059669" : "#a3a3a3",
-      },
-      animated: targetStatus === "pending",
-    };
-  });
-
-  return { nodes, edges };
 }
 
-function TopologyLabel({
-  title,
-  subtitle,
-  status,
-  reason,
+function TopologySegment({
+  node,
+  nextStatus,
+  isLast,
 }: {
-  title: string;
-  subtitle: string;
-  status: NodeStatus;
-  reason: string | null;
+  node: TopologyNode;
+  nextStatus: NodeStatus | null;
+  isLast: boolean;
 }) {
   return (
+    <>
+      <TopologyCard node={node} />
+      {!isLast && (
+        <div className="flex w-14 shrink-0 items-center px-2" aria-hidden="true">
+          <div
+            className={`h-0.5 w-full rounded-full ${
+              nextStatus ? LINE_CLASS[nextStatus] : LINE_CLASS.pending
+            }`}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+function TopologyCard({ node }: { node: TopologyNode }) {
+  return (
     <div
-      title={reason ? translateError(reason) : undefined}
-      className={`flex h-20 w-[156px] flex-col justify-between rounded-lg border px-3 py-2 text-left shadow-sm ${STATUS_CLASS[status]}`}
+      title={node.reason ? translateError(node.reason) : undefined}
+      className={`flex h-14 w-36 shrink-0 flex-col justify-between rounded-md border px-3 py-2 text-left shadow-sm ${NODE_CLASS[node.status]}`}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-semibold">{title}</span>
-        <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-medium dark:bg-black/20">
-          {STATUS_LABEL[status]}
+        <span className="truncate text-sm font-semibold leading-none">{node.title}</span>
+        <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-medium leading-none dark:bg-black/20">
+          {STATUS_LABEL[node.status]}
         </span>
       </div>
-      <div className="truncate font-mono text-[11px] opacity-80">{subtitle}</div>
+      <div className="truncate font-mono text-[11px] leading-none opacity-80">{node.subtitle}</div>
     </div>
   );
 }

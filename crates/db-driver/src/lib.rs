@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 use futures_util::TryStreamExt;
-use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow};
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow, MySqlSslMode};
 use sqlx::{Column, ConnectOptions, Executor, MySqlPool, Row, TypeInfo, ValueRef};
 use tokio_util::sync::CancellationToken;
 
@@ -161,7 +161,10 @@ impl MySqlDriver {
         if !database.is_empty() {
             opts = opts.database(database);
         }
-        opts = opts.log_statements(log::LevelFilter::Off);
+        // v0.1 不启用 MySQL TLS；sqlx 默认 PREFERRED 会在部分内网 MySQL 上握手失败。
+        opts = opts
+            .ssl_mode(MySqlSslMode::Disabled)
+            .log_statements(log::LevelFilter::Off);
 
         let pool = MySqlPoolOptions::new()
             .max_connections(5)
@@ -183,16 +186,17 @@ impl MySqlDriver {
     ///
     /// integration 测试用 `TINY_SQL_TEST_MYSQL_URL`，未来隧道桥接也走本地端口 URL。
     pub async fn connect_url(url: &str) -> Result<Self, DriverError> {
+        let opts = mysql_options_from_url(url)?;
         let pool = MySqlPoolOptions::new()
             .max_connections(5)
             .acquire_timeout(Duration::from_secs(10))
-            .connect(url)
+            .connect_with(opts.clone())
             .await
             .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
         let control_pool = MySqlPoolOptions::new()
             .max_connections(1)
             .acquire_timeout(Duration::from_secs(10))
-            .connect(url)
+            .connect_with(opts)
             .await
             .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
         Ok(Self { pool, control_pool })
@@ -410,6 +414,27 @@ impl MySqlDriver {
         self.pool.close().await;
         self.control_pool.close().await;
     }
+}
+
+fn mysql_options_from_url(url: &str) -> Result<MySqlConnectOptions, DriverError> {
+    let mut opts: MySqlConnectOptions = url
+        .parse()
+        .map_err(|e: sqlx::Error| DriverError::ConnectFailed(e.to_string()))?;
+    if !url_has_ssl_mode(url) {
+        opts = opts.ssl_mode(MySqlSslMode::Disabled);
+    }
+    Ok(opts.log_statements(log::LevelFilter::Off))
+}
+
+fn url_has_ssl_mode(url: &str) -> bool {
+    url.split_once('?')
+        .map(|(_, query)| {
+            query.split('&').any(|part| {
+                let key = part.split_once('=').map_or(part, |(key, _)| key);
+                key.eq_ignore_ascii_case("ssl-mode")
+            })
+        })
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -696,5 +721,22 @@ mod tests {
         .expect("确认后允许执行单条写 SQL");
         assert_eq!(prepared.kind, PreparedSqlKind::Write);
         assert_eq!(prepared.sql, "UPDATE orders SET status = 1");
+    }
+
+    #[test]
+    fn mysql_url_defaults_to_ssl_disabled() {
+        let opts = mysql_options_from_url("mysql://root:password@127.0.0.1:3306/test")
+            .expect("URL 应能解析");
+
+        assert!(matches!(opts.get_ssl_mode(), MySqlSslMode::Disabled));
+    }
+
+    #[test]
+    fn mysql_url_honors_explicit_ssl_mode() {
+        let opts =
+            mysql_options_from_url("mysql://root:password@127.0.0.1:3306/test?ssl-mode=preferred")
+                .expect("URL 应能解析");
+
+        assert!(matches!(opts.get_ssl_mode(), MySqlSslMode::Preferred));
     }
 }
