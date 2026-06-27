@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { EyeIcon, EyeOffIcon } from "@/components/icons";
 import {
   connectionApi,
   translateError,
@@ -221,7 +222,11 @@ function Field({
             title={show ? "隐藏" : "显示"}
             className="absolute inset-y-0 right-0 flex items-center px-2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
           >
-            {show ? "🙈" : "👁"}
+            {show ? (
+              <EyeOffIcon className="h-4 w-4" />
+            ) : (
+              <EyeIcon className="h-4 w-4" />
+            )}
           </button>
         )}
       </div>

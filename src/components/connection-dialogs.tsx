@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { listen } from "@tauri-apps/api/event";
 
+import { EyeIcon, EyeOffIcon } from "@/components/icons";
 import {
   SSH_EVENTS,
   tofuApi,
@@ -151,7 +152,11 @@ function PassphraseDialog({
           title={show ? "隐藏" : "显示"}
           className="absolute inset-y-0 right-0 flex items-center px-2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
         >
-          {show ? "🙈" : "👁"}
+          {show ? (
+            <EyeOffIcon className="h-4 w-4" />
+          ) : (
+            <EyeIcon className="h-4 w-4" />
+          )}
         </button>
       </div>
       <div className="flex justify-end gap-2">
