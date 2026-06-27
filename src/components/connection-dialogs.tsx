@@ -122,22 +122,38 @@ function PassphraseDialog({
   onCancel: () => void;
 }) {
   const [value, setValue] = useState("");
+  const [show, setShow] = useState(false);
   return (
     <Overlay>
       <h3 className="text-base font-semibold">输入私钥 passphrase</h3>
       <p className="text-sm text-neutral-600 dark:text-neutral-400">
         该 SSH 私钥已加密，请输入 passphrase（仅本次会话内存，不保存）。
       </p>
-      <input
-        type="password"
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onSubmit(value);
-        }}
-        className="rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900"
-      />
+      <div className="relative">
+        <input
+          type={show ? "text" : "password"}
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSubmit(value);
+          }}
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full rounded-md border border-neutral-300 px-2 py-1 pr-9 dark:border-neutral-600 dark:bg-neutral-900"
+        />
+        <button
+          type="button"
+          onClick={() => setShow((s) => !s)}
+          tabIndex={-1}
+          title={show ? "隐藏" : "显示"}
+          className="absolute inset-y-0 right-0 flex items-center px-2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+        >
+          {show ? "🙈" : "👁"}
+        </button>
+      </div>
       <div className="flex justify-end gap-2">
         <button
           onClick={onCancel}

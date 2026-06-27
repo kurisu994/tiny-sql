@@ -192,15 +192,39 @@ function Field({
   onChange: (v: string) => void;
   type?: string;
 }) {
+  const isPassword = type === "password";
+  const [show, setShow] = useState(false);
+  // 密码框可切换明文；其余沿用传入 type
+  const inputType = isPassword ? (show ? "text" : "password") : type;
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="text-neutral-600 dark:text-neutral-400">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900"
-      />
+      <div className="relative">
+        <input
+          type={inputType}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          // 关闭 WKWebView 的自动首字母大写 / 纠错 / 自动填充 / 拼写检查
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          className={`w-full rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900 ${
+            isPassword ? "pr-9" : ""
+          }`}
+        />
+        {isPassword && (
+          <button
+            type="button"
+            onClick={() => setShow((s) => !s)}
+            tabIndex={-1}
+            title={show ? "隐藏" : "显示"}
+            className="absolute inset-y-0 right-0 flex items-center px-2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+          >
+            {show ? "🙈" : "👁"}
+          </button>
+        )}
+      </div>
     </label>
   );
 }
