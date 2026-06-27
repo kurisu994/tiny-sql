@@ -112,6 +112,19 @@ impl MySqlDriver {
         Ok(Self { pool })
     }
 
+    /// 用完整 `mysql://` URL 建立连接池。
+    ///
+    /// integration 测试用 `TINY_SQL_TEST_MYSQL_URL`，未来隧道桥接也走本地端口 URL。
+    pub async fn connect_url(url: &str) -> Result<Self, DriverError> {
+        let pool = MySqlPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(Duration::from_secs(10))
+            .connect(url)
+            .await
+            .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
+        Ok(Self { pool })
+    }
+
     /// 跑一条 `SELECT 1`，用于连接测试。
     pub async fn ping(&self) -> Result<i64, DriverError> {
         let row: (i64,) = sqlx::query_as("SELECT 1")
