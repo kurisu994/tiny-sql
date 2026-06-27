@@ -37,7 +37,7 @@ build-debug:
 # === 一键检查（对齐 CI：fmt 检查 + clippy + 测试 + 前端 build）===
 
 # 提交前跑一遍，等价于 CI 的 check job
-check: fmt-check lint-rust test-rust build-web
+check: fmt-check lint-rust test-rust test-web build-web
 
 # === 代码检查 ===
 
@@ -62,12 +62,16 @@ fmt-check:
 
 # === 测试 ===
 
-# 全部单元测试（workspace）
-test: test-rust
+# 全部单元测试（Rust + 前端）
+test: test-rust test-web
 
 # cargo test（workspace；不含连真实 MySQL 的 integration）
 test-rust:
     cargo test --workspace
+
+# 前端单元测试（vitest）
+test-web:
+    pnpm test
 
 # integration 测试（连本地 MySQL，需 .env 设 TINY_SQL_TEST_MYSQL_URL，见 .env.example）
 test-integration:
