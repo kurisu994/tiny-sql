@@ -12,8 +12,18 @@
 
 use std::time::Duration;
 
+use futures_util::TryStreamExt;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow};
-use sqlx::{Column, ConnectOptions, MySqlPool, Row, TypeInfo, ValueRef};
+use sqlx::{Column, ConnectOptions, Executor, MySqlPool, Row, TypeInfo, ValueRef};
+use tokio_util::sync::CancellationToken;
+
+/// 表浏览默认服务端行数上限（FR-021）。
+pub const TABLE_PREVIEW_LIMIT: usize = 1_000;
+
+/// SQL 编辑器客户端硬上限（FR-022）。
+pub const QUERY_RESULT_LIMIT: usize = 100_000;
+
+const CONTROL_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// driver 错误 —— 每个变体对应一个稳定的前端 i18n key（NFR-041：key 只能加不能改名）
 #[derive(Debug, thiserror::Error)]
@@ -22,6 +32,14 @@ pub enum DriverError {
     ConnectFailed(String),
     #[error("error.driver.query_failed: {0}")]
     QueryFailed(String),
+    #[error("error.driver.invalid_sql")]
+    InvalidSql,
+    #[error("error.driver.multiple_statements")]
+    MultipleStatements,
+    #[error("error.driver.write_requires_confirmation")]
+    WriteRequiresConfirmation,
+    #[error("error.driver.query_cancelled")]
+    QueryCancelled,
 }
 
 impl DriverError {
@@ -29,7 +47,42 @@ impl DriverError {
         match self {
             Self::ConnectFailed(_) => "error.driver.connect_failed",
             Self::QueryFailed(_) => "error.driver.query_failed",
+            Self::InvalidSql => "error.driver.invalid_sql",
+            Self::MultipleStatements => "error.driver.multiple_statements",
+            Self::WriteRequiresConfirmation => "error.driver.write_requires_confirmation",
+            Self::QueryCancelled => "error.driver.query_cancelled",
         }
+    }
+}
+
+/// SQL 执行选项。
+#[derive(Debug, Clone, Copy)]
+pub struct QueryOptions {
+    /// 最多返回多少行；后端会强制 clamp 到 `1..=QUERY_RESULT_LIMIT`。
+    pub row_limit: usize,
+    /// 非 SELECT/CTE 语句是否已由前端完成二次确认。
+    pub allow_write: bool,
+}
+
+impl Default for QueryOptions {
+    fn default() -> Self {
+        Self {
+            row_limit: QUERY_RESULT_LIMIT,
+            allow_write: false,
+        }
+    }
+}
+
+impl QueryOptions {
+    pub fn table_preview() -> Self {
+        Self {
+            row_limit: TABLE_PREVIEW_LIMIT,
+            allow_write: false,
+        }
+    }
+
+    fn effective_limit(self) -> usize {
+        self.row_limit.clamp(1, QUERY_RESULT_LIMIT)
     }
 }
 
@@ -74,7 +127,7 @@ pub struct RowSet {
     pub columns: Vec<String>,
     /// 行数据，外层是行、内层是列；None = NULL
     pub rows: Vec<Vec<Option<String>>>,
-    /// 是否因客户端硬上限被截断（Week 4 接 10w 截断，当前恒为 false）
+    /// 是否因客户端硬上限被截断
     pub truncated: bool,
 }
 
@@ -86,6 +139,8 @@ pub struct RowSet {
 #[derive(Clone)]
 pub struct MySqlDriver {
     pool: MySqlPool,
+    /// 独立 control pool：只用于 `KILL QUERY`，不从主 pool 借连接，避免主 pool 满时取消也卡住。
+    control_pool: MySqlPool,
 }
 
 impl MySqlDriver {
@@ -111,11 +166,17 @@ impl MySqlDriver {
         let pool = MySqlPoolOptions::new()
             .max_connections(5)
             .acquire_timeout(Duration::from_secs(10))
+            .connect_with(opts.clone())
+            .await
+            .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
+        let control_pool = MySqlPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(Duration::from_secs(10))
             .connect_with(opts)
             .await
             .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
 
-        Ok(Self { pool })
+        Ok(Self { pool, control_pool })
     }
 
     /// 用完整 `mysql://` URL 建立连接池。
@@ -128,7 +189,13 @@ impl MySqlDriver {
             .connect(url)
             .await
             .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
-        Ok(Self { pool })
+        let control_pool = MySqlPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(Duration::from_secs(10))
+            .connect(url)
+            .await
+            .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
+        Ok(Self { pool, control_pool })
     }
 
     /// 跑一条 `SELECT 1`，用于连接测试。
@@ -208,42 +275,288 @@ impl MySqlDriver {
             .collect())
     }
 
-    /// 执行任意 SQL，返回结果集（Week 2 基础版）。
-    ///
-    /// TODO(Week4)：拒多语句 + 子查询包装 `SELECT * FROM (<sql>) AS tiny_sql_limited LIMIT 1000`
-    /// + 客户端 take(100000) 硬上限 + 独立 control connection 的 KILL QUERY 取消。
+    /// 执行 SQL，返回结果集。默认用于 SQL 编辑器：最多返回 10w 行，非 SELECT 需显式确认。
     pub async fn query(&self, sql: &str) -> Result<RowSet, DriverError> {
-        let rows = sqlx::query(sql)
-            .fetch_all(&self.pool)
+        self.query_with_options(sql, QueryOptions::default(), CancellationToken::new())
+            .await
+    }
+
+    /// 执行 SQL，支持子查询包装、10w 硬上限与 `KILL QUERY` 取消。
+    pub async fn query_with_options(
+        &self,
+        sql: &str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> Result<RowSet, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        let prepared = prepare_query_sql(sql, options)?;
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        let mysql_thread_id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()")
+            .fetch_one(&mut *conn)
             .await
             .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
 
-        // TODO(Week4)：空结果集时拿不到列名，改流式 fetch + describe 取表头
-        let columns: Vec<String> = rows
-            .first()
-            .map(|row| row.columns().iter().map(|c| c.name().to_string()).collect())
-            .unwrap_or_default();
+        match prepared.kind {
+            PreparedSqlKind::Read { limit } => {
+                self.fetch_read_rows(
+                    &prepared.sql,
+                    limit,
+                    &mut conn,
+                    mysql_thread_id,
+                    cancel_token,
+                )
+                .await
+            }
+            PreparedSqlKind::Write => {
+                self.execute_write(&prepared.sql, &mut conn, mysql_thread_id, cancel_token)
+                    .await
+            }
+        }
+    }
 
-        let data: Vec<Vec<Option<String>>> = rows
+    async fn fetch_read_rows(
+        &self,
+        sql: &str,
+        limit: usize,
+        conn: &mut sqlx::pool::PoolConnection<sqlx::MySql>,
+        mysql_thread_id: u64,
+        cancel_token: CancellationToken,
+    ) -> Result<RowSet, DriverError> {
+        let columns: Vec<String> = self
+            .pool
+            .describe(sql)
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?
+            .columns()
             .iter()
-            .map(|row| {
-                (0..row.columns().len())
-                    .map(|i| cell_to_string(row, i))
-                    .collect()
-            })
+            .map(|c| c.name().to_string())
             .collect();
+
+        let mut rows = sqlx::query(sql).fetch(&mut **conn);
+        let mut data: Vec<Vec<Option<String>>> = Vec::new();
+        let mut truncated = false;
+
+        loop {
+            tokio::select! {
+                row = rows.try_next() => {
+                    let Some(row) = row.map_err(|e| DriverError::QueryFailed(e.to_string()))? else {
+                        break;
+                    };
+                    if data.len() >= limit {
+                        truncated = true;
+                        break;
+                    }
+                    data.push((0..row.columns().len()).map(|i| cell_to_string(&row, i)).collect());
+                }
+                _ = cancel_token.cancelled() => {
+                    drop(rows);
+                    self.kill_query(mysql_thread_id).await;
+                    return Err(DriverError::QueryCancelled);
+                }
+            }
+        }
 
         Ok(RowSet {
             columns,
             rows: data,
-            truncated: false,
+            truncated,
         })
+    }
+
+    async fn execute_write(
+        &self,
+        sql: &str,
+        conn: &mut sqlx::pool::PoolConnection<sqlx::MySql>,
+        mysql_thread_id: u64,
+        cancel_token: CancellationToken,
+    ) -> Result<RowSet, DriverError> {
+        tokio::select! {
+            result = sqlx::query(sql).execute(&mut **conn) => {
+                let result = result.map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+                Ok(RowSet {
+                    columns: vec!["affected_rows".to_string(), "last_insert_id".to_string()],
+                    rows: vec![vec![
+                        Some(result.rows_affected().to_string()),
+                        Some(result.last_insert_id().to_string()),
+                    ]],
+                    truncated: false,
+                })
+            }
+            _ = cancel_token.cancelled() => {
+                self.kill_query(mysql_thread_id).await;
+                Err(DriverError::QueryCancelled)
+            }
+        }
+    }
+
+    /// 从独立 control pool 发 KILL QUERY；取消路径不再向用户暴露二次失败。
+    async fn kill_query(&self, mysql_thread_id: u64) {
+        let sql = format!("KILL QUERY {mysql_thread_id}");
+        let _ = tokio::time::timeout(
+            CONTROL_QUERY_TIMEOUT,
+            sqlx::query(&sql).execute(&self.control_pool),
+        )
+        .await;
     }
 
     /// 关闭连接池。
     pub async fn close(&self) {
         self.pool.close().await;
+        self.control_pool.close().await;
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreparedSqlKind {
+    Read { limit: usize },
+    Write,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreparedSql {
+    sql: String,
+    kind: PreparedSqlKind,
+}
+
+/// 分析并改写 SQL：
+/// - 拒绝空 SQL / 多语句；
+/// - SELECT / WITH 用子查询外包 LIMIT；
+/// - 非 SELECT 仅在 `allow_write=true` 时执行，作为 best-effort 写操作二次确认。
+fn prepare_query_sql(sql: &str, options: QueryOptions) -> Result<PreparedSql, DriverError> {
+    let sanitized = strip_literals_and_comments(sql);
+    let sanitized_stmt = trim_trailing_terminators(&sanitized);
+    if sanitized_stmt.trim().is_empty() {
+        return Err(DriverError::InvalidSql);
+    }
+    if sanitized_stmt.contains(';') {
+        return Err(DriverError::MultipleStatements);
+    }
+
+    let stmt = trim_trailing_terminators(sql);
+    let tokens = sql_tokens(&sanitized_stmt);
+    let first = tokens.first().map(String::as_str).unwrap_or_default();
+    let is_read = matches!(first, "SELECT" | "WITH");
+
+    if !is_read {
+        if !options.allow_write {
+            return Err(DriverError::WriteRequiresConfirmation);
+        }
+        return Ok(PreparedSql {
+            sql: stmt,
+            kind: PreparedSqlKind::Write,
+        });
+    }
+
+    let limit = options.effective_limit();
+    // 多取 1 行仅用于精确判断是否截断；返回给前端时会丢掉第 limit+1 行。
+    let fetch_limit = limit.saturating_add(1);
+    Ok(PreparedSql {
+        sql: format!("SELECT * FROM ({stmt}) AS tiny_sql_limited LIMIT {fetch_limit}"),
+        kind: PreparedSqlKind::Read { limit },
+    })
+}
+
+fn trim_trailing_terminators(sql: &str) -> String {
+    let mut end = sql.len();
+    for (idx, ch) in sql.char_indices().rev() {
+        if ch.is_whitespace() || ch == ';' {
+            end = idx;
+        } else {
+            break;
+        }
+    }
+    sql[..end].trim().to_string()
+}
+
+fn strip_literals_and_comments(sql: &str) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' | '"' => {
+                let quote = ch;
+                out.push(' ');
+                let mut escaped = false;
+                for c in chars.by_ref() {
+                    out.push(if c == '\n' { '\n' } else { ' ' });
+                    if c == quote && !escaped {
+                        break;
+                    }
+                    escaped = c == '\\' && !escaped;
+                    if c != '\\' {
+                        escaped = false;
+                    }
+                }
+            }
+            '`' => {
+                out.push(' ');
+                while let Some(c) = chars.next() {
+                    out.push(if c == '\n' { '\n' } else { ' ' });
+                    if c == '`' {
+                        if chars.peek() == Some(&'`') {
+                            out.push(' ');
+                            chars.next();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+            }
+            '-' if chars.peek() == Some(&'-') => {
+                out.push(' ');
+                out.push(' ');
+                chars.next();
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                    out.push(' ');
+                }
+            }
+            '#' => {
+                out.push(' ');
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                    out.push(' ');
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                out.push(' ');
+                out.push(' ');
+                chars.next();
+                let mut prev = '\0';
+                for c in chars.by_ref() {
+                    out.push(if c == '\n' { '\n' } else { ' ' });
+                    if prev == '*' && c == '/' {
+                        break;
+                    }
+                    prev = c;
+                }
+            }
+            _ => out.push(ch),
+        }
+    }
+
+    out
+}
+
+fn sql_tokens(sanitized_sql: &str) -> Vec<String> {
+    sanitized_sql
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_uppercase())
+        .collect()
 }
 
 /// 把动态结果集的某个单元格转成字符串；NULL 返回 None。
@@ -313,4 +626,75 @@ pub async fn ping_select_1(
     let result = driver.ping().await;
     driver.close().await;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_is_wrapped_with_outer_limit() {
+        let prepared = prepare_query_sql(
+            "SELECT * FROM orders ORDER BY id DESC;",
+            QueryOptions::table_preview(),
+        )
+        .expect("SELECT 应通过");
+
+        assert_eq!(prepared.kind, PreparedSqlKind::Read { limit: 1_000 });
+        assert_eq!(
+            prepared.sql,
+            "SELECT * FROM (SELECT * FROM orders ORDER BY id DESC) AS tiny_sql_limited LIMIT 1001"
+        );
+    }
+
+    #[test]
+    fn cte_select_is_treated_as_read_query() {
+        let prepared = prepare_query_sql(
+            "WITH recent AS (SELECT id FROM orders) SELECT * FROM recent",
+            QueryOptions {
+                row_limit: 20,
+                allow_write: false,
+            },
+        )
+        .expect("CTE SELECT 应通过");
+
+        assert_eq!(prepared.kind, PreparedSqlKind::Read { limit: 20 });
+        assert!(prepared.sql.ends_with("LIMIT 21"));
+    }
+
+    #[test]
+    fn semicolon_inside_string_and_comments_is_not_multi_statement() {
+        let prepared = prepare_query_sql(
+            "SELECT ';' AS semi, 'UPDATE not write' AS s -- DELETE comment\nFROM dual;",
+            QueryOptions::default(),
+        )
+        .expect("字符串和注释里的分号/写关键字应忽略");
+
+        assert!(matches!(prepared.kind, PreparedSqlKind::Read { .. }));
+    }
+
+    #[test]
+    fn multiple_statements_are_rejected() {
+        let err = prepare_query_sql("SELECT 1; SELECT 2", QueryOptions::default())
+            .expect_err("多语句必须拒绝");
+        assert!(matches!(err, DriverError::MultipleStatements));
+    }
+
+    #[test]
+    fn write_statement_requires_confirmation() {
+        let err = prepare_query_sql("UPDATE orders SET status = 1", QueryOptions::default())
+            .expect_err("未确认写操作必须拒绝");
+        assert!(matches!(err, DriverError::WriteRequiresConfirmation));
+
+        let prepared = prepare_query_sql(
+            "UPDATE orders SET status = 1",
+            QueryOptions {
+                row_limit: 10,
+                allow_write: true,
+            },
+        )
+        .expect("确认后允许执行单条写 SQL");
+        assert_eq!(prepared.kind, PreparedSqlKind::Write);
+        assert_eq!(prepared.sql, "UPDATE orders SET status = 1");
+    }
 }

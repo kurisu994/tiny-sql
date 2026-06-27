@@ -4,6 +4,11 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+export function isTauriRuntime(): boolean {
+  if (typeof process !== "undefined" && process.env.VITEST) return true;
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 /** SSH 单跳配置（持久化模型，不含 passphrase） */
 export interface SshHopConfig {
   host: string;
@@ -61,6 +66,10 @@ export const ERROR_ZH: Record<string, string> = {
   "error.ssh.accept_loop_died": "SSH 隧道内部错误，请上报",
   "error.driver.connect_failed": "MySQL 连接失败",
   "error.driver.query_failed": "SQL 执行失败",
+  "error.driver.invalid_sql": "SQL 不能为空或格式不合法",
+  "error.driver.multiple_statements": "一次只能执行一条 SQL",
+  "error.driver.write_requires_confirmation": "检测到写操作，需要二次确认",
+  "error.driver.query_cancelled": "SQL 已取消",
   "error.connection.not_found": "连接配置不存在",
   "error.connection.not_open": "连接尚未打开",
 };
@@ -119,6 +128,12 @@ export interface RowSet {
   truncated: boolean;
 }
 
+export interface QueryOptions {
+  queryId?: string;
+  rowLimit?: number;
+  allowWrite?: boolean;
+}
+
 /** 基于已打开连接的数据浏览 command */
 export const dbApi = {
   listDatabases: (id: string) =>
@@ -127,7 +142,16 @@ export const dbApi = {
     invoke<TableMeta[]>("db_list_tables", { id, database }),
   listColumns: (id: string, database: string, table: string) =>
     invoke<ColumnMeta[]>("db_list_columns", { id, database, table }),
-  query: (id: string, sql: string) => invoke<RowSet>("db_query", { id, sql }),
+  query: (id: string, sql: string, options: QueryOptions = {}) =>
+    invoke<RowSet>("db_query", {
+      id,
+      sql,
+      queryId: options.queryId ?? null,
+      rowLimit: options.rowLimit ?? null,
+      allowWrite: options.allowWrite ?? false,
+    }),
+  cancelQuery: (queryId: string) =>
+    invoke<void>("db_query_cancel", { queryId }),
 };
 
 // === SSH TOFU / 隧道事件 ===
@@ -151,7 +175,7 @@ export interface TofuRequestPayload {
 export interface HopStatusPayload {
   connectionId: string;
   hopIndex: number;
-  status: "lost";
+  status: "pending" | "connected" | "failed" | "lost";
   reason: string | null;
 }
 

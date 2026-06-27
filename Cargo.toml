@@ -14,6 +14,8 @@ repository = "https://github.com/kurisu994/tiny-sql"
 # 公共依赖在此统一版本，各 crate 用 { workspace = true } 引用
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+futures-util = "0.3"
 thiserror = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }

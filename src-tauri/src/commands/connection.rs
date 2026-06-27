@@ -147,7 +147,7 @@ fn to_runtime_hop(hop: &store::SshHop, passphrase: Option<&str>) -> Result<SshHo
 struct HopStatusPayload {
     connection_id: String,
     hop_index: usize,
-    /// 目前仅 "lost"
+    /// "pending" / "connected" / "failed" / "lost"
     status: String,
     reason: Option<String>,
 }
@@ -186,13 +186,25 @@ pub async fn connection_open(
     // 直连用真实 host:port；走隧道时换隧道的本地端口
     let (host, port, tunnel) = if conn.ssh.enabled {
         let hops = build_runtime_hops(&conn.ssh, effective_passphrase.as_deref())?;
+        for hop_index in 0..hops.len() {
+            emit_hop_status(&app, &id, hop_index, "pending", None);
+        }
         let ctx = TunnelContext {
             status_cb: Some(build_status_callback(app.clone(), id.clone())),
             verifier: Some(build_verifier(&app, &state, id.clone())),
         };
-        let tunnel = ssh_multihop::open(&hops, &conn.host, conn.port, &ctx)
-            .await
-            .map_err(|e| e.i18n_key().to_string())?;
+        let tunnel = match ssh_multihop::open(&hops, &conn.host, conn.port, &ctx).await {
+            Ok(tunnel) => tunnel,
+            Err(e) => {
+                if let Some(hop_index) = e.hop_index() {
+                    emit_hop_status(&app, &id, hop_index, "failed", Some(e.i18n_key()));
+                }
+                return Err(e.i18n_key().to_string());
+            }
+        };
+        for hop_index in 0..hops.len() {
+            emit_hop_status(&app, &id, hop_index, "connected", None);
+        }
         let addr = tunnel.local_addr();
         (addr.ip().to_string(), addr.port(), Some(tunnel))
     } else {
@@ -236,16 +248,32 @@ fn build_status_callback(app: AppHandle, connection_id: String) -> HopStatusCall
         let status = match ev.status {
             ssh_multihop::HopStatus::Lost => "lost",
         };
-        let _ = app.emit(
-            "ssh:hop-status",
-            HopStatusPayload {
-                connection_id: connection_id.clone(),
-                hop_index: ev.hop_index,
-                status: status.to_string(),
-                reason: ev.reason.clone(),
-            },
+        emit_hop_status(
+            &app,
+            &connection_id,
+            ev.hop_index,
+            status,
+            ev.reason.as_deref(),
         );
     })
+}
+
+fn emit_hop_status(
+    app: &AppHandle,
+    connection_id: &str,
+    hop_index: usize,
+    status: &str,
+    reason: Option<&str>,
+) {
+    let _ = app.emit(
+        "ssh:hop-status",
+        HopStatusPayload {
+            connection_id: connection_id.to_string(),
+            hop_index,
+            status: status.to_string(),
+            reason: reason.map(ToString::to_string),
+        },
+    );
 }
 
 /// 构造 host key 校验器：known_hosts 命中比对，未知走 TOFU 弹窗，指纹变更硬拒绝。

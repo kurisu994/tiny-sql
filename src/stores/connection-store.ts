@@ -6,6 +6,7 @@ import { create } from "zustand";
 
 import {
   connectionApi,
+  isTauriRuntime,
   translateError,
   type ConnectionInput,
   type StoredConnection,
@@ -32,6 +33,10 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   load: async () => {
     set({ loading: true });
+    if (!isTauriRuntime()) {
+      set({ connections: [], error: null, loading: false });
+      return;
+    }
     try {
       const connections = await connectionApi.list();
       set({ connections, error: null });

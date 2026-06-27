@@ -20,6 +20,7 @@ beforeEach(() => {
   mockInvoke.mockReset();
   useSessionStore.setState({
     openId: null,
+    activeConnection: null,
     status: "idle",
     errorMsg: null,
     passphraseFor: null,
@@ -29,6 +30,11 @@ beforeEach(() => {
     selectedTable: null,
     rowSet: null,
     loadingData: false,
+    sqlText: "SELECT 1",
+    queryRunning: false,
+    currentQueryId: null,
+    queryErrorMsg: null,
+    hopStatuses: {},
     lostHops: [],
   });
 });
@@ -68,7 +74,7 @@ describe("session-store", () => {
     });
   });
 
-  it("selectTable 用反引号包裹并加 LIMIT 1000 查询", async () => {
+  it("selectTable 用反引号包裹并交给后端 rowLimit=1000", async () => {
     useSessionStore.setState({ openId: "c1", selectedDb: "app" });
     routeInvoke({
       db_query: { columns: ["id"], rows: [["1"]], truncated: false },
@@ -76,9 +82,29 @@ describe("session-store", () => {
     await useSessionStore.getState().selectTable("user`s");
     expect(mockInvoke).toHaveBeenCalledWith("db_query", {
       id: "c1",
-      sql: "SELECT * FROM `app`.`user``s` LIMIT 1000",
+      sql: "SELECT * FROM `app`.`user``s`",
+      queryId: expect.any(String),
+      rowLimit: 1000,
+      allowWrite: false,
     });
     expect(useSessionStore.getState().rowSet?.rows).toHaveLength(1);
+  });
+
+  it("executeSql 使用 10w 默认上限并可取消 query", async () => {
+    useSessionStore.setState({ openId: "c1" });
+    routeInvoke({
+      db_query: { columns: ["n"], rows: [["1"]], truncated: false },
+      db_query_cancel: undefined,
+    });
+
+    await useSessionStore.getState().executeSql("SELECT 1");
+    expect(mockInvoke).toHaveBeenCalledWith("db_query", {
+      id: "c1",
+      sql: "SELECT 1",
+      queryId: expect.any(String),
+      rowLimit: 100000,
+      allowWrite: false,
+    });
   });
 
   it("markHopLost 去重累加断开跳", () => {

@@ -15,6 +15,7 @@ export default function Home() {
 
   const sessionStatus = useSessionStore((s) => s.status);
   const openId = useSessionStore((s) => s.openId);
+  const activeConnection = useSessionStore((s) => s.activeConnection);
   const openConnection = useSessionStore((s) => s.open);
 
   useEffect(() => {
@@ -23,8 +24,13 @@ export default function Home() {
 
   const selected = connections.find((c) => c.id === selectedId) ?? null;
   const showForm = creating || selected !== null;
-  const connected = sessionStatus === "connected" && openId !== null;
-  const openConn = connections.find((c) => c.id === openId) ?? null;
+  const showingSession =
+    activeConnection !== null &&
+    (sessionStatus === "connecting" ||
+      sessionStatus === "connected" ||
+      sessionStatus === "error");
+  const openConn =
+    activeConnection ?? connections.find((c) => c.id === openId) ?? null;
 
   function startCreate() {
     setCreating(true);
@@ -48,7 +54,14 @@ export default function Home() {
       {/* 左侧连接列表 */}
       <aside className="flex w-72 flex-col border-r border-neutral-200 dark:border-neutral-800">
         <div className="flex items-center justify-between border-b border-neutral-200 p-3 dark:border-neutral-800">
-          <h1 className="font-semibold">tiny-sql</h1>
+          <h1 className="flex min-w-0 items-center">
+            <img
+              src="/logo.svg"
+              alt="tiny-sql"
+              className="h-8 w-auto"
+              draggable={false}
+            />
+          </h1>
           <button
             onClick={startCreate}
             className="rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
@@ -89,7 +102,7 @@ export default function Home() {
                   </span>
                 </button>
                 <button
-                  onClick={() => openConnection(c.id)}
+                  onClick={() => openConnection(c.id, undefined, c)}
                   disabled={sessionStatus === "connecting"}
                   className="shrink-0 rounded border border-neutral-300 px-1.5 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
                   title="连接并浏览"
@@ -104,12 +117,8 @@ export default function Home() {
 
       {/* 右侧：已连接 → schema 浏览；否则编辑表单 / 空状态 */}
       <section className="min-w-0 flex-1">
-        {connected && openConn ? (
-          <SchemaBrowser connectionName={openConn.name} />
-        ) : sessionStatus === "connecting" ? (
-          <div className="flex h-full items-center justify-center text-sm text-neutral-500">
-            连接中…
-          </div>
+        {showingSession && openConn ? (
+          <SchemaBrowser connection={openConn} />
         ) : showForm ? (
           <div className="h-full overflow-y-auto p-6">
             <ConnectionForm

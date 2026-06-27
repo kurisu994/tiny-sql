@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { EyeIcon, EyeOffIcon } from "@/components/icons";
 import {
   SSH_EVENTS,
+  isTauriRuntime,
   tofuApi,
   type HopStatusPayload,
   type TofuRequestPayload,
@@ -24,10 +25,11 @@ export function ConnectionDialogs() {
   const passphraseFor = useSessionStore((s) => s.passphraseFor);
   const submitPassphrase = useSessionStore((s) => s.submitPassphrase);
   const cancelPassphrase = useSessionStore((s) => s.cancelPassphrase);
-  const markHopLost = useSessionStore((s) => s.markHopLost);
+  const markHopStatus = useSessionStore((s) => s.markHopStatus);
 
   // TOFU 请求事件 → 入队
   useEffect(() => {
+    if (!isTauriRuntime()) return;
     const un = listen<TofuRequestPayload>(SSH_EVENTS.tofuRequest, (e) => {
       setTofuQueue((q) => [...q, e.payload]);
     });
@@ -38,13 +40,14 @@ export function ConnectionDialogs() {
 
   // keepalive 断开事件 → 标记
   useEffect(() => {
+    if (!isTauriRuntime()) return;
     const un = listen<HopStatusPayload>(SSH_EVENTS.hopStatus, (e) => {
-      if (e.payload.status === "lost") markHopLost(e.payload.hopIndex);
+      markHopStatus(e.payload);
     });
     return () => {
       un.then((f) => f());
     };
-  }, [markHopLost]);
+  }, [markHopStatus]);
 
   const current = tofuQueue[0] ?? null;
 

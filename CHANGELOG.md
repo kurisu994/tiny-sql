@@ -11,6 +11,7 @@
 ### 🎨 体验调整
 
 - 更新 tiny-sql 专属应用图标，以数据库与多跳连接为主体，并重新生成 Tauri 桌面与平台图标资源。
+- 左上角品牌区从文本 `tiny-sql` 替换为简化像素风 SVG logo（数据库方块 + 多跳节点）。
 
 ### 🏗️ 工程脚手架
 
@@ -20,6 +21,7 @@
 - 连接配置加密：复用 AES-256-GCM + master key（0600），tiny-sql 对**整个 `connections.enc` 文件**加密（满足 FR-001：明文 host/user/password 不落盘）。
 - 测试基础设施：前端 `vitest` + `@testing-library/react`；`db-driver` integration 测试连本地 MySQL（`TINY_SQL_TEST_MYSQL_URL`，默认 `#[ignore]`）。
 - GitHub Actions CI（macOS arm64）：`cargo fmt --check` + `clippy` + `cargo test` + `vitest` + 前端 build。
+- GitHub Actions release job：`v0.1.*` tag 触发 macOS arm64 Tauri build，并上传 `.dmg` 到 GitHub Release。
 - ⏸️ playwright E2E 因 Tauri WebDriver 不支持 macOS 推迟（留将来 Linux CI / Week 5 dogfooding）。
 
 ### ✨ 新功能
@@ -38,19 +40,26 @@
 
 - 基于 `sqlx 0.8`（`runtime-tokio-rustls`）。v0.1 是具体 `struct MySqlDriver`，**不抽 `trait Driver`**；v0.2 加 PostgreSQL 时再 extract trait（避免抽象提前）。
 - `MySqlDriver`：`connect` / `connect_url` / `ping` / `list_databases` / `list_tables` / `list_columns` / `query`；动态结果集按列类型分派解码为字符串（`chrono` 解日期、`bigdecimal` 解 DECIMAL，NULL → None）。
-- `query` 的子查询包装防 OOM、10w 行截断、独立 control connection 的 `KILL QUERY` 取消留 Week 4。
+- SQL 执行护栏：拒绝空 SQL / 多语句；`SELECT` / `WITH` 统一后端子查询包装并外层注入 LIMIT；表浏览传 1000 行上限，SQL 编辑器传 10w 行硬上限。
+- SQL 取消：每次执行记录 MySQL `CONNECTION_ID()`，主 pool 外维护 max=1 control pool，取消时发 `KILL QUERY <id>`，不从主 pool 借连接。
+- 写操作 best-effort 二次确认：非 `SELECT` / `WITH` 语句需前端传 `allowWrite=true`，否则后端返回稳定 i18n key `error.driver.write_requires_confirmation`。
 
 #### 连接管理（src-tauri + 前端）
 
 - 命令 `connection_create` / `connection_list` / `connection_update` / `connection_delete` / `connection_test`；配置整体加密落盘，`connection_test` 走完整链路（可选多跳 SSH + `SELECT 1`），错误以稳定 i18n key 回传。
 - **持久连接**：`connection_open` / `connection_close` 把（可选）SSH 隧道 + MySQL 连接池存入 `AppState` 活跃注册表，生命周期绑定（先关 pool 后关隧道）；私钥 passphrase 首次输入后**会话内缓存**（NFR-011），下次打开静默。
 - 前端：左侧连接列表 + 右侧编辑表单（`zustand`），SSH 跳板折叠区可配 N 跳（增删 / 调序）；TOFU 指纹确认、passphrase、隧道断开提示弹窗。
+- 拓扑图：引入 `@xyflow/react`，按“本机 → hop[0..N-1] → MySQL”绘制静态链路，节点状态支持 `pending` / `connected` / `failed` / `lost`；运行期 lost 继续来自 `ssh:hop-status`，连接阶段 pending/connected/failed 由 Tauri command 补齐。
 
 #### 数据浏览（src-tauri + 前端）
 
 - 命令 `db_list_databases` / `db_list_tables` / `db_list_columns` / `db_query`（基于已打开连接）。
-- 前端：左侧 database/table 树，点表查看前 1000 行（`SELECT … LIMIT 1000`）。
-- ⏸️ 1000 行用普通滚动表格，`react-virtuoso` 虚拟滚动留 Week 4 的 10 万行硬上限再引入。
+- 前端：左侧 database/table 树，点表以 `rowLimit=1000` 走后端子查询包装；右侧 SQL textarea 可直接执行 SQL，并显示截断提示。
+- 结果表格改为 `react-virtuoso` 虚拟滚动，复用表浏览与 SQL 编辑器结果展示。
 - TOFU 信任库 `known_hosts.json`（自有 store，**不碰** `~/.ssh/known_hosts`，NFR-012）。
+
+#### macOS 打包
+
+- 本地 `pnpm tauri build` 已产出 `/target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`。
 
 ---

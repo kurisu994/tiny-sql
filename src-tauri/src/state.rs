@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use db_driver::MySqlDriver;
 use ssh_multihop::SshTunnel;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::config::ssh_known_hosts::SshKnownHostsStore;
 use crate::config::store::ConnectionStore;
@@ -36,6 +37,8 @@ pub struct AppState {
     pub store: Mutex<ConnectionStore>,
     /// 已打开的活跃连接注册表：connection_id → OpenConnection。
     pub connections: AsyncMutex<HashMap<String, OpenConnection>>,
+    /// 正在执行的 query：query_id → cancel token。
+    pub queries: AsyncMutex<HashMap<String, CancellationToken>>,
     /// SSH known_hosts 信任库（TOFU）。
     pub known_hosts: Arc<SshKnownHostsStore>,
     /// TOFU 决策管理器（前端弹窗回调通道）。
@@ -49,6 +52,7 @@ impl AppState {
         Self {
             store: Mutex::new(store),
             connections: AsyncMutex::new(HashMap::new()),
+            queries: AsyncMutex::new(HashMap::new()),
             known_hosts: Arc::new(known_hosts),
             tofu: Arc::new(SshTofuManager::default()),
             passphrases: Mutex::new(HashMap::new()),
