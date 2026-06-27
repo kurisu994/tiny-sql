@@ -7,6 +7,8 @@
 use serde::Deserialize;
 use ssh_multihop::{SshAuth, SshHop};
 
+pub mod config;
+
 /// 前端传入的单跳配置
 #[derive(Debug, Deserialize)]
 struct HopInput {

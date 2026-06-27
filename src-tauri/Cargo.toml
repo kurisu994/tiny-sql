@@ -24,3 +24,7 @@ tokio = { workspace = true }
 log = { workspace = true }
 ssh-multihop = { path = "../crates/ssh-multihop" }
 db-driver = { path = "../crates/db-driver" }
+# 连接配置加密 store
+aes-gcm = "0.10"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
