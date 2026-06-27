@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支新 push 取消旧 run
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # v0.1 Week 1：仅 macOS arm64。Win/Linux + .dmg 打包推 Week 4 / v0.3
+  check:
+    name: check (macOS arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend (Next static export -> out/)
+        run: pnpm build
+
+      - name: cargo fmt check
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+        # integration test 连用户本地 MySQL（TINY_SQL_TEST_MYSQL_URL），CI 不跑

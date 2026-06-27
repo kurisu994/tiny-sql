@@ -1,0 +1,15 @@
+[package]
+name = "db-driver"
+version = "0.1.0"
+description = "MySQL driver —— v0.1 具体 struct，v0.2 加 PG 时 extract trait"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+sqlx = { workspace = true }

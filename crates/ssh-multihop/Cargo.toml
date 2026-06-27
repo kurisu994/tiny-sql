@@ -1,0 +1,15 @@
+[package]
+name = "ssh-multihop"
+version = "0.1.0"
+description = "多级 SSH 跳板隧道 —— 把流量经 N 跳 SSH 转发到本地端口"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+russh = { workspace = true }

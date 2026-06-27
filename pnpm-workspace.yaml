@@ -1,0 +1,4 @@
+# pnpm 11 构建脚本批准（verify-deps-before-run 会因未批准的 build script 卡成 exit 1）
+# sharp 是 Next 图片优化依赖；我们用 images.unoptimized，但仍需批准其 build 让 install 干净退出
+allowBuilds:
+  sharp: true

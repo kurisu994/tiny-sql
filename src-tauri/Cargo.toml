@@ -1,0 +1,26 @@
+[package]
+name = "tiny-sql"
+version = "0.1.0"
+description = "多级跳板机友好的 MySQL 桌面客户端"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-log = "2"
+serde = { workspace = true }
+serde_json = "1"
+tokio = { workspace = true }
+log = { workspace = true }
+ssh-multihop = { path = "../crates/ssh-multihop" }
+db-driver = { path = "../crates/db-driver" }

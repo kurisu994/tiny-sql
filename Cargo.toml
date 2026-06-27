@@ -1,0 +1,24 @@
+# tiny-sql workspace 根
+# v0.1 三个成员：ssh-multihop（隧道）/ db-driver（MySQL）/ src-tauri（壳）
+[workspace]
+resolver = "2"
+members = ["crates/ssh-multihop", "crates/db-driver", "src-tauri"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.77.2"
+license = "MIT"
+authors = ["kurisu <makise_kurisuu@outlook.jp>"]
+repository = "https://github.com/kurisu994/tiny-sql"
+
+# 公共依赖在此统一版本，各 crate 用 { workspace = true } 引用
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+thiserror = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+russh = "0.54"
+sqlx = { version = "0.8", default-features = false, features = [
+    "mysql",
+    "runtime-tokio-rustls",
+] }
