@@ -8,12 +8,15 @@
 
 ## [Unreleased]
 
-### 🏗️ 工程脚手架（Week 1 vertical slice）
+### 🏗️ 工程脚手架
 
 - 初始化 Cargo workspace：`ssh-multihop`（隧道）/ `db-driver`（MySQL）/ `src-tauri`（Tauri 壳）三成员；`src-tauri` 引用 workspace crate 编译通过，无需退回扁平 mod。
 - 前端：Next.js 16 (Turbopack) + React 19 + Tailwind CSS 4 静态导出（`output: export` → `out/`）。
 - 命令入口 `justfile`：`dev` / `build` / `check` / `lint` / `fmt` / `test` / `version` / `release` 等。
-- GitHub Actions CI（macOS arm64）：`cargo fmt --check` + `clippy` + `cargo test` + 前端 build。
+- 连接配置加密：复用 AES-256-GCM + master key（0600），tiny-sql 对**整个 `connections.enc` 文件**加密（满足 FR-001：明文 host/user/password 不落盘）。
+- 测试基础设施：前端 `vitest` + `@testing-library/react`；`db-driver` integration 测试连本地 MySQL（`TINY_SQL_TEST_MYSQL_URL`，默认 `#[ignore]`）。
+- GitHub Actions CI（macOS arm64）：`cargo fmt --check` + `clippy` + `cargo test` + `vitest` + 前端 build。
+- ⏸️ playwright E2E 因 Tauri WebDriver 不支持 macOS 推迟（留将来 Linux CI / Week 5 dogfooding）。
 
 ### ✨ 新功能
 
@@ -27,11 +30,13 @@
 
 #### MySQL driver（crates/db-driver）
 
-- 基于 `sqlx 0.8`（`runtime-tokio-rustls`）。v0.1 是具体 `struct`，**不抽 `trait Driver`**；v0.2 加 PostgreSQL 时再 extract trait（避免抽象提前）。
-- `ping_select_1`：经「隧道本地端口 → `mysql://127.0.0.1:port`」桥接连上 MySQL 跑 `SELECT 1`，用来打通整条最小链路。
+- 基于 `sqlx 0.8`（`runtime-tokio-rustls`）。v0.1 是具体 `struct MySqlDriver`，**不抽 `trait Driver`**；v0.2 加 PostgreSQL 时再 extract trait（避免抽象提前）。
+- `MySqlDriver`：`connect` / `connect_url` / `ping` / `list_databases` / `list_tables` / `list_columns` / `query`；动态结果集按列类型分派解码为字符串（`chrono` 解日期、`bigdecimal` 解 DECIMAL，NULL → None）。
+- `query` 的子查询包装防 OOM、10w 行截断、独立 control connection 的 `KILL QUERY` 取消留 Week 4。
 
-#### 前端测试连接页
+#### 连接管理（src-tauri + 前端）
 
-- Next.js hello 页：可填 MySQL（host/port/user/password/database）+ 可选单跳 SSH 跳板，点「测试连接 (SELECT 1)」验证「前端 → tauri command → ssh-multihop → db-driver → MySQL」端到端链路。
+- 命令 `connection_create` / `connection_list` / `connection_update` / `connection_delete` / `connection_test`；配置整体加密落盘，`connection_test` 走完整链路（可选多跳 SSH + `SELECT 1`），错误以稳定 i18n key 回传。
+- 前端：左侧连接列表 + 右侧编辑表单（`zustand` 状态），测试连接即时反馈；SSH 跳板配置 UI 留 Week 3。
 
 ---
