@@ -21,4 +21,6 @@ russh = "0.54"
 sqlx = { version = "0.8", default-features = false, features = [
     "mysql",
     "runtime-tokio-rustls",
+    "chrono",
+    "bigdecimal",
 ] }

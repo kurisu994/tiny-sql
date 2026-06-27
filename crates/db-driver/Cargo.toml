@@ -13,3 +13,7 @@ tokio = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 sqlx = { workspace = true }
+serde = { workspace = true }
+# 动态结果集解码：DATE/TIME/DATETIME 用 chrono，DECIMAL 用 bigdecimal
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+bigdecimal = "0.4"
