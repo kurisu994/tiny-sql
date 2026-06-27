@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 🎨 体验调整
+
+- 更新 tiny-sql 专属应用图标，以数据库与多跳连接为主体，并重新生成 Tauri 桌面与平台图标资源。
+
 ### 🏗️ 工程脚手架
 
 - 初始化 Cargo workspace：`ssh-multihop`（隧道）/ `db-driver`（MySQL）/ `src-tauri`（Tauri 壳）三成员；`src-tauri` 引用 workspace crate 编译通过，无需退回扁平 mod。
