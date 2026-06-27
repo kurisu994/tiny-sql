@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**Week 2 完成（5/5 子任务，静态验证全绿）**。后端连接管理全链路 + 测试基建落地：
+**Week 2 完成（5/5 子任务，静态验证全绿）**。后端连接管理全链路 + 测试基建落地；应用图标已换成 tiny-sql 专属视觉：
 
 - ✅ T2.2 `MySqlDriver`（connect/connect_url/ping/list_databases/list_tables/list_columns/query），动态结果集按列类型解码字符串
 - ✅ T2.4 加密 store：整个 `connections.enc` 文件 AES-GCM 加密（强于参考项目的逐字段加密，满足 FR-001）
@@ -14,9 +14,12 @@
 - ✅ T2.5 前端连接管理 UI（列表 + 编辑表单 + 测试连接，zustand）
 - ✅ T2.1 测试基建：vitest（9 例）+ db-driver integration（4 例 `#[ignore]`）+ CI 接入
 - `just check` 全绿：cargo test（2 ssh + 6 config）+ vitest 9 + fmt/clippy + 前端 build
+- ✅ 应用图标已按 `tauri-icon` 流程重做：深色 macOS squircle 底，前景为数据库圆柱 + 多跳连接；`CHANGELOG.md` 已记录，提交 `d855e2c`。
 
 ## 活跃文件
 
+- `CHANGELOG.md` — `[Unreleased]` 记录应用图标体验调整
+- `src-tauri/icons/` — Tauri CLI 重新生成的 macOS / Windows / iOS / Android 图标资源
 - `crates/db-driver/src/lib.rs` — MySqlDriver + 元数据/RowSet + cell_to_string 动态解码
 - `src-tauri/src/config/{encryption,store}.rs` — AES-GCM 整体加密 + ConnectionStore CRUD
 - `src-tauri/src/commands/connection.rs` + `state.rs` — 5 个命令 + AppState
@@ -24,6 +27,7 @@
 
 ## 近期已做决策
 
+- **应用图标专属化**：不继续沿用其他项目复制图标，改用数据库 + 多跳连接隐喻；不放文字，保证 Dock 小尺寸可辨识。
 - **整体文件加密**而非参考项目的逐字段加密（FR-001 要求 host/user 也不明文）。
 - **connection_list 返回完整配置含明文 password**（Week 2 简化，本地工具内存明文可接受，落盘已加密）。
 - **playwright E2E 推迟**：Tauri WebDriver 不支持 macOS（CI 是 macOS arm64），改 vitest 进 CI，E2E 留 Linux CI / dogfooding。

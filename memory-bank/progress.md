@@ -10,7 +10,7 @@
 | v0.2 | 规划 | PG driver + 自动更新 + passphrase 加密 + TLS + Schema-aware 联想 |
 | v0.3+ | 规划 | Win/Linux + crate 独立 publish + 多集群 diff |
 
-CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-2：脚手架 + 加密 store + 多跳 SSH / MySQL driver / 连接管理 + 测试基建）。
+CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-2：脚手架 + 加密 store + 多跳 SSH / MySQL driver / 连接管理 + 测试基建 + 应用图标更新）。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -37,9 +37,11 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-2：脚手架 + 加密 sto
 | `0f758aa` | feat(ui): 连接管理列表与编辑表单 |
 | `97711dd` | tests(db-driver): integration 测试连本地 MySQL |
 | `0bbd9b5` | tests(web): vitest 前端单测与 CI/justfile 接入 |
+| `4bcd298` | docs: 更新 CHANGELOG 与 memory-bank 反映 Week 2 |
+| `d855e2c` | feat(icon): 更新 tiny-sql 应用图标 |
 
 > 注：`d0973ef`（含）之前已 push 到远端 `git@github.com:kurisu994/tiny-sql.git`；
-> Week 2 的 6 个 commit（`525e769`…`0bbd9b5`）及本次文档收尾**尚未 push**。
+> Week 2 的 6 个 commit（`525e769`…`0bbd9b5`）、文档收尾 `4bcd298`、图标更新 `d855e2c` 及本次 memory-bank 补录**尚未 push**。
 
 ## 重大决策与架构变更记录
 
@@ -48,6 +50,7 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-2：脚手架 + 加密 sto
 - **2026-06-26 文档全量改 draft-2**：4 篇 docs 落地上述 9 决策，PLAN.md 重写（Week 1 = vertical slice）。
 - **2026-06-27 Week 2 整体文件加密**：连接配置用整个 `connections.enc` 文件 AES-GCM 加密（强于 redis-desktop-client 的逐字段加密），满足 FR-001（host/user 也不明文）。
 - **2026-06-27 playwright E2E 推迟**：Tauri WebDriver 不支持 macOS（CI 是 macOS arm64）。Week 2 测试基建改用 vitest（前端单测）+ db-driver integration（连本地 MySQL）进 CI，E2E 留将来 Linux CI / dogfooding。
+- **2026-06-27 应用图标专属化**：原图标来自其他项目，不适配 tiny-sql；按 `tauri-icon` 流程生成数据库 + 多跳连接主题图标，更新 `src-tauri/icons/` 全平台资源，并在 `CHANGELOG.md` 记录用户可见变化。
 
 ## 已解决的阻碍
 
