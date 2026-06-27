@@ -45,21 +45,24 @@ OpenSSH ProxyJump 等效：hops[0] 用 `TcpStream` 直连；hops[i] 在 hops[i-1
 tiny-sql/
 ├── Cargo.toml                  # workspace 根，members + workspace.dependencies
 ├── crates/
-│   ├── ssh-multihop/src/lib.rs # N 跳隧道（当前单跳，348 行）
-│   └── db-driver/src/lib.rs    # ping_select_1（75 行，尚无 MySqlDriver struct）
+│   ├── ssh-multihop/src/lib.rs # N 跳隧道 + keepalive + 错误模型 + TunnelHandler/HostKeyVerifier
+│   └── db-driver/src/lib.rs    # MySqlDriver(connect/ping/list_*/query) + cell_to_string
 ├── src-tauri/
-│   ├── src/{lib.rs, main.rs}   # test_select_1 command
-│   ├── capabilities/default.json
-│   ├── tauri.conf.json
-│   └── icons/
-├── src/app/                    # layout.tsx / page.tsx / globals.css
+│   ├── src/lib.rs · main.rs    # setup 装配 store/known_hosts + 注册 command
+│   ├── src/state.rs · tofu.rs  # AppState(注册表/passphrase 缓存) + SshTofuManager
+│   ├── src/commands/           # connection(open/close/CRUD/test) · query(db_*) · ssh_tofu
+│   ├── src/config/             # encryption · store · ssh_known_hosts
+│   ├── capabilities/default.json · tauri.conf.json · icons/
+├── src/                        # app/ · components/(connection-form/dialogs/schema-browser)
+│                               #   stores/(connection-store/session-store) · lib/tauri-api.ts
 ├── docs/                       # REQUIREMENTS / PLAN / ARCHITECTURE / ROADMAP
 ├── justfile · README · CHANGELOG · AGENTS · .env.example
 ```
 
-### 规划结构（ARCHITECTURE.md §1.1，尚未创建）
+### 与 ARCHITECTURE 的偏差（实施期决定）
 
-`src-tauri/src/` 下将分 `commands/`（connection/query/ssh_tofu）、`config/`（encryption/store/ssh_known_hosts）、`state.rs`；`db-driver` 拆 `mysql.rs` / `tunneled.rs`；前端加 `components/` `lib/` `stores/`（zustand）。**写代码前确认是「实际」还是「规划」。**
+- **db-driver 未拆 `mysql.rs`/`tunneled.rs`**：单文件 `MySqlDriver`，隧道在 src-tauri 的 `OpenConnection` 里与 pool 绑定生命周期（不引入 `MySqlDriverViaSshTunnel` 组合类型）。
+- **ssh-multihop 不引 `tauri::AppHandle`**：原 `SshTunnelContext{app_handle}` 改为 `TunnelContext` 注入回调闭包，保「可独立 publish」不变量。**写代码前确认是「实际」还是「规划」。**
 
 ## 设计模式
 

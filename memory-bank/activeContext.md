@@ -6,44 +6,43 @@
 
 ## 当前状态
 
-**Week 2 完成（5/5 子任务，静态验证全绿）**。后端连接管理全链路 + 测试基建落地；应用图标已换成 tiny-sql 专属视觉：
+**Week 3 完成（6/6 子任务，静态验证全绿）**。多跳 SSH 强化 + TOFU + 数据浏览全链路：
 
-- ✅ T2.2 `MySqlDriver`（connect/connect_url/ping/list_databases/list_tables/list_columns/query），动态结果集按列类型解码字符串
-- ✅ T2.4 加密 store：整个 `connections.enc` 文件 AES-GCM 加密（强于参考项目的逐字段加密，满足 FR-001）
-- ✅ T2.3 `connection_*` 命令 + `AppState`（Mutex<ConnectionStore>）
-- ✅ T2.5 前端连接管理 UI（列表 + 编辑表单 + 测试连接，zustand）
-- ✅ T2.1 测试基建：vitest（9 例）+ db-driver integration（4 例 `#[ignore]`）+ CI 接入
-- `just check` 全绿：cargo test（2 ssh + 6 config）+ vitest 9 + fmt/clippy + 前端 build
-- ✅ 应用图标已按 `tauri-icon` 流程重做：深色 macOS squircle 底，前景为数据库圆柱 + 多跳连接；`CHANGELOG.md` 已记录，提交 `d855e2c`。
+- ✅ T3.1 N 跳隧道已实现（旧称「单跳」过时）；新增 `connection_open/close` 持久连接 + `OpenConnection`（tunnel+pool 生命周期绑定，先 pool 后 tunnel）+ AppState 注册表
+- ✅ T3.2 keepalive：russh 内置 60s/连续 3 次（≈180s）+ 每跳监控 task + `HopStatusCallback` 上报 `ssh:hop-status`，Drop 全 abort
+- ✅ T3.3 `SshTunnelError` 各变体补 `hop_index` + 三个 mid-session 变体（TunnelLost/ChannelDropped/AcceptLoopDied）+ HostKeyMismatch/HostKeyRejected/InvalidAuthType
+- ✅ T3.4 TOFU：`HostKeyVerifier` 回调注入 + `SshKnownHostsStore`(known_hosts.json) + `SshTofuManager`(oneshot+120s) + `ssh_tofu_decision` + 前端指纹弹窗
+- ✅ T3.5 前端 SSH 多跳表单（N 跳增删/调序）
+- ✅ T3.6 前端 schema/table 树 + 前 1000 行表格 + `db_*` 命令
+- `just check` 全绿：cargo test（3 ssh + 8 config + 4 ignored）+ vitest 14 + fmt/clippy + 前端 build
 
 ## 活跃文件
 
-- `CHANGELOG.md` — `[Unreleased]` 记录应用图标体验调整
-- `src-tauri/icons/` — Tauri CLI 重新生成的 macOS / Windows / iOS / Android 图标资源
-- `crates/db-driver/src/lib.rs` — MySqlDriver + 元数据/RowSet + cell_to_string 动态解码
-- `src-tauri/src/config/{encryption,store}.rs` — AES-GCM 整体加密 + ConnectionStore CRUD
-- `src-tauri/src/commands/connection.rs` + `state.rs` — 5 个命令 + AppState
-- `src/lib/tauri-api.ts` / `src/stores/connection-store.ts` / `src/components/connection-form.tsx` — 前端
+- `crates/ssh-multihop/src/lib.rs` — N 跳 + keepalive + 错误模型 + TunnelHandler/HostKeyVerifier（仍不依赖 Tauri，回调注入）
+- `src-tauri/src/{state.rs,tofu.rs}` + `config/ssh_known_hosts.rs` — 注册表/passphrase 缓存 + TOFU manager + known_hosts
+- `src-tauri/src/commands/{connection,query,ssh_tofu}.rs` — open/close + db_* + tofu 决策
+- `src/components/{connection-form,connection-dialogs,schema-browser}.tsx` + `stores/session-store.ts` + `lib/tauri-api.ts`
 
 ## 近期已做决策
 
-- **应用图标专属化**：不继续沿用其他项目复制图标，改用数据库 + 多跳连接隐喻；不放文字，保证 Dock 小尺寸可辨识。
-- **整体文件加密**而非参考项目的逐字段加密（FR-001 要求 host/user 也不明文）。
-- **connection_list 返回完整配置含明文 password**（Week 2 简化，本地工具内存明文可接受，落盘已加密）。
-- **playwright E2E 推迟**：Tauri WebDriver 不支持 macOS（CI 是 macOS arm64），改 vitest 进 CI，E2E 留 Linux CI / dogfooding。
-- **移除 Week 1 的 test_select_1**，由 connection_test 取代。
+- **ssh-multihop 保持不依赖 Tauri**：ARCHITECTURE 原设计 `SshTunnelContext { app_handle }` 会耦合 Tauri，改用 `TunnelContext` 注入闭包（HostKeyVerifier + 状态回调），由 src-tauri 接事件总线——honor「可独立 publish」不变量。
+- **keepalive 用 russh 内置机制**：`keepalive_interval=60s`+`keepalive_max=2`（第 3 次未响应即 180s 断），监控 task 仅探测 session 死亡后上报，持锁短不卡末跳 accept loop。
+- **指纹拒绝区分 mismatch/reject**：`HostKeyDecision::Reject{mismatch}` + handler `reject_slot` 在握手失败后还原精确错误。
+- **passphrase 单值应用到全部私钥跳**（v0.1 简化），按 connection_id 会话缓存（NFR-011）。
+- **1000 行用普通滚动表格**，react-virtuoso 留 Week 4 的 10w 行硬上限再引入（避免提前加依赖）。
+- 沿用：整体文件加密、playwright 推迟、移除 test_select_1。
 
-## 下一步（Week 3）
+## 下一步（Week 4）
 
-1. 多跳 SSH 扩成 N 跳（当前 ssh-multihop 单跳）+ keepalive 60s/3 次 + `SshTunnelError` 三个 mid-session 变体 + hop_index。
-2. TOFU 流程（known_hosts.json + 弹窗）。
-3. 前端 SSH 跳板配置表单（ConnectionForm 加 SSH 折叠区，passphrase 仅会话内存）。
-4. schema/table 左侧树 + 1000 行表格（用 db-driver 的 list_*/query）。
+1. SQL 执行：拒多语句 + **子查询包装** `SELECT * FROM (<sql>) AS t LIMIT 1000`（替换前端临时 LIMIT）+ 客户端 take(100000) 硬上限。
+2. 取消：独立 control connection 发 `KILL QUERY`。
+3. 拓扑图（@xyflow/react）+ macOS .dmg build。
+4. （并入）react-virtuoso 虚拟滚动表格。
 
 ## 阻塞 / 待确认
 
-- **CP-1b** GUI 运行时 smoke（点按钮连真实 MySQL）仍待用户 `pnpm tauri dev` 验证——现在可测连接管理 CRUD + 测试连接。
-- **CP-2** Week 2 末 25h 累计工时检查（PLAN §3.3）：未正式记录工时。
-- 本会话所有提交**未 push**。
+- **CP-1b** GUI 运行时 smoke 仍待用户 `pnpm tauri dev`——现可测：配 3 跳 SSH 连真实 MySQL、TOFU 弹窗、passphrase、左侧树点表看前 1000 行、kill 中间跳验证 180s 内 lost。
+- **CP-2/CP-3** 工时与 MySQL 5.7 兼容仍留 dogfooding。
+- 本会话所有提交**未 push**（Week 2 + Week 3 共 10+ commit）。
 
 相关：[[progress]] · [[systemPatterns]]

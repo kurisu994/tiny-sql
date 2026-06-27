@@ -15,7 +15,8 @@
 | tailwindcss + @tailwindcss/postcss | ^4 (dev) | 样式 |
 | typescript | ^5 (dev) | 类型 |
 
-> **规划未装**（按周引入）：`@xyflow/react`（拓扑图）、`react-virtuoso`（虚拟滚动）、`zustand`、`i18next`/`react-i18next`、`shadcn`/`radix-ui`、`lucide-react`、`sonner`、`vitest`、`playwright`。
+> **已装**：`zustand` 5（状态）、`vitest` + `@testing-library/react`（前端单测）。
+> **规划未装**（按周引入）：`@xyflow/react`（拓扑图，Week 4）、`react-virtuoso`（虚拟滚动，Week 4 的 10w 行）、`i18next`/`react-i18next`、`shadcn`/`radix-ui`、`lucide-react`、`sonner`、`playwright`（推迟）。
 
 ### 后端 Rust（workspace.dependencies — 实际已装）
 
@@ -28,9 +29,10 @@
 | serde | 1（derive） | 序列化 |
 | log | 0.4 | 日志 facade |
 
-`src-tauri` 额外：`tauri` 2、`tauri-plugin-log` 2、`serde_json` 1、`tauri-build` 2（build-dep）。
+`src-tauri` 额外：`tauri` 2、`tauri-plugin-log` 2、`serde_json` 1、`aes-gcm` 0.10 + `base64` 0.22（加密 store）、`uuid` 1（连接 id）、`chrono` 0.4（最近使用时间戳）、`tauri-build` 2（build-dep）。
 
-> **规划未引入**：`dashmap`（AppState 注册表）、`tokio-util`（CancellationToken）、`sqlparser-rs`（拒多语句）、`aes-gcm`（加密 store）、`@xyflow` 对应后端无。
+> **AppState 注册表**实际用 `std`/`tokio` 的 `Mutex<HashMap>` 而非 `dashmap`（够用、少依赖）。
+> **规划未引入**：`tokio-util`（CancellationToken）、`sqlparser-rs`（拒多语句）、前端 `react-virtuoso`（Week 4 的 10w 行虚拟滚动）、`@xyflow/react`（Week 4 拓扑图）。
 
 ### 工具链版本
 
@@ -72,12 +74,15 @@
 | beforeDevCommand | `pnpm dev` |
 | pnpm build script 批准 | `pnpm-workspace.yaml` 的 `allowBuilds: sharp: true`（否则 pnpm 11 的 verify-deps-before-run 会 exit 1） |
 | 集成测试 env | `TINY_SQL_TEST_MYSQL_URL`（见 `.env.example`，`.env` 已忽略） |
-| 加密 store 路径（规划） | `~/Library/Application Support/tiny-sql/connections.enc`（AES-GCM） |
-| known_hosts 路径（规划） | `~/Library/Application Support/tiny-sql/known_hosts.json` |
+| 加密 store 路径 | `~/Library/Application Support/tiny-sql/{connections.enc, master.key}`（AES-GCM，整体加密） |
+| known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
 
 ## 当前 command（src-tauri 实际）
 
-- `test_select_1(input: ConnectInput)`：hops 空则直连，否则开隧道连本地端口，跑 `SELECT 1`。
-- 规划 command（ARCHITECTURE §3.3）：`connection_create/list/update/delete/test/open/close`、`query_execute/cancel`、`ssh_tofu_decision`。
+- 连接：`connection_create/list/update/delete/test`（CRUD + 瞬时测试）、`connection_open/close`（持久连接，存 AppState 注册表）。
+- 数据浏览：`db_list_databases/db_list_tables/db_list_columns/db_query`（基于已打开连接）。
+- TOFU：`ssh_tofu_decision(connectionId, hopIndex, accept)`。
+- 事件（后端 emit → 前端 listen）：`ssh:tofu-request`（指纹确认）、`ssh:hop-status`（keepalive 断开）。
+- 规划 command（Week 4）：`query_execute/cancel`（子查询包装 + KILL QUERY）。
 
 相关：[[systemPatterns]] · [[progress]]
