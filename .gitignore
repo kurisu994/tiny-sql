@@ -1,0 +1,62 @@
+# ---- Rust / Cargo ----
+# 编译产物（workspace 根 + 各 crate + src-tauri）
+/target/
+**/target/
+# 注意：Cargo.lock 不忽略 —— tiny-sql 产出的是应用/二进制，需锁定依赖版本
+
+# ---- Tauri ----
+# Tauri 构建产物与自动生成的 schema
+/src-tauri/target/
+/src-tauri/gen/schemas/
+# 移动端模板（v0.3+ 才可能用到）
+/src-tauri/gen/apple/
+/src-tauri/gen/android/
+
+# ---- Node / Next.js / pnpm ----
+node_modules/
+.pnpm-store/
+# Next.js 构建输出
+.next/
+/out/
+/build/
+.turbo/
+# TypeScript 增量构建信息 + Next 自动生成
+*.tsbuildinfo
+next-env.d.ts
+# 注意：pnpm-lock.yaml 不忽略 —— 锁定前端依赖
+
+# ---- 环境变量与密钥 ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- 测试 / 覆盖率 / Playwright ----
+/coverage/
+/playwright-report/
+/test-results/
+/.nyc_output/
+
+# ---- 本地运行时数据（dogfooding 日志等，不公开） ----
+docs/dogfooding-log.md
+
+# ---- 编辑器 / IDE ----
+# JetBrains（RustRover / WebStorm）
+.idea/
+*.iml
+# VS Code：保留共享配置，忽略个人 workspace 状态
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+
+# ---- 本地 agent 工具（非项目源码，不入库） ----
+.agents/
+.claude/
+.codex/
+.gstack/
