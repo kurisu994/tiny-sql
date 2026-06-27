@@ -4,7 +4,7 @@
 //! ssh-multihop），但 SSH 配置 UI 留 Week 3，所以 UI 此阶段只填直连字段。
 
 use serde::Deserialize;
-use ssh_multihop::{SshAuth, SshHop};
+use ssh_multihop::{SshAuth, SshHop, TunnelContext};
 use tauri::State;
 
 use crate::config::store::{self, SshConfig, StoredConnection};
@@ -83,17 +83,19 @@ pub async fn connection_test(input: ConnectionInput) -> Result<(), String> {
             .ssh
             .hops
             .iter()
-            .map(to_runtime_hop)
+            .enumerate()
+            .map(|(i, h)| to_runtime_hop(i, h))
             .collect::<Result<_, _>>()?
     } else {
         Vec::new()
     };
 
-    // 直连用真实 host:port；走隧道时换成隧道的本地端口
+    // 直连用真实 host:port；走隧道时换成隧道的本地端口。
+    // 测试连接是瞬时建链立即销毁，无需 keepalive 上报，故传 default ctx。
     let (host, port, _tunnel) = if hops.is_empty() {
         (input.host.clone(), input.port, None)
     } else {
-        let tunnel = ssh_multihop::open(&hops, &input.host, input.port)
+        let tunnel = ssh_multihop::open(&hops, &input.host, input.port, &TunnelContext::default())
             .await
             .map_err(|e| e.i18n_key().to_string())?;
         let addr = tunnel.local_addr();
@@ -111,11 +113,12 @@ pub async fn connection_test(input: ConnectionInput) -> Result<(), String> {
     // _tunnel 在此 drop，关闭 listener 与 session
 }
 
-/// 把持久化的 SSH 跳转换成 ssh-multihop 运行时跳。
+/// 把持久化的 SSH 跳转换成 ssh-multihop 运行时跳。`hop_index` 仅用于错误归因。
 ///
 /// passphrase 不落盘，所以这里恒为 None；带 passphrase 的私钥测试留 Week 3
 /// （配 passphrase 输入弹窗后再补）。
-fn to_runtime_hop(hop: &store::SshHop) -> Result<SshHop, String> {
+fn to_runtime_hop(hop_index: usize, hop: &store::SshHop) -> Result<SshHop, String> {
+    let _ = hop_index; // 当前转换失败仅有 invalid_auth_type 一种，归因信息后续接入
     let auth = match hop.auth_type.as_str() {
         "password" => SshAuth::Password(hop.password.clone().unwrap_or_default()),
         "privateKey" => SshAuth::PrivateKey {
