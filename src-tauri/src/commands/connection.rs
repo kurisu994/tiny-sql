@@ -3,12 +3,17 @@
 //! Week 2：纯本地连接 CRUD 与测试。connection_test 已支持可选多跳 SSH（复用
 //! ssh-multihop），但 SSH 配置 UI 留 Week 3，所以 UI 此阶段只填直连字段。
 
-use serde::Deserialize;
-use ssh_multihop::{SshAuth, SshHop, TunnelContext};
-use tauri::State;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+use ssh_multihop::{
+    HopStatusCallback, HopStatusEvent, HostKeyDecision, HostKeyQuery, HostKeyVerifier, SshAuth,
+    SshHop, TunnelContext,
+};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::config::store::{self, SshConfig, StoredConnection};
-use crate::state::AppState;
+use crate::state::{AppState, OpenConnection};
 
 /// 前端传入的连接配置（create / test 用，不含 id 与 last_used_at）
 #[derive(Debug, Deserialize)]
@@ -79,13 +84,8 @@ pub async fn connection_delete(state: State<'_, AppState>, id: String) -> Result
 #[tauri::command]
 pub async fn connection_test(input: ConnectionInput) -> Result<(), String> {
     let hops: Vec<SshHop> = if input.ssh.enabled {
-        input
-            .ssh
-            .hops
-            .iter()
-            .enumerate()
-            .map(|(i, h)| to_runtime_hop(i, h))
-            .collect::<Result<_, _>>()?
+        // 测试连接不带会话 passphrase 缓存，私钥 passphrase 测试留连接打开路径
+        build_runtime_hops(&input.ssh, None)?
     } else {
         Vec::new()
     };
@@ -113,17 +113,23 @@ pub async fn connection_test(input: ConnectionInput) -> Result<(), String> {
     // _tunnel 在此 drop，关闭 listener 与 session
 }
 
-/// 把持久化的 SSH 跳转换成 ssh-multihop 运行时跳。`hop_index` 仅用于错误归因。
+/// 把持久化的 SSH 配置转换成 ssh-multihop 运行时跳数组。
 ///
-/// passphrase 不落盘，所以这里恒为 None；带 passphrase 的私钥测试留 Week 3
-/// （配 passphrase 输入弹窗后再补）。
-fn to_runtime_hop(hop_index: usize, hop: &store::SshHop) -> Result<SshHop, String> {
-    let _ = hop_index; // 当前转换失败仅有 invalid_auth_type 一种，归因信息后续接入
+/// passphrase 不落盘（NFR-011），由调用方从会话缓存传入，统一应用到所有私钥跳。
+fn build_runtime_hops(ssh: &SshConfig, passphrase: Option<&str>) -> Result<Vec<SshHop>, String> {
+    ssh.hops
+        .iter()
+        .map(|h| to_runtime_hop(h, passphrase))
+        .collect()
+}
+
+/// 单跳转换：`passphrase` 仅对 privateKey 跳生效（会话内存，不落盘）。
+fn to_runtime_hop(hop: &store::SshHop, passphrase: Option<&str>) -> Result<SshHop, String> {
     let auth = match hop.auth_type.as_str() {
         "password" => SshAuth::Password(hop.password.clone().unwrap_or_default()),
         "privateKey" => SshAuth::PrivateKey {
             path: hop.private_key_path.clone().unwrap_or_default(),
-            passphrase: None,
+            passphrase: passphrase.map(|s| s.to_string()),
         },
         _ => return Err("error.ssh.invalid_auth_type".to_string()),
     };
@@ -132,5 +138,156 @@ fn to_runtime_hop(hop_index: usize, hop: &store::SshHop) -> Result<SshHop, Strin
         port: hop.port,
         username: hop.username.clone(),
         auth,
+    })
+}
+
+/// keepalive 断开等运行期跳状态，emit 给前端的载荷
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HopStatusPayload {
+    connection_id: String,
+    hop_index: usize,
+    /// 目前仅 "lost"
+    status: String,
+    reason: Option<String>,
+}
+
+/// 打开一条已保存的连接：建立（可选）SSH 隧道 + MySQL 连接池，存入活跃注册表。
+///
+/// `passphrase` 为本次提供的私钥口令（仅会话内存）；成功后缓存，下次打开同一连接
+/// 自动复用（FR-011：首次弹窗、本会话第二次静默）。已打开则幂等返回。
+#[tauri::command]
+pub async fn connection_open(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    passphrase: Option<String>,
+) -> Result<(), String> {
+    // 已打开则幂等
+    if state.connections.lock().await.contains_key(&id) {
+        return Ok(());
+    }
+
+    // 取出目标连接配置（brief lock）
+    let conn = {
+        let store = state.store.lock().unwrap();
+        store
+            .load()?
+            .into_iter()
+            .find(|c| c.id == id)
+            .ok_or("error.connection.not_found")?
+    };
+
+    // passphrase：本次传入优先，否则用会话缓存
+    let effective_passphrase = passphrase
+        .clone()
+        .or_else(|| state.passphrases.lock().unwrap().get(&id).cloned());
+
+    // 直连用真实 host:port；走隧道时换隧道的本地端口
+    let (host, port, tunnel) = if conn.ssh.enabled {
+        let hops = build_runtime_hops(&conn.ssh, effective_passphrase.as_deref())?;
+        let ctx = TunnelContext {
+            status_cb: Some(build_status_callback(app.clone(), id.clone())),
+            verifier: Some(build_verifier(&app, &state, id.clone())),
+        };
+        let tunnel = ssh_multihop::open(&hops, &conn.host, conn.port, &ctx)
+            .await
+            .map_err(|e| e.i18n_key().to_string())?;
+        let addr = tunnel.local_addr();
+        (addr.ip().to_string(), addr.port(), Some(tunnel))
+    } else {
+        (conn.host.clone(), conn.port, None)
+    };
+
+    let driver =
+        db_driver::MySqlDriver::connect(&host, port, &conn.user, &conn.password, &conn.database)
+            .await
+            .map_err(|e| e.i18n_key().to_string())?;
+    // 立即 ping 确认握手成功（隧道桥接 + MySQL 认证）
+    driver.ping().await.map_err(|e| e.i18n_key().to_string())?;
+
+    // 成功：缓存本次 passphrase + 落注册表 + 刷新最近使用
+    if let Some(pp) = passphrase {
+        state.passphrases.lock().unwrap().insert(id.clone(), pp);
+    }
+    state
+        .connections
+        .lock()
+        .await
+        .insert(id.clone(), OpenConnection { driver, tunnel });
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = state.store.lock().unwrap().touch_last_used(&id, now);
+    Ok(())
+}
+
+/// 关闭一条活跃连接（先关 pool 再关隧道）。未打开时静默成功。
+#[tauri::command]
+pub async fn connection_close(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let conn = state.connections.lock().await.remove(&id);
+    if let Some(conn) = conn {
+        conn.close().await;
+    }
+    Ok(())
+}
+
+/// 构造 keepalive 断开回调：把 ssh-multihop 的状态事件转成 Tauri `ssh:hop-status` 事件。
+fn build_status_callback(app: AppHandle, connection_id: String) -> HopStatusCallback {
+    Arc::new(move |ev: HopStatusEvent| {
+        let status = match ev.status {
+            ssh_multihop::HopStatus::Lost => "lost",
+        };
+        let _ = app.emit(
+            "ssh:hop-status",
+            HopStatusPayload {
+                connection_id: connection_id.clone(),
+                hop_index: ev.hop_index,
+                status: status.to_string(),
+                reason: ev.reason.clone(),
+            },
+        );
+    })
+}
+
+/// 构造 host key 校验器：known_hosts 命中比对，未知走 TOFU 弹窗，指纹变更硬拒绝。
+fn build_verifier(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    connection_id: String,
+) -> HostKeyVerifier {
+    let known_hosts = state.known_hosts.clone();
+    let tofu = state.tofu.clone();
+    let app = app.clone();
+    Arc::new(move |q: HostKeyQuery| {
+        let known_hosts = known_hosts.clone();
+        let tofu = tofu.clone();
+        let app = app.clone();
+        let connection_id = connection_id.clone();
+        Box::pin(async move {
+            match known_hosts.get(&q.host, q.port) {
+                // 已信任且一致
+                Some(fp) if fp == q.fingerprint => HostKeyDecision::Trust,
+                // 已信任但指纹变了 → 硬拒绝（NFR：不给「忽略」按钮）
+                Some(_) => HostKeyDecision::Reject { mismatch: true },
+                // 未知 host → TOFU 弹窗
+                None => {
+                    let accept = tofu
+                        .request(
+                            &app,
+                            &connection_id,
+                            q.hop_index,
+                            &q.host,
+                            q.port,
+                            &q.fingerprint,
+                        )
+                        .await;
+                    if accept {
+                        let _ = known_hosts.insert(&q.host, q.port, &q.fingerprint);
+                        HostKeyDecision::Trust
+                    } else {
+                        HostKeyDecision::Reject { mismatch: false }
+                    }
+                }
+            }
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = HostKeyDecision> + Send>>
     })
 }

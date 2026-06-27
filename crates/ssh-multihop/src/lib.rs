@@ -18,8 +18,10 @@
 
 use russh::client::{self, AuthResult, Config, Handle, Handler};
 use russh::keys::{load_secret_key, ssh_key, PrivateKeyWithHashAlg};
+use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -170,40 +172,96 @@ pub enum HopStatus {
 /// ssh-multihop 自身**不依赖 Tauri**，故用闭包解耦。
 pub type HopStatusCallback = Arc<dyn Fn(HopStatusEvent) + Send + Sync>;
 
+/// host key 校验请求 —— 传给上层注入的 [`HostKeyVerifier`]。
+/// 只携带预计算的指纹字符串，**不暴露 russh / ssh_key 类型**，让上层无需依赖 SSH 库。
+#[derive(Debug, Clone)]
+pub struct HostKeyQuery {
+    pub hop_index: usize,
+    pub host: String,
+    pub port: u16,
+    /// OpenSSH 风格 sha256 指纹，如 `SHA256:abc...`
+    pub fingerprint: String,
+}
+
+/// host key 校验结论
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostKeyDecision {
+    /// 信任，继续握手
+    Trust,
+    /// 拒绝握手。`mismatch=true` 表示「已信任 host 的指纹被改」（→ HostKeyMismatch），
+    /// `false` 表示「未知 host 用户拒绝 / TOFU 超时」（→ HostKeyRejected）。
+    Reject { mismatch: bool },
+}
+
+/// host key 校验器：由上层注入，内部接 known_hosts + TOFU 弹窗。
+/// 返回 boxed future 而非 `async fn`，以保持 trait 对象安全且不引入 async-trait 依赖。
+pub type HostKeyVerifier = Arc<
+    dyn Fn(HostKeyQuery) -> Pin<Box<dyn Future<Output = HostKeyDecision> + Send>> + Send + Sync,
+>;
+
 /// 建立 / 运行隧道所需的回调上下文。保持 ssh-multihop 不依赖 Tauri：
 /// 上层把「状态上报」「host key 校验」等以闭包注入。
 #[derive(Clone, Default)]
 pub struct TunnelContext {
     /// 跳状态回调（keepalive 断开等）；None = 不上报。
     pub status_cb: Option<HopStatusCallback>,
-}
-
-impl TunnelContext {
-    /// 仅注入状态回调的便捷构造。
-    pub fn with_status_callback(cb: HopStatusCallback) -> Self {
-        Self {
-            status_cb: Some(cb),
-        }
-    }
+    /// host key 校验器；None = 接受任意 key（仅用于瞬时连接测试）。
+    pub verifier: Option<HostKeyVerifier>,
 }
 
 /// `Handle` 含 `UnboundedReceiver` 不是 Sync，跨任务共享需走 Mutex
-type SharedSession = Arc<TokioMutex<Handle<AcceptAll>>>;
+type SharedSession = Arc<TokioMutex<Handle<TunnelHandler>>>;
 
-/// v0.1 host key 校验器：接受任意公钥。
+/// russh 客户端 handler：每跳一个，承载该跳的 host key 校验。
 ///
-/// **不安全**，仅用于打通链路。T3.4 替换为 known_hosts + TOFU（经 [`TunnelContext`] 注入）。
-struct AcceptAll;
+/// 无 verifier 时（连接测试）接受任意 key；有 verifier 时把指纹交给上层判定，
+/// 拒绝则把精确错误写进 `reject_slot` 供 [`open`] 在握手失败后读取。
+struct TunnelHandler {
+    hop_index: usize,
+    host: String,
+    port: u16,
+    verifier: Option<HostKeyVerifier>,
+    reject_slot: Arc<std::sync::Mutex<Option<SshTunnelError>>>,
+}
 
-impl Handler for AcceptAll {
+impl Handler for TunnelHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &ssh_key::PublicKey,
+        server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        // TODO(T3.4): 接 known_hosts 校验 + TOFU 弹窗回调
-        Ok(true)
+        let Some(verifier) = &self.verifier else {
+            // 无校验器（连接测试）：接受任意 key
+            return Ok(true);
+        };
+        let fingerprint = server_public_key
+            .fingerprint(ssh_key::HashAlg::Sha256)
+            .to_string();
+        let query = HostKeyQuery {
+            hop_index: self.hop_index,
+            host: self.host.clone(),
+            port: self.port,
+            fingerprint,
+        };
+        match verifier(query).await {
+            HostKeyDecision::Trust => Ok(true),
+            HostKeyDecision::Reject { mismatch } => {
+                let err = if mismatch {
+                    SshTunnelError::HostKeyMismatch {
+                        hop_index: self.hop_index,
+                        host: self.host.clone(),
+                        port: self.port,
+                    }
+                } else {
+                    SshTunnelError::HostKeyRejected {
+                        hop_index: self.hop_index,
+                    }
+                };
+                *self.reject_slot.lock().unwrap() = Some(err);
+                Ok(false)
+            }
+        }
     }
 }
 
@@ -272,13 +330,7 @@ pub async fn open(
             hop_index: 0,
             reason: e.to_string(),
         })?;
-    let mut current = client::connect_stream(config.clone(), tcp, AcceptAll)
-        .await
-        .map_err(|e| SshTunnelError::ConnectFailed {
-            hop_index: 0,
-            reason: e.to_string(),
-        })?;
-    authenticate_hop(&mut current, first, 0).await?;
+    let current = connect_and_auth(config.clone(), tcp, first, 0, &ctx.verifier).await?;
     sessions.push(Arc::new(TokioMutex::new(current)));
 
     // 第 2..N 跳：在前一跳 session 上开 direct-tcpip 到下一跳 SSH 端口，
@@ -301,13 +353,8 @@ pub async fn open(
                 })?
         };
         let stream = channel.into_stream();
-        let mut current = client::connect_stream(config.clone(), stream, AcceptAll)
-            .await
-            .map_err(|e| SshTunnelError::ConnectFailed {
-                hop_index,
-                reason: e.to_string(),
-            })?;
-        authenticate_hop(&mut current, next_hop, hop_index).await?;
+        let current =
+            connect_and_auth(config.clone(), stream, next_hop, hop_index, &ctx.verifier).await?;
         sessions.push(Arc::new(TokioMutex::new(current)));
     }
 
@@ -412,6 +459,44 @@ fn spawn_keepalive_monitor(
             }
         }
     })
+}
+
+/// 在给定 transport 上建立一跳 SSH session：完成 host key 校验 + 认证。
+///
+/// host key 被校验器拒绝时，握手会失败；此处读取 handler 的 `reject_slot` 还原出
+/// 精确错误（HostKeyMismatch / HostKeyRejected），而不是笼统的 ConnectFailed。
+async fn connect_and_auth<S>(
+    config: Arc<Config>,
+    stream: S,
+    hop: &SshHop,
+    hop_index: usize,
+    verifier: &Option<HostKeyVerifier>,
+) -> Result<Handle<TunnelHandler>, SshTunnelError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let reject_slot = Arc::new(std::sync::Mutex::new(None));
+    let handler = TunnelHandler {
+        hop_index,
+        host: hop.host.clone(),
+        port: hop.port,
+        verifier: verifier.clone(),
+        reject_slot: reject_slot.clone(),
+    };
+    let mut session = match client::connect_stream(config, stream, handler).await {
+        Ok(h) => h,
+        Err(e) => {
+            if let Some(err) = reject_slot.lock().unwrap().take() {
+                return Err(err);
+            }
+            return Err(SshTunnelError::ConnectFailed {
+                hop_index,
+                reason: e.to_string(),
+            });
+        }
+    };
+    authenticate_hop(&mut session, hop, hop_index).await?;
+    Ok(session)
 }
 
 /// 对一个 SSH session 执行该跳的认证（密码 / 私钥），`hop_index` 用于错误归因

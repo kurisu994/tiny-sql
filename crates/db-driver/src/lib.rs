@@ -77,7 +77,9 @@ pub struct RowSet {
 /// MySQL driver —— v0.1 具体实现，v0.2 extract 为 trait Driver。
 ///
 /// 内部持有 `sqlx::MySqlPool`（max_connections = 5）。直连传真实 host:port；
-/// 走隧道时 host=127.0.0.1 + 隧道本地端口。
+/// 走隧道时 host=127.0.0.1 + 隧道本地端口。`MySqlPool` 内部是 Arc，`Clone`
+/// 只增引用计数，便于在 AppState 注册表外短暂取出执行查询而不长持锁。
+#[derive(Clone)]
 pub struct MySqlDriver {
     pool: MySqlPool,
 }

@@ -28,3 +28,5 @@ db-driver = { path = "../crates/db-driver" }
 aes-gcm = "0.10"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
+# 最近使用时间戳（ISO 8601）
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
