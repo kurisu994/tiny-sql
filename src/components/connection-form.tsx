@@ -7,6 +7,7 @@ import {
   translateError,
   type ConnectionInput,
   type SshConfig,
+  type SshHopConfig,
   type StoredConnection,
 } from "@/lib/tauri-api";
 import { useConnectionStore } from "@/stores/connection-store";
@@ -62,9 +63,9 @@ export function ConnectionForm({
   );
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
-
-  // 编辑时保留原 SSH 配置（Week 3 才在 UI 暴露）；新建为空
-  const ssh: SshConfig = editing?.ssh ?? { enabled: false, hops: [] };
+  const [ssh, setSsh] = useState<SshConfig>(
+    () => editing?.ssh ?? { enabled: false, hops: [] },
+  );
 
   const toInput = (): ConnectionInput => ({
     name: form.name,
@@ -139,6 +140,8 @@ export function ConnectionForm({
         />
       </div>
 
+      <SshSection ssh={ssh} onChange={setSsh} />
+
       <div className="flex items-center gap-3">
         <button
           onClick={onTest}
@@ -199,5 +202,181 @@ function Field({
         className="rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900"
       />
     </label>
+  );
+}
+
+const EMPTY_HOP: SshHopConfig = {
+  host: "",
+  port: 22,
+  username: "",
+  authType: "password",
+  password: "",
+  privateKeyPath: "",
+};
+
+/**
+ * SSH 跳板配置区 —— 开关 + N 跳数组编辑器（增删 / 调序）。
+ *
+ * hops 顺序即链路顺序：第 1 跳本地直连，最后一跳对目标库开转发。
+ * passphrase 不在此收集（仅会话内存，连接时按需弹窗）。
+ */
+function SshSection({
+  ssh,
+  onChange,
+}: {
+  ssh: SshConfig;
+  onChange: (ssh: SshConfig) => void;
+}) {
+  const setHop = (i: number, patch: Partial<SshHopConfig>) =>
+    onChange({
+      ...ssh,
+      hops: ssh.hops.map((h, idx) => (idx === i ? { ...h, ...patch } : h)),
+    });
+
+  const addHop = () =>
+    onChange({ ...ssh, hops: [...ssh.hops, { ...EMPTY_HOP }] });
+
+  const removeHop = (i: number) =>
+    onChange({ ...ssh, hops: ssh.hops.filter((_, idx) => idx !== i) });
+
+  const moveHop = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= ssh.hops.length) return;
+    const hops = [...ssh.hops];
+    [hops[i], hops[j]] = [hops[j], hops[i]];
+    onChange({ ...ssh, hops });
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+      <label className="flex items-center gap-2 text-sm font-medium">
+        <input
+          type="checkbox"
+          checked={ssh.enabled}
+          onChange={(e) => onChange({ ...ssh, enabled: e.target.checked })}
+        />
+        通过 SSH 跳板连接
+      </label>
+
+      {ssh.enabled && (
+        <div className="flex flex-col gap-3">
+          {ssh.hops.length === 0 && (
+            <p className="text-xs text-neutral-500">
+              还没有跳板，点下方「+ 添加跳板」。第 1 跳为本地直连的堡垒机。
+            </p>
+          )}
+          {ssh.hops.map((hop, i) => (
+            <HopEditor
+              key={i}
+              index={i}
+              total={ssh.hops.length}
+              hop={hop}
+              onChange={(patch) => setHop(i, patch)}
+              onRemove={() => removeHop(i)}
+              onMove={(dir) => moveHop(i, dir)}
+            />
+          ))}
+          <button
+            onClick={addHop}
+            className="self-start rounded-md border border-dashed border-neutral-400 px-3 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
+          >
+            + 添加跳板
+          </button>
+          <p className="text-xs text-neutral-500">
+            私钥 passphrase 仅在连接时按需输入，不会保存。
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 单跳编辑器 */
+function HopEditor({
+  index,
+  total,
+  hop,
+  onChange,
+  onRemove,
+  onMove,
+}: {
+  index: number;
+  total: number;
+  hop: SshHopConfig;
+  onChange: (patch: Partial<SshHopConfig>) => void;
+  onRemove: () => void;
+  onMove: (dir: -1 | 1) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md bg-neutral-50 p-2 dark:bg-neutral-900">
+      <div className="flex items-center gap-2 text-xs text-neutral-500">
+        <span className="font-medium">第 {index + 1} 跳</span>
+        <button
+          onClick={() => onMove(-1)}
+          disabled={index === 0}
+          className="rounded px-1 hover:bg-neutral-200 disabled:opacity-30 dark:hover:bg-neutral-700"
+          title="上移"
+        >
+          ↑
+        </button>
+        <button
+          onClick={() => onMove(1)}
+          disabled={index === total - 1}
+          className="rounded px-1 hover:bg-neutral-200 disabled:opacity-30 dark:hover:bg-neutral-700"
+          title="下移"
+        >
+          ↓
+        </button>
+        <button
+          onClick={onRemove}
+          className="ml-auto rounded px-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-950"
+          title="删除该跳"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="主机" value={hop.host} onChange={(v) => onChange({ host: v })} />
+        <Field
+          label="端口"
+          type="number"
+          value={String(hop.port)}
+          onChange={(v) => onChange({ port: Number(v) })}
+        />
+        <Field
+          label="用户"
+          value={hop.username}
+          onChange={(v) => onChange({ username: v })}
+        />
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-neutral-600 dark:text-neutral-400">认证方式</span>
+          <select
+            value={hop.authType}
+            onChange={(e) =>
+              onChange({ authType: e.target.value as SshHopConfig["authType"] })
+            }
+            className="rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900"
+          >
+            <option value="password">密码</option>
+            <option value="privateKey">私钥</option>
+          </select>
+        </label>
+        {hop.authType === "password" ? (
+          <Field
+            label="SSH 密码"
+            type="password"
+            value={hop.password ?? ""}
+            onChange={(v) => onChange({ password: v })}
+          />
+        ) : (
+          <Field
+            label="私钥路径（支持 ~）"
+            value={hop.privateKeyPath ?? ""}
+            onChange={(v) => onChange({ privateKeyPath: v })}
+          />
+        )}
+      </div>
+    </div>
   );
 }

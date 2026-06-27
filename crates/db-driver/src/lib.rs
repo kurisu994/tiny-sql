@@ -35,12 +35,14 @@ impl DriverError {
 
 /// 单个 database（MySQL 里 schema 与 database 同义）
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DatabaseMeta {
     pub name: String,
 }
 
 /// 单张表的元信息
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TableMeta {
     pub name: String,
     /// "BASE TABLE" / "VIEW" 等
@@ -52,6 +54,7 @@ pub struct TableMeta {
 
 /// 单列的元信息
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ColumnMeta {
     pub name: String,
     /// 完整列类型，如 "varchar(255)" / "int unsigned"
@@ -65,6 +68,7 @@ pub struct ColumnMeta {
 
 /// 查询结果集 —— v0.1 所有单元格统一转成字符串展示，None 表示 SQL NULL
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RowSet {
     /// 列名（按查询顺序）
     pub columns: Vec<String>,

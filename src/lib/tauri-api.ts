@@ -54,8 +54,15 @@ export const ERROR_ZH: Record<string, string> = {
   "error.ssh.channel_open_failed": "SSH 通道开启失败",
   "error.ssh.local_listen_failed": "本地端口监听失败",
   "error.ssh.invalid_auth_type": "SSH 认证方式非法",
+  "error.ssh.host_key_mismatch": "SSH 主机指纹与已信任记录不一致，已拒绝连接",
+  "error.ssh.host_key_rejected": "未信任该 SSH 主机指纹",
+  "error.ssh.tunnel_lost": "SSH 隧道已断开（keepalive 超时）",
+  "error.ssh.channel_dropped": "SSH 通道被对端关闭，请重连",
+  "error.ssh.accept_loop_died": "SSH 隧道内部错误，请上报",
   "error.driver.connect_failed": "MySQL 连接失败",
   "error.driver.query_failed": "SQL 执行失败",
+  "error.connection.not_found": "连接配置不存在",
+  "error.connection.not_open": "连接尚未打开",
 };
 
 /** 把后端返回的错误（可能是 i18n key）翻译成中文 */
@@ -73,4 +80,83 @@ export const connectionApi = {
     invoke<void>("connection_update", { connection }),
   remove: (id: string) => invoke<void>("connection_delete", { id }),
   test: (input: ConnectionInput) => invoke<void>("connection_test", { input }),
+  /** 打开连接（建隧道 + 连接池）；passphrase 仅本次会话生效 */
+  open: (id: string, passphrase?: string) =>
+    invoke<void>("connection_open", { id, passphrase: passphrase ?? null }),
+  /** 关闭连接 */
+  close: (id: string) => invoke<void>("connection_close", { id }),
+};
+
+// === 数据浏览（schema / 结果集）===
+
+/** database（= MySQL schema）元信息 */
+export interface DatabaseMeta {
+  name: string;
+}
+
+/** 表元信息 */
+export interface TableMeta {
+  name: string;
+  tableType: string;
+  rows: number | null;
+  comment: string | null;
+}
+
+/** 列元信息 */
+export interface ColumnMeta {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  columnKey: string;
+  defaultValue: string | null;
+  comment: string | null;
+}
+
+/** 查询结果集（所有单元格统一为字符串，null = SQL NULL） */
+export interface RowSet {
+  columns: string[];
+  rows: (string | null)[][];
+  truncated: boolean;
+}
+
+/** 基于已打开连接的数据浏览 command */
+export const dbApi = {
+  listDatabases: (id: string) =>
+    invoke<DatabaseMeta[]>("db_list_databases", { id }),
+  listTables: (id: string, database: string) =>
+    invoke<TableMeta[]>("db_list_tables", { id, database }),
+  listColumns: (id: string, database: string, table: string) =>
+    invoke<ColumnMeta[]>("db_list_columns", { id, database, table }),
+  query: (id: string, sql: string) => invoke<RowSet>("db_query", { id, sql }),
+};
+
+// === SSH TOFU / 隧道事件 ===
+
+/** 后端事件名常量 */
+export const SSH_EVENTS = {
+  tofuRequest: "ssh:tofu-request",
+  hopStatus: "ssh:hop-status",
+} as const;
+
+/** `ssh:tofu-request` 事件载荷 */
+export interface TofuRequestPayload {
+  connectionId: string;
+  hopIndex: number;
+  host: string;
+  port: number;
+  fingerprint: string;
+}
+
+/** `ssh:hop-status` 事件载荷 */
+export interface HopStatusPayload {
+  connectionId: string;
+  hopIndex: number;
+  status: "lost";
+  reason: string | null;
+}
+
+/** TOFU 决策回传 command */
+export const tofuApi = {
+  decide: (connectionId: string, hopIndex: number, accept: boolean) =>
+    invoke<void>("ssh_tofu_decision", { connectionId, hopIndex, accept }),
 };

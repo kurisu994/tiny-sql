@@ -2,13 +2,20 @@
 
 import { useEffect, useState } from "react";
 
+import { ConnectionDialogs } from "@/components/connection-dialogs";
 import { ConnectionForm } from "@/components/connection-form";
+import { SchemaBrowser } from "@/components/schema-browser";
 import { useConnectionStore } from "@/stores/connection-store";
+import { useSessionStore } from "@/stores/session-store";
 
 export default function Home() {
   const { connections, loading, error, load } = useConnectionStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  const sessionStatus = useSessionStore((s) => s.status);
+  const openId = useSessionStore((s) => s.openId);
+  const openConnection = useSessionStore((s) => s.open);
 
   useEffect(() => {
     load();
@@ -16,6 +23,8 @@ export default function Home() {
 
   const selected = connections.find((c) => c.id === selectedId) ?? null;
   const showForm = creating || selected !== null;
+  const connected = sessionStatus === "connected" && openId !== null;
+  const openConn = connections.find((c) => c.id === openId) ?? null;
 
   function startCreate() {
     setCreating(true);
@@ -34,6 +43,8 @@ export default function Home() {
 
   return (
     <main className="flex h-screen">
+      <ConnectionDialogs />
+
       {/* 左侧连接列表 */}
       <aside className="flex w-72 flex-col border-r border-neutral-200 dark:border-neutral-800">
         <div className="flex items-center justify-between border-b border-neutral-200 p-3 dark:border-neutral-800">
@@ -56,18 +67,34 @@ export default function Home() {
           )}
           <ul>
             {connections.map((c) => (
-              <li key={c.id}>
+              <li
+                key={c.id}
+                className={`flex items-center gap-1 border-b border-neutral-100 pr-2 dark:border-neutral-900 ${
+                  selectedId === c.id ? "bg-blue-50 dark:bg-blue-950" : ""
+                }`}
+              >
                 <button
                   onClick={() => selectConnection(c.id)}
-                  className={`flex w-full flex-col items-start gap-0.5 border-b border-neutral-100 px-3 py-2 text-left hover:bg-neutral-50 dark:border-neutral-900 dark:hover:bg-neutral-900 ${
-                    selectedId === c.id ? "bg-blue-50 dark:bg-blue-950" : ""
-                  }`}
+                  className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-neutral-50 dark:hover:bg-neutral-900"
                 >
-                  <span className="text-sm font-medium">{c.name}</span>
-                  <span className="text-xs text-neutral-500">
-                    {c.host}:{c.port}
-                    {c.ssh.enabled ? " · SSH" : ""}
+                  <span className="truncate text-sm font-medium">
+                    {c.name}
+                    {openId === c.id && (
+                      <span className="ml-1 text-green-600">●</span>
+                    )}
                   </span>
+                  <span className="truncate text-xs text-neutral-500">
+                    {c.host}:{c.port}
+                    {c.ssh.enabled ? ` · SSH×${c.ssh.hops.length}` : ""}
+                  </span>
+                </button>
+                <button
+                  onClick={() => openConnection(c.id)}
+                  disabled={sessionStatus === "connecting"}
+                  className="shrink-0 rounded border border-neutral-300 px-1.5 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+                  title="连接并浏览"
+                >
+                  连接
                 </button>
               </li>
             ))}
@@ -75,14 +102,22 @@ export default function Home() {
         </div>
       </aside>
 
-      {/* 右侧表单 / 空状态 */}
-      <section className="flex-1 overflow-y-auto p-6">
-        {showForm ? (
-          <ConnectionForm
-            key={selected?.id ?? "new"}
-            editing={selected}
-            onDone={onFormDone}
-          />
+      {/* 右侧：已连接 → schema 浏览；否则编辑表单 / 空状态 */}
+      <section className="min-w-0 flex-1">
+        {connected && openConn ? (
+          <SchemaBrowser connectionName={openConn.name} />
+        ) : sessionStatus === "connecting" ? (
+          <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+            连接中…
+          </div>
+        ) : showForm ? (
+          <div className="h-full overflow-y-auto p-6">
+            <ConnectionForm
+              key={selected?.id ?? "new"}
+              editing={selected}
+              onDone={onFormDone}
+            />
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-neutral-400">
             选择左侧连接，或点「+ 新建」创建一个。
