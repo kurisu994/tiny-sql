@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：v0.1 开发中（Week 1 vertical slice 已打通）**。完整范围与进度见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：v0.1 开发中，已进入 Week 5 dogfooding**。Week 1-4 的静态验证、本地 `.dmg` 打包、SQL 执行/取消、拓扑图和多跳 SSH 主链路已经落地；当前重点是真实 3 跳 SSH + MySQL 试用、MySQL 5.7 兼容验证、README/GIF 与发布准备。完整范围与进度见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -14,10 +14,19 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 
 - **原生多跳 SSH**，不用手动 `ssh -L` 拼链路、改 `~/.ssh/config`
 - **可视化跳板拓扑**，连接失败时高亮断点的那一跳
-- **keepalive 感知断开**，隧道任意一跳挂掉 180s 内推送到 UI（v0.1 规划）
+- **keepalive 感知断开**，隧道任意一跳挂掉 180s 内推送到 UI
 - 纯 Rust 异步 SSH（russh），跨平台无需系统 `ssh` / `sshpass`
 
 自用 + 同事可用 + 开源。不收费、不联网、仅本地。
+
+## v0.1 当前能力
+
+- N 跳 SSH 配置与连接：密码 / 私钥认证、passphrase 会话缓存、TOFU host key 校验、指纹变更硬拒绝。
+- MySQL 数据浏览：列出 database / table / columns，点表浏览前 1000 行。
+- SQL 执行：拒绝空 SQL / 多语句，`SELECT` / `WITH` 后端子查询包装，SQL 编辑器结果上限 10 万行。
+- SQL 取消：执行时记录 MySQL `CONNECTION_ID()`，取消时通过独立 control pool 发 `KILL QUERY`。
+- 拓扑状态：本机 → N 跳 → MySQL 的只读拓扑图，支持 `pending` / `connected` / `failed` / `lost`。
+- macOS 打包：本地已能产出 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`，GitHub Release workflow 监听 `v0.1.*` tag。
 
 ## 技术栈
 
@@ -29,7 +38,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 | SSH 隧道 | russh 0.54（N 跳，纯 Rust 异步） |
 | 数据库 | sqlx 0.8（MySQL；v0.2 加 PostgreSQL） |
 
-> v0.1 后续接入：shadcn/ui、Zustand、i18next、@xyflow/react（拓扑图）、known_hosts + TOFU。详见 [ROADMAP](./docs/ROADMAP.md)。
+> v0.2 之后再考虑 PostgreSQL、自动更新、MySQL TLS、SQL 历史、导出与 schema-aware 智能联想。详见 [ROADMAP](./docs/ROADMAP.md)。
 
 ## 开发环境准备
 
@@ -106,19 +115,38 @@ justfile                    # 项目命令入口
 
 ## 安装
 
-> v0.1 尚未发布。发布后前往 [Releases](https://github.com/kurisu994/tiny-sql/releases) 下载。
+> v0.1 尚未正式发布。Week 5 dogfooding 使用本地或 GitHub Release 产出的 `.dmg`；正式发布后前往 [Releases](https://github.com/kurisu994/tiny-sql/releases) 下载。
 
 v0.1 仅提供 **macOS（Apple Silicon + Intel）** `.dmg`；Windows / Linux 推到 v0.3。
 
 ### macOS 首次打开
 
-v0.1 暂未配置代码签名证书。安装 `.dmg` 后首次打开如果提示**"已损坏，无法打开"**，在终端执行：
+v0.1 暂未配置代码签名证书。安装 `.dmg` 后首次打开时，优先在 Finder 中对 `tiny-sql.app` 右键选择「打开」，再在系统弹窗中确认打开。
+
+如果仍提示**"已损坏，无法打开"**，在终端执行：
 
 ```bash
 xattr -cr /Applications/tiny-sql.app
 ```
 
 然后重新打开即可。
+
+## Week 5 dogfooding
+
+dogfooding 目标是确认 v0.1 能不能真实承担日常多跳 MySQL 查询，而不只是通过静态测试。
+
+### 必验场景
+
+- 真实 3 跳 SSH + MySQL 连接：连接成功后能列出 database / table。
+- TOFU：首次未知 host 弹窗；已信任 host 静默；指纹变更硬拒绝。
+- passphrase：私钥首次输入后同一会话内复用，退出应用后重新要求输入。
+- 表浏览：点表后展示前 1000 行，滚动不卡顿。
+- SQL 执行：覆盖 SELECT / JOIN / 聚合 / 大表无 LIMIT 截断提示。
+- SQL 取消：`SELECT SLEEP(60)` 执行中取消，UI 停止等待，`SHOW PROCESSLIST` 中 query 消失。
+- 拓扑状态：故意断中间跳后，180s 内对应 hop 变为 `lost`。
+- MySQL 5.7：至少一位同事在 5.7 环境完成连接与 SELECT 验证。
+
+试用记录不要写入公开仓库。仓库提供 [dogfooding 日志模板](./docs/dogfooding-log.template.md)，实际记录文件 `docs/dogfooding-log.md` 已被 `.gitignore` 忽略。
 
 ## 文档
 

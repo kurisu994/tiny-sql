@@ -2,11 +2,11 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-06-27
+**最后更新**：2026-06-29
 
 ## 当前状态
 
-**Week 4 完成（静态验证 + 本地 .dmg 产出）**。SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地：
+**Week 5 已启动（发布前 dogfooding 准备中）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地，本轮完成了 dogfooding 入口文档与自动化验证：
 
 - ✅ SQL 执行护栏：拒空 SQL / 多语句；`SELECT` / `WITH` 后端子查询包装；表浏览 `rowLimit=1000`，SQL 编辑器 `rowLimit=100000`。
 - ✅ SQL 取消：每次执行取 MySQL `CONNECTION_ID()`；`MySqlDriver` 主 pool 外新增 max=1 control pool，取消时发 `KILL QUERY <id>`。
@@ -18,6 +18,9 @@
 - ✅ 品牌区：首屏左上角 `tiny-sql` 文本已替换为简化像素风 `public/logo.svg`（数据库方块 + 多跳节点）。
 - ✅ 打包：`pnpm tauri build` 产出 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`。
 - ✅ 验证：`just check` 全绿（fmt-check + clippy + cargo test + vitest 17 + Next build）；浏览器首屏目检通过（普通 Web 下 Tauri runtime guard 无 IPC 错误）。
+- ✅ 代码状态：本轮 `docs: 启动 Week 5 dogfooding` 已提交；本地 `main` 较本地跟踪的 `origin/main` ahead 1，尚未 push。
+- ✅ Week 5 启动文档：README 已更新到 dogfooding 口径，新增 `docs/dogfooding-log.template.md`；本地实际记录 `docs/dogfooding-log.md` 被 `.gitignore` 忽略，不进入公开仓库。
+- ✅ Week 5 自动化验证：`just check` 通过；`just test-integration` 在沙箱外连接 `.env` MySQL 后 4 个 integration 全部通过；`just build` 在沙箱外成功产出 `.app` 和 `.dmg`。
 
 ## 活跃文件
 
@@ -27,6 +30,7 @@
 - `public/logo.svg` + `src/app/page.tsx` — 左上角品牌 logo。
 - `src/stores/{session-store,connection-store}.ts` + `src/lib/{tauri-api,sql-guard}.ts` — 会话状态、SQL guard、Tauri API 参数与 Web 预览降级。
 - `.github/workflows/release.yml` — `v0.1.*` tag 构建并上传 macOS arm64 `.dmg`。
+- `README.md` + `docs/dogfooding-log.template.md` — Week 5 dogfooding 说明、macOS 首次打开说明与脱敏记录模板。
 
 ## 近期已做决策
 
@@ -42,15 +46,16 @@
 
 ## 下一步（Week 5）
 
-1. Dogfooding：用真实 3 跳 SSH + MySQL 验证连接、TOFU、passphrase、表浏览、SQL 执行、取消和拓扑状态。
+1. Dogfooding：安装/运行最新本地 `.dmg`，用真实 3 跳 SSH + MySQL 验证连接、TOFU、passphrase、表浏览、SQL 执行、取消和拓扑状态。
 2. CP-4：应用稳定运行 ≥30 分钟；至少 10 条 SQL（SELECT/JOIN/聚合/长查询取消）；故意断中间跳验证 180s 内 lost。
-3. README/GIF 与发布准备：补右键打开说明、3 跳拓扑 GIF、tag `v0.1.0-rc1` 后验证 GitHub Release `.dmg`。
-4. MySQL 5.7 兼容进入 Week 5 dogfooding（CP-3）。
+3. README/GIF 与发布准备：补真实右键打开 GIF、3 跳拓扑 GIF；tag `v0.1.0-rc1` 后验证 GitHub Release `.dmg`。
+4. CP-3：找 MySQL 5.7 环境完成连接与 SELECT 验证。
 
 ## 阻塞 / 待确认
 
 - **CP-4 GUI/dogfooding 仍待真实环境**：本轮只做静态验证、浏览器首屏目检和本地 .dmg 打包；未连真实 3 跳 SSH/MySQL，也未验证 `SHOW PROCESSLIST` 中 KILL 后 query 消失。
 - **CP-3** MySQL 5.7 兼容仍留 Week 5 dogfooding。
-- 本会话所有提交**未 push**（Week 2 + Week 3 + Week 4 变更均仍在本地）。
+- README 中仍缺真实 GIF；当前仅补了文字说明和试用 checklist。
+- 未执行 `git fetch`，远端实时状态未刷新；按当前本地跟踪分支看本轮提交尚未 push。
 
 相关：[[progress]] · [[systemPatterns]]
