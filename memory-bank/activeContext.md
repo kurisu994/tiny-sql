@@ -18,9 +18,11 @@
 - ✅ 品牌区：首屏左上角 `tiny-sql` 文本已替换为简化像素风 `public/logo.svg`（数据库方块 + 多跳节点）。
 - ✅ 打包：`pnpm tauri build` 产出 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`。
 - ✅ 验证：`just check` 全绿（fmt-check + clippy + cargo test + vitest 17 + Next build）；浏览器首屏目检通过（普通 Web 下 Tauri runtime guard 无 IPC 错误）。
-- ✅ 代码状态：本轮 `docs: 启动 Week 5 dogfooding` 已提交；本地 `main` 较本地跟踪的 `origin/main` ahead 1，尚未 push。
+- ✅ 代码状态：本地 `main` 有未 push 提交；本轮 Week 5 dogfooding 与发布准备均已纳入本地提交。
 - ✅ Week 5 启动文档：README 已更新到 dogfooding 口径，新增 `docs/dogfooding-log.template.md`；本地实际记录 `docs/dogfooding-log.md` 被 `.gitignore` 忽略，不进入公开仓库。
 - ✅ Week 5 自动化验证：`just check` 通过；`just test-integration` 在沙箱外连接 `.env` MySQL 后 4 个 integration 全部通过；`just build` 在沙箱外成功产出 `.app` 和 `.dmg`。
+- ✅ Week 5 发布准备：release workflow 已改为 macOS Apple Silicon + Intel 双构建；新增 `docs/RELEASE_CHECKLIST.md` 约束 RC、同事试用、正式发布和延期规则。
+- ✅ Week 5 发布准备提交范围：`.github/workflows/release.yml`、`docs/RELEASE_CHECKLIST.md`、`CHANGELOG.md`、`README.md`、`memory-bank/*`。
 
 ## 活跃文件
 
@@ -29,8 +31,9 @@
 - `src/components/{schema-browser,topology-graph,connection-dialogs}.tsx` — SQL 面板、虚拟滚动表格、拓扑图、事件监听 runtime guard。
 - `public/logo.svg` + `src/app/page.tsx` — 左上角品牌 logo。
 - `src/stores/{session-store,connection-store}.ts` + `src/lib/{tauri-api,sql-guard}.ts` — 会话状态、SQL guard、Tauri API 参数与 Web 预览降级。
-- `.github/workflows/release.yml` — `v0.1.*` tag 构建并上传 macOS arm64 `.dmg`。
+- `.github/workflows/release.yml` — `v0.1.*` tag 构建 macOS Apple Silicon + Intel `.dmg`，再统一创建 GitHub Release。
 - `README.md` + `docs/dogfooding-log.template.md` — Week 5 dogfooding 说明、macOS 首次打开说明与脱敏记录模板。
+- `docs/RELEASE_CHECKLIST.md` + `CHANGELOG.md` — v0.1 RC/正式发布检查、双架构 release 说明。
 
 ## 近期已做决策
 
@@ -42,13 +45,14 @@
 - **control pool 不从主 pool 借连接**：v0.1 用同一 host/port（SSH 时同一本地 listener）开独立 max=1 pool，满足 pool 满时仍可发 KILL；“独立本地端口”留后续按 dogfooding 反馈再强化。
 - **v0.1 不启用 MySQL TLS**：`db-driver` 默认把 sqlx `ssl-mode` 设为 `Disabled`；`connect_url` 在 URL 显式传 `ssl-mode` 时仍尊重配置，避免内网 MySQL 声明 SSL 能力但 rustls 握手失败。
 - **普通 Web 预览不报 Tauri IPC 错误**：无 `window.__TAURI_INTERNALS__` 时连接列表降级为空，Tauri 事件监听跳过；Vitest 仍走 mock invoke。
+- **release workflow 拆成双构建 + 单发布**：`macos-15` 产 Apple Silicon `.dmg`，`macos-15-intel` 产 Intel `.dmg`，最后由单独 `release` job 等两个 artifact 都下载后再创建 GitHub Release，避免并发创建同一个 release。
 - 沿用：整体文件加密、playwright 推迟、移除 test_select_1。
 
 ## 下一步（Week 5）
 
 1. Dogfooding：安装/运行最新本地 `.dmg`，用真实 3 跳 SSH + MySQL 验证连接、TOFU、passphrase、表浏览、SQL 执行、取消和拓扑状态。
 2. CP-4：应用稳定运行 ≥30 分钟；至少 10 条 SQL（SELECT/JOIN/聚合/长查询取消）；故意断中间跳验证 180s 内 lost。
-3. README/GIF 与发布准备：补真实右键打开 GIF、3 跳拓扑 GIF；tag `v0.1.0-rc1` 后验证 GitHub Release `.dmg`。
+3. README/GIF 与发布准备：补真实右键打开 GIF、3 跳拓扑 GIF；tag `v0.1.0-rc1` 后验证 GitHub Release 的 Apple Silicon + Intel 两个 `.dmg`。
 4. CP-3：找 MySQL 5.7 环境完成连接与 SELECT 验证。
 
 ## 阻塞 / 待确认
@@ -56,6 +60,6 @@
 - **CP-4 GUI/dogfooding 仍待真实环境**：本轮只做静态验证、浏览器首屏目检和本地 .dmg 打包；未连真实 3 跳 SSH/MySQL，也未验证 `SHOW PROCESSLIST` 中 KILL 后 query 消失。
 - **CP-3** MySQL 5.7 兼容仍留 Week 5 dogfooding。
 - README 中仍缺真实 GIF；当前仅补了文字说明和试用 checklist。
-- 未执行 `git fetch`，远端实时状态未刷新；按当前本地跟踪分支看本轮提交尚未 push。
+- 未执行 `git fetch`，远端实时状态未刷新；按当前本地跟踪分支看本地提交尚未 push。
 
 相关：[[progress]] · [[systemPatterns]]

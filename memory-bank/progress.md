@@ -10,7 +10,7 @@
 | v0.2 | 规划 | PG driver + 自动更新 + passphrase 加密 + TLS + Schema-aware 联想 |
 | v0.3+ | 规划 | Win/Linux + crate 独立 publish + 多集群 diff |
 
-CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新）。
+CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新；Week 5：release workflow 双架构打包与发布检查清单）。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -20,7 +20,7 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 | Week 2 | 测试基础设施 + `MySqlDriver` struct + 加密 store + 连接管理 UI | ✅ 静态验证完成（playwright E2E 推迟；CP-2 工时未记录） |
 | Week 3 | 多跳 SSH + keepalive + 错误模型三变体 + TOFU + 表浏览 | ✅ 静态验证完成（CP-1b 待 GUI smoke：3 跳/TOFU/180s lost） |
 | Week 4 | SQL 执行（子查询包装 + KILL QUERY）+ 拓扑图 + .dmg | ✅ 静态验证完成（真实 SSH/MySQL dogfooding 待 Week 5） |
-| Week 5 | dogfooding + 修 bug + README/GIF + tag v0.1.0 | 🚧 已启动（README/日志模板/自动化验证完成；真实环境待测） |
+| Week 5 | dogfooding + 修 bug + README/GIF + tag v0.1.0 | 🚧 已启动（README/日志模板/自动化验证/release checklist 完成；真实环境待测） |
 | Week 6 / 7 | 缓冲 / launch（V2EX + 掘金） | ⬜ |
 
 ## Git 提交历史
@@ -44,7 +44,8 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 | `43706a3` | feat(ui): SSH 多跳表单 + TOFU/passphrase 弹窗 + schema 浏览 |
 | `4e32edd` | feat: 完成 Week 4 SQL 执行与拓扑图 |
 | `d6a625f` | fix: 修复 MySQL TLS 与拓扑图布局 |
-| `HEAD` | docs: 启动 Week 5 dogfooding |
+| `67a1d70` | docs: 启动 Week 5 dogfooding |
+| `HEAD` | docs: 完善 Week 5 发布准备 |
 
 > 注：`d0973ef`（含）之前已 push 到远端 `git@github.com:kurisu994/tiny-sql.git`；
 > 当前本地 `main` 较本地跟踪的 `origin/main` ahead 1（本轮提交尚未 push）；未执行 `git fetch`，远端实时状态以 GitHub 为准。
@@ -64,6 +65,7 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 - **2026-06-27 Week 4 拓扑图四态事件**：`ssh:hop-status` 扩展为 `pending/connected/failed/lost`，连接阶段由 Tauri command 补事件，运行期 lost 仍由 `ssh-multihop` 回调上报，保持 crate 不依赖 Tauri。
 - **2026-06-27 Week 4 本地 .dmg 产出**：`pnpm tauri build` 已生成 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`；CI release workflow 使用 GitHub 官方 `macos-15` arm64 runner。
 - **2026-06-29 Week 5 dogfooding 启动**：README 更新到发布前试用口径，新增脱敏 `docs/dogfooding-log.template.md`，本地忽略的 `docs/dogfooding-log.md` 记录验证；`just check`、沙箱外 `just test-integration`、沙箱外 `just build` 均通过。
+- **2026-06-29 Week 5 release workflow 收口**：`release.yml` 从单 arm64 job 改为 `macos-15` Apple Silicon + `macos-15-intel` Intel 矩阵构建，上传 artifact 后由单独 release job 创建 GitHub Release；新增 `docs/RELEASE_CHECKLIST.md` 固化 RC、dogfooding、正式发布和延期规则。
 
 ## 已解决的阻碍
 

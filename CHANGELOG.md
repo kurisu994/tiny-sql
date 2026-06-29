@@ -22,7 +22,7 @@
 - 连接配置加密：复用 AES-256-GCM + master key（0600），tiny-sql 对**整个 `connections.enc` 文件**加密（满足 FR-001：明文 host/user/password 不落盘）。
 - 测试基础设施：前端 `vitest` + `@testing-library/react`；`db-driver` integration 测试连本地 MySQL（`TINY_SQL_TEST_MYSQL_URL`，默认 `#[ignore]`）。
 - GitHub Actions CI（macOS arm64）：`cargo fmt --check` + `clippy` + `cargo test` + `vitest` + 前端 build。
-- GitHub Actions release job：`v0.1.*` tag 触发 macOS arm64 Tauri build，并上传 `.dmg` 到 GitHub Release。
+- GitHub Actions release job：`v0.1.*` tag 触发 macOS Apple Silicon + Intel 双架构 Tauri build，并在两个 `.dmg` 都上传后创建 GitHub Release。
 - ⏸️ playwright E2E 因 Tauri WebDriver 不支持 macOS 推迟（留将来 Linux CI / Week 5 dogfooding）。
 
 ### ✨ 新功能
