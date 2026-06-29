@@ -6,7 +6,13 @@
 
 ## 当前状态
 
-**Week 5 已启动（发布前 dogfooding 准备中）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地，本轮完成了 dogfooding 入口文档与自动化验证：
+**Week 5 进行中（发布前 dogfooding 准备 + 连接管理 UI 打磨）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地；最近一轮把连接管理交互改成 Navicat 风格并接入 shadcn/ui：
+
+- ✅ 连接列表交互重做：去掉行内「连接」按钮，改右键菜单（连接 / 断开 / 进入命令列界面 / 编辑 / 复制 / 删除）+ 单击选中 + 双击连接；新建/编辑改 shadcn `Dialog` 弹窗；删除与写操作确认从 `window.confirm` 换成 shadcn `AlertDialog`（全局 `confirm-store`）。
+- ✅ 接入 shadcn/ui（radix-nova、radix 基库）：`components.json` + `src/lib/utils.ts` + `src/components/ui/*`；暗色保持 `prefers-color-scheme` 跟随系统（不切 `.dark` class），还原 system 中文字体栈（移除 init 引入的 Geist Google 字体）。
+- ✅ 验证：`npx tsc --noEmit` 与 `npx next build` 均通过；本地 `main` 新增 `705ef8e`（feat）/ `d91dd43`（refactor）两个未 push 提交。
+
+此前 Week 5 dogfooding 准备同样完成（保留）：
 
 - ✅ SQL 执行护栏：拒空 SQL / 多语句；`SELECT` / `WITH` 后端子查询包装；表浏览 `rowLimit=1000`，SQL 编辑器 `rowLimit=100000`。
 - ✅ SQL 取消：每次执行取 MySQL `CONNECTION_ID()`；`MySqlDriver` 主 pool 外新增 max=1 control pool，取消时发 `KILL QUERY <id>`。
@@ -34,6 +40,10 @@
 - `.github/workflows/release.yml` — `v0.1.*` tag 构建 macOS Apple Silicon + Intel `.dmg`，再统一创建 GitHub Release。
 - `README.md` + `docs/dogfooding-log.template.md` — Week 5 dogfooding 说明、macOS 首次打开说明与脱敏记录模板。
 - `docs/RELEASE_CHECKLIST.md` + `CHANGELOG.md` — v0.1 RC/正式发布检查、双架构 release 说明。
+- `src/components/ui/{dialog,alert-dialog,context-menu,button}.tsx` + `src/lib/utils.ts` — shadcn/ui 组件与 `cn`。
+- `src/components/confirm-dialog.tsx` + `src/stores/confirm-store.ts` — 全局命令式确认弹窗（替代 `window.confirm`）。
+- `src/app/{page.tsx,globals.css,layout.tsx}` — 连接列表右键菜单 + 表单弹窗、shadcn 主题变量（暗色跟随系统）、字体还原。
+- `src/components/{schema-browser,connection-form}.tsx` — 写操作 / 删除确认改用全局 confirm。
 
 ## 近期已做决策
 
@@ -46,6 +56,9 @@
 - **v0.1 不启用 MySQL TLS**：`db-driver` 默认把 sqlx `ssl-mode` 设为 `Disabled`；`connect_url` 在 URL 显式传 `ssl-mode` 时仍尊重配置，避免内网 MySQL 声明 SSL 能力但 rustls 握手失败。
 - **普通 Web 预览不报 Tauri IPC 错误**：无 `window.__TAURI_INTERNALS__` 时连接列表降级为空，Tauri 事件监听跳过；Vitest 仍走 mock invoke。
 - **release workflow 拆成双构建 + 单发布**：`macos-15` 产 Apple Silicon `.dmg`，`macos-15-intel` 产 Intel `.dmg`，最后由单独 `release` job 等两个 artifact 都下载后再创建 GitHub Release，避免并发创建同一个 release。
+- **接入 shadcn/ui（radix-nova）而非自研弹窗**：确认框用 `AlertDialog`、表单用 `Dialog`、右键菜单用 `ContextMenu`，统一交互与无障碍；保留命令式 `confirm-store` 包一层，让多处 `await confirm()` 调用最省事。
+- **暗色保持 `prefers-color-scheme` 跟随系统**：shadcn init 默认把暗色切到 `.dark` class，会让现有满屏 `dark:` 失效；改回 media 策略并把 shadcn 变量塞进 `@media`，现有 `dark:` 零迁移、无需 JS、无闪烁。
+- **还原 system 中文字体栈**：移除 init 引入的 Geist（`next/font/google`），避免 Tauri 构建期联网拉字体且更适配中文。
 - 沿用：整体文件加密、playwright 推迟、移除 test_select_1。
 
 ## 下一步（Week 5）
@@ -57,6 +70,7 @@
 
 ## 阻塞 / 待确认
 
+- **连接列表新交互待真实 GUI 验证**：右键菜单 → 编辑/删除弹窗的焦点、以及「表单弹窗内再叠确认弹窗」的层叠手感只过了 `tsc` / `next build` 静态验证，未在 Tauri 实机点过。
 - **CP-4 GUI/dogfooding 仍待真实环境**：本轮只做静态验证、浏览器首屏目检和本地 .dmg 打包；未连真实 3 跳 SSH/MySQL，也未验证 `SHOW PROCESSLIST` 中 KILL 后 query 消失。
 - **CP-3** MySQL 5.7 兼容仍留 Week 5 dogfooding。
 - README 中仍缺真实 GIF；当前仅补了文字说明和试用 checklist。

@@ -10,7 +10,7 @@
 | v0.2 | 规划 | PG driver + 自动更新 + passphrase 加密 + TLS + Schema-aware 联想 |
 | v0.3+ | 规划 | Win/Linux + crate 独立 publish + 多集群 diff |
 
-CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新；Week 5：release workflow 双架构打包与发布检查清单）。
+CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新；Week 5：release workflow 双架构打包与发布检查清单、连接管理 UI 接入 shadcn（右键菜单 / 弹窗 / 确认弹窗））。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -45,7 +45,9 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 | `4e32edd` | feat: 完成 Week 4 SQL 执行与拓扑图 |
 | `d6a625f` | fix: 修复 MySQL TLS 与拓扑图布局 |
 | `67a1d70` | docs: 启动 Week 5 dogfooding |
-| `HEAD` | docs: 完善 Week 5 发布准备 |
+| `b5a137d` | docs: 完善 Week 5 发布准备 |
+| `705ef8e` | feat(ui): 连接列表改用右键菜单与 shadcn 弹窗 |
+| `d91dd43` | refactor(ui): 右键菜单改用 shadcn ContextMenu（HEAD） |
 
 > 注：`d0973ef`（含）之前已 push 到远端 `git@github.com:kurisu994/tiny-sql.git`；
 > 当前本地 `main` 较本地跟踪的 `origin/main` ahead 1（本轮提交尚未 push）；未执行 `git fetch`，远端实时状态以 GitHub 为准。
@@ -66,6 +68,7 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 - **2026-06-27 Week 4 本地 .dmg 产出**：`pnpm tauri build` 已生成 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`；CI release workflow 使用 GitHub 官方 `macos-15` arm64 runner。
 - **2026-06-29 Week 5 dogfooding 启动**：README 更新到发布前试用口径，新增脱敏 `docs/dogfooding-log.template.md`，本地忽略的 `docs/dogfooding-log.md` 记录验证；`just check`、沙箱外 `just test-integration`、沙箱外 `just build` 均通过。
 - **2026-06-29 Week 5 release workflow 收口**：`release.yml` 从单 arm64 job 改为 `macos-15` Apple Silicon + `macos-15-intel` Intel 矩阵构建，上传 artifact 后由单独 release job 创建 GitHub Release；新增 `docs/RELEASE_CHECKLIST.md` 固化 RC、dogfooding、正式发布和延期规则。
+- **2026-06-29 连接管理 UI 接入 shadcn/ui**：连接列表去掉行内「连接」按钮改 Navicat 式右键菜单（shadcn `ContextMenu`）；新建/编辑改 `Dialog` 弹窗；二次确认用 `AlertDialog` + 全局 `confirm-store` 替代 `window.confirm`。`shadcn init` 选 radix-nova / radix；暗色改回 `prefers-color-scheme` 跟随系统（不切 `.dark` class，现有 `dark:` 零迁移），并还原 system 中文字体栈（移除 init 引入的 Geist）。提交 `705ef8e` + `d91dd43`，`tsc` / `next build` 通过，未 push。
 
 ## 已解决的阻碍
 

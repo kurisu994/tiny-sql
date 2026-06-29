@@ -76,7 +76,8 @@ tiny-sql/
 **前端**
 
 - `"use client"` 组件 + `invoke<T>()` 调 command；i18n key → 中文映射（v0.1 用 `ERROR_ZH` map，Week 2 接 i18next）。
-- 状态用 zustand（规划）；拓扑图用 `@xyflow/react`（规划）；表格用 `react-virtuoso`（规划）。
+- 状态用 zustand；拓扑图用纯 CSS 静态布局；结果表格用 `react-virtuoso` 虚拟滚动。
+- UI 组件库用 **shadcn/ui**（radix base，组件源码落 `src/components/ui/`，用 `cn()` 合并 className）：新建/编辑表单用 `Dialog`、右键菜单用 `ContextMenu`、二次确认用 `AlertDialog`；确认统一走全局命令式 `confirm-store`（`await confirm({...})`）替代 `window.confirm`。
 
 **数据库（被连接的 MySQL）**
 
@@ -95,5 +96,6 @@ tiny-sql/
 - ❌ **不联网**（除用户配置的 SSH/MySQL 目标）—— 无遥测/更新检查/错误上报。
 - ❌ **数据库设计不定义 FOREIGN KEY**（全局规则）—— 关联由代码与索引控制。
 - ❌ **keepalive 不要 30s/1 次即报** —— 用 60s + 连续 3 次，防误报。
+- ❌ **不把暗色切成 `.dark` class 策略** —— 保持 Tailwind v4 默认 `prefers-color-scheme`（跟随系统），shadcn 主题变量在 `@media` 下随系统切换，避免现有满屏 `dark:` 工具类失效。
 
 相关：[[techContext]] · [[productContext]] · [[activeContext]]

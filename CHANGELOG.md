@@ -10,6 +10,9 @@
 
 ### 🎨 体验调整
 
+- 首页连接列表去掉行内「连接」按钮，改为 Navicat 式右键菜单（连接 / 断开连接 / 进入命令列界面 / 编辑连接 / 复制连接 / 删除连接）：单击选中、双击连接、右键唤出更多操作。
+- 新建 / 编辑连接由右侧内联表单改为居中弹窗（shadcn `Dialog`）。
+- 删除连接、SQL 写操作的二次确认从系统 `window.confirm` 统一换成 shadcn `AlertDialog`（全局命令式 confirm）。
 - 更新 tiny-sql 专属应用图标，以数据库与多跳连接为主体，并重新生成 Tauri 桌面与平台图标资源。
 - 左上角品牌区从文本 `tiny-sql` 替换为简化像素风 SVG logo（数据库方块 + 多跳节点）。
 - 拓扑图改为纯 CSS 只读紧凑样式：无画布缩放/拖拽状态，避免连线穿节点和节点被自动放大。
@@ -18,6 +21,7 @@
 
 - 初始化 Cargo workspace：`ssh-multihop`（隧道）/ `db-driver`（MySQL）/ `src-tauri`（Tauri 壳）三成员；`src-tauri` 引用 workspace crate 编译通过，无需退回扁平 mod。
 - 前端：Next.js 16 (Turbopack) + React 19 + Tailwind CSS 4 静态导出（`output: export` → `out/`）。
+- 接入 shadcn/ui（radix-nova 预设、radix 基库）：新增 `components.json`、`src/lib/utils.ts`（`cn`）与 `src/components/ui/*`（dialog / alert-dialog / context-menu / button），依赖新增 `radix-ui` / `lucide-react` / `class-variance-authority` / `clsx` / `tailwind-merge` / `tw-animate-css`；暗色保持跟随系统（`prefers-color-scheme`，不切 `.dark` class），现有 `dark:` 工具类零迁移。
 - 命令入口 `justfile`：`dev` / `build` / `check` / `lint` / `fmt` / `test` / `version` / `release` 等。
 - 连接配置加密：复用 AES-256-GCM + master key（0600），tiny-sql 对**整个 `connections.enc` 文件**加密（满足 FR-001：明文 host/user/password 不落盘）。
 - 测试基础设施：前端 `vitest` + `@testing-library/react`；`db-driver` integration 测试连本地 MySQL（`TINY_SQL_TEST_MYSQL_URL`，默认 `#[ignore]`）。

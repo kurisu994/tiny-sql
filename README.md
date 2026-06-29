@@ -33,7 +33,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 | 层 | 选型 |
 |---|---|
 | 桌面框架 | Tauri 2.x |
-| 前端 | Next.js 16 (Turbopack) + React 19 + TypeScript + Tailwind CSS 4 |
+| 前端 | Next.js 16 (Turbopack) + React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |
 | 后端 | Rust (Edition 2021, MSRV 1.77.2) + Tokio |
 | SSH 隧道 | russh 0.54（N 跳，纯 Rust 异步） |
 | 数据库 | sqlx 0.8（MySQL；v0.2 加 PostgreSQL） |

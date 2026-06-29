@@ -14,9 +14,14 @@
 | @tauri-apps/cli | ^2.10.0 (dev) | tauri 命令 |
 | tailwindcss + @tailwindcss/postcss | ^4 (dev) | 样式 |
 | typescript | ^5 (dev) | 类型 |
+| radix-ui | ^1.6.0 | shadcn 组件底层 primitives（统一包） |
+| lucide-react | ^1.21.0 | 图标 |
+| class-variance-authority / clsx / tailwind-merge | ^0.7 / ^2.1 / ^3.6 | shadcn 组件 variant + `cn()` className 合并 |
+| tw-animate-css | ^1.4.0 | shadcn 弹窗 / 菜单动画 |
+| react-virtuoso | ^4.18.9 | 结果表格虚拟滚动 |
 
-> **已装**：`zustand` 5（状态）、`vitest` + `@testing-library/react`（前端单测）。
-> **规划未装**（按周引入）：`@xyflow/react`（拓扑图，Week 4）、`react-virtuoso`（虚拟滚动，Week 4 的 10w 行）、`i18next`/`react-i18next`、`shadcn`/`radix-ui`、`lucide-react`、`sonner`、`playwright`（推迟）。
+> **已装**：`zustand` 5（状态）、`vitest` + `@testing-library/react`（前端单测）、`react-virtuoso`（虚拟滚动）、shadcn/ui 体系（`shadcn` CLI + `radix-ui` + `lucide-react` + `class-variance-authority` + `clsx` + `tailwind-merge` + `tw-animate-css`）。
+> **规划未装**：`i18next`/`react-i18next`、`sonner`（toast）、`playwright`（推迟）；拓扑图最终用纯 CSS，未引入 `@xyflow/react`。
 
 ### 后端 Rust（workspace.dependencies — 实际已装）
 
