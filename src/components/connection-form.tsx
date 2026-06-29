@@ -11,6 +11,7 @@ import {
   type SshHopConfig,
   type StoredConnection,
 } from "@/lib/tauri-api";
+import { useConfirmStore } from "@/stores/confirm-store";
 import { useConnectionStore } from "@/stores/connection-store";
 
 interface FormFields {
@@ -50,6 +51,7 @@ export function ConnectionForm({
   onDone: () => void;
 }) {
   const { create, update, remove } = useConnectionStore();
+  const confirm = useConfirmStore((s) => s.confirm);
   const [form, setForm] = useState<FormFields>(() =>
     editing
       ? {
@@ -110,6 +112,13 @@ export function ConnectionForm({
 
   async function onDelete() {
     if (!editing) return;
+    const ok = await confirm({
+      title: "删除连接",
+      message: `确定删除连接「${editing.name}」？此操作不可撤销。`,
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!ok) return;
     await remove(editing.id);
     onDone();
   }

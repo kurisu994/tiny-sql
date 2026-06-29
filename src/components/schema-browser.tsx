@@ -5,6 +5,7 @@ import { Virtuoso } from "react-virtuoso";
 import { TopologyGraph } from "@/components/topology-graph";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
 import type { RowSet, StoredConnection } from "@/lib/tauri-api";
+import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
 
 /**
@@ -35,14 +36,22 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     cancelQuery,
     close,
   } = useSessionStore();
+  const confirm = useConfirmStore((s) => s.confirm);
 
   async function runSql() {
     const sql = sqlText.trim();
     if (!sql) return;
-    const allowWrite =
-      needsWriteConfirmation(sql) &&
-      window.confirm("检测到写操作，请确认已经使用只读账号或明确知道风险。继续执行？");
-    if (needsWriteConfirmation(sql) && !allowWrite) return;
+    let allowWrite = false;
+    if (needsWriteConfirmation(sql)) {
+      allowWrite = await confirm({
+        title: "确认写操作",
+        message:
+          "检测到写操作，请确认已使用只读账号或明确知道风险。是否继续执行？",
+        confirmText: "继续执行",
+        danger: true,
+      });
+      if (!allowWrite) return;
+    }
     await executeSql(sql, { rowLimit: 100000, allowWrite });
   }
 
