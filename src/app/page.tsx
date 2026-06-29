@@ -5,10 +5,17 @@ import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ConnectionDialogs } from "@/components/connection-dialogs";
 import { ConnectionForm } from "@/components/connection-form";
-import { ContextMenu, type ContextMenuItem } from "@/components/context-menu";
 import { SchemaBrowser } from "@/components/schema-browser";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import type { StoredConnection } from "@/lib/tauri-api";
+import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useConnectionStore } from "@/stores/connection-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -26,12 +33,6 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // 表单弹窗状态
   const [form, setForm] = useState<FormState>(null);
-  // 右键菜单：记录位置与目标连接（null 表示未打开）
-  const [menu, setMenu] = useState<{
-    x: number;
-    y: number;
-    conn: StoredConnection;
-  } | null>(null);
 
   const sessionStatus = useSessionStore((s) => s.status);
   const openId = useSessionStore((s) => s.openId);
@@ -99,58 +100,10 @@ export default function Home() {
     if (form?.mode === "edit" && form.conn.id === c.id) setForm(null);
   }
 
-  function openMenu(e: React.MouseEvent, c: StoredConnection) {
-    e.preventDefault();
-    setMenu({ x: e.clientX, y: e.clientY, conn: c });
-  }
-
-  function buildMenuItems(c: StoredConnection): ContextMenuItem[] {
-    const isOpen = openId === c.id;
-    const connecting = sessionStatus === "connecting";
-    return [
-      {
-        label: "连接",
-        onClick: () => openSession(c),
-        disabled: isOpen || connecting,
-      },
-      {
-        label: "断开连接",
-        onClick: () => closeConnection(),
-        disabled: !isOpen,
-      },
-      {
-        label: "进入命令列界面",
-        onClick: () => openSession(c),
-        disabled: connecting,
-        divider: true,
-      },
-      {
-        label: "编辑连接",
-        onClick: () => openEdit(c),
-        divider: true,
-      },
-      { label: "复制连接", onClick: () => duplicateConnection(c) },
-      {
-        label: "删除连接",
-        onClick: () => deleteConnection(c),
-        danger: true,
-        divider: true,
-      },
-    ];
-  }
-
   return (
     <main className="flex h-screen">
       <ConnectionDialogs />
       <ConfirmDialog />
-      {menu && (
-        <ContextMenu
-          x={menu.x}
-          y={menu.y}
-          items={buildMenuItems(menu.conn)}
-          onClose={() => setMenu(null)}
-        />
-      )}
 
       {/* 新建 / 编辑连接弹窗 */}
       <Dialog
@@ -201,35 +154,80 @@ export default function Home() {
             <p className="p-3 text-sm text-neutral-500">还没有连接，点「+ 新建」开始。</p>
           )}
           <ul>
-            {connections.map((c) => (
-              <li
-                key={c.id}
-                className={`border-b border-neutral-100 dark:border-neutral-900 ${
-                  selectedId === c.id || menu?.conn.id === c.id
-                    ? "bg-blue-50 dark:bg-blue-950"
-                    : ""
-                }`}
-              >
-                <button
-                  onClick={() => setSelectedId(c.id)}
-                  onDoubleClick={() => openSession(c)}
-                  onContextMenu={(e) => openMenu(e, c)}
-                  className="flex w-full min-w-0 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-neutral-50 dark:hover:bg-neutral-900"
-                  title="双击连接，右键更多操作"
+            {connections.map((c) => {
+              const isOpen = openId === c.id;
+              const connecting = sessionStatus === "connecting";
+              return (
+                <li
+                  key={c.id}
+                  className="border-b border-neutral-100 dark:border-neutral-900"
                 >
-                  <span className="truncate text-sm font-medium">
-                    {c.name}
-                    {openId === c.id && (
-                      <span className="ml-1 text-green-600">●</span>
-                    )}
-                  </span>
-                  <span className="truncate text-xs text-neutral-500">
-                    {c.host}:{c.port}
-                    {c.ssh.enabled ? ` · SSH×${c.ssh.hops.length}` : ""}
-                  </span>
-                </button>
-              </li>
-            ))}
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <button
+                        onClick={() => setSelectedId(c.id)}
+                        onDoubleClick={() => openSession(c)}
+                        title="双击连接，右键更多操作"
+                        className={cn(
+                          "flex w-full min-w-0 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-neutral-50 data-[state=open]:bg-blue-50 dark:hover:bg-neutral-900 dark:data-[state=open]:bg-blue-950",
+                          selectedId === c.id && "bg-blue-50 dark:bg-blue-950",
+                        )}
+                      >
+                        <span className="truncate text-sm font-medium">
+                          {c.name}
+                          {isOpen && (
+                            <span className="ml-1 text-green-600">●</span>
+                          )}
+                        </span>
+                        <span className="truncate text-xs text-neutral-500">
+                          {c.host}:{c.port}
+                          {c.ssh.enabled ? ` · SSH×${c.ssh.hops.length}` : ""}
+                        </span>
+                      </button>
+                    </ContextMenuTrigger>
+                    {/* 阻止菜单关闭时把焦点拉回触发器，避免与随后打开的弹窗抢焦点 */}
+                    <ContextMenuContent
+                      className="w-44"
+                      onCloseAutoFocus={(e) => e.preventDefault()}
+                    >
+                      <ContextMenuItem
+                        disabled={isOpen || connecting}
+                        onSelect={() => openSession(c)}
+                      >
+                        连接
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        disabled={!isOpen}
+                        onSelect={() => closeConnection()}
+                      >
+                        断开连接
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        disabled={connecting}
+                        onSelect={() => openSession(c)}
+                      >
+                        进入命令列界面
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onSelect={() => openEdit(c)}>
+                        编辑连接
+                      </ContextMenuItem>
+                      <ContextMenuItem onSelect={() => duplicateConnection(c)}>
+                        复制连接
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        variant="destructive"
+                        onSelect={() => deleteConnection(c)}
+                      >
+                        删除连接
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </aside>
