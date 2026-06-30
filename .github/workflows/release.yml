@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   macos:
-    name: macOS ${{ matrix.arch }} .dmg
+    name: macOS ${{ matrix.arch }} bundle
     runs-on: ${{ matrix.runner }}
 
     strategy:
@@ -44,13 +44,30 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build
 
-      - name: Upload dmg artifact
+      - name: Normalize updater artifact names
+        run: |
+          shopt -s nullglob
+          for file in src-tauri/target/release/bundle/macos/*.app.tar.gz; do
+            renamed="${file%.app.tar.gz}_${{ matrix.arch }}.app.tar.gz"
+            mv "$file" "$renamed"
+            if [ -f "$file.sig" ]; then
+              mv "$file.sig" "$renamed.sig"
+            fi
+          done
+
+      - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tiny-sql-${{ matrix.arch }}-dmg
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          name: tiny-sql-${{ matrix.arch }}-bundle
+          path: |
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.tar.gz
+            src-tauri/target/release/bundle/**/*.sig
           if-no-files-found: error
 
   release:
@@ -59,17 +76,136 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download dmg artifacts
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download bundle artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
+      - name: Extract release notes from CHANGELOG
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          notes_file="release-notes.md"
+
+          extract_notes() {
+            local heading="$1"
+            awk -v heading="$heading" '
+              index($0, heading) == 1 { in_section = 1; found = 1; next }
+              in_section && /^## \[/ { exit }
+              in_section { print }
+              END { if (!found) exit 1 }
+            ' CHANGELOG.md
+          }
+
+          if ! extract_notes "## [$version]" > "$notes_file"; then
+            case "$version" in
+              *-alpha*|*-beta*|*-rc*) extract_notes "## [Unreleased]" > "$notes_file" || echo "tiny-sql ${GITHUB_REF_NAME}" > "$notes_file" ;;
+              *) echo "tiny-sql ${GITHUB_REF_NAME}" > "$notes_file" ;;
+            esac
+          fi
+
+          perl -0pi -e 's/\A\s+//' "$notes_file"
+          if [ ! -s "$notes_file" ] || ! grep -q '[^[:space:]-]' "$notes_file"; then
+            echo "tiny-sql ${GITHUB_REF_NAME}" > "$notes_file"
+          fi
+
+      - name: Collect release assets
+        run: |
+          mkdir -p dist-assets
+          find dist -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -exec cp '{}' dist-assets/ \;
+          find dist-assets -maxdepth 1 -type f -print | sort
+
+      - name: Generate updater manifest
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            *-alpha*|*-beta*|*-rc*)
+              echo "Skip latest.json for prerelease ${GITHUB_REF_NAME}"
+              exit 0
+              ;;
+          esac
+
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          import pathlib
+          import sys
+
+          dist = pathlib.Path("dist-assets")
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tag[1:] if tag.startswith("v") else tag
+          repo = os.environ["GITHUB_REPOSITORY"]
+          notes = pathlib.Path("release-notes.md").read_text(encoding="utf-8").strip()
+
+          def find_update_asset(platform, patterns):
+              matches = []
+              for pattern in patterns:
+                  matches.extend(sorted(dist.glob(pattern)))
+              matches = [p for p in matches if p.is_file()]
+              if not matches:
+                  print(f"missing updater artifact for {platform}", file=sys.stderr)
+                  print("available files:", file=sys.stderr)
+                  for path in sorted(dist.iterdir()):
+                      print(f"  {path.name}", file=sys.stderr)
+                  sys.exit(1)
+              return matches[0]
+
+          platforms = {}
+          for platform, patterns in {
+              "darwin-aarch64": ["*aarch64*.tar.gz", "*arm64*.tar.gz"],
+              "darwin-x86_64": ["*x86_64*.tar.gz", "*x64*.tar.gz"],
+          }.items():
+              asset = find_update_asset(platform, patterns)
+              sig = pathlib.Path(str(asset) + ".sig")
+              if not sig.exists():
+                  print(f"missing updater signature for {asset.name}", file=sys.stderr)
+                  sys.exit(1)
+              platforms[platform] = {
+                  "signature": sig.read_text(encoding="utf-8").strip(),
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/{asset.name}",
+              }
+
+          manifest = {
+              "version": version,
+              "notes": notes,
+              "pub_date": datetime.datetime.now(datetime.timezone.utc)
+              .replace(microsecond=0)
+              .isoformat()
+              .replace("+00:00", "Z"),
+              "platforms": platforms,
+          }
+          (dist / "latest.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          shopt -s nullglob
+          release_flags=()
+          case "${GITHUB_REF_NAME}" in
+            *-alpha*|*-beta*|*-rc*) release_flags+=(--prerelease --latest=false) ;;
+          esac
+
+          release_assets=(dist-assets/*.dmg dist-assets/*.tar.gz dist-assets/*.sig)
+          if [ -f dist-assets/latest.json ]; then
+            release_assets+=(dist-assets/latest.json)
+          fi
+
+          if [ "${#release_assets[@]}" -eq 0 ]; then
+            echo "No release assets found" >&2
+            exit 1
+          fi
+
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
-            --notes "tiny-sql ${GITHUB_REF_NAME}" \
-            dist/*.dmg
+            --notes-file release-notes.md \
+            --verify-tag \
+            "${release_flags[@]}" \
+            "${release_assets[@]}"

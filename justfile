@@ -125,6 +125,10 @@ release tag:
     TAG="{{tag}}"
     # 剥离前缀 'v' 用于内部配置版本号
     VERSION="${TAG#v}"
+    IS_PRERELEASE=0
+    if [[ "$VERSION" == *-* ]]; then
+        IS_PRERELEASE=1
+    fi
 
     echo "🚀 开始基于版本 $TAG 构建发布流程..."
 
@@ -132,7 +136,9 @@ release tag:
     just version "$VERSION"
 
     echo "2️⃣ 自动更新 CHANGELOG.md..."
-    if [ -f CHANGELOG.md ] && grep -q '## \[Unreleased\]' CHANGELOG.md; then
+    if [ "$IS_PRERELEASE" -eq 1 ]; then
+        echo "   ℹ️ 预发布版本不切出 CHANGELOG，[Unreleased] 将用于 RC Release notes"
+    elif [ -f CHANGELOG.md ] && grep -q '## \[Unreleased\]' CHANGELOG.md; then
         TODAY=$(date +%Y-%m-%d)
         perl -i -pe "s/## \\[Unreleased\\]/## \\[Unreleased\\]\\n\\n---\\n\\n## [$VERSION] — $TODAY/" CHANGELOG.md
         echo "   ✅ CHANGELOG 已更新: [Unreleased] -> [$VERSION] — $TODAY"
@@ -141,8 +147,15 @@ release tag:
     fi
 
     echo "3️⃣ 提交本次发布变更到 Git..."
-    git add .
-    git commit -m "🔖 release: $TAG" || echo "⚠️ 暂无变更需要提交，跳过 Commit"
+    git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+    if [ "$IS_PRERELEASE" -eq 0 ]; then
+        git add CHANGELOG.md
+    fi
+    if git diff --cached --quiet; then
+        echo "⚠️ 暂无版本变更需要提交，跳过 Commit"
+    else
+        git commit -m "🔖 release: $TAG"
+    fi
 
     echo "4️⃣ 推送最新代码到当前远程分支..."
     git push origin HEAD

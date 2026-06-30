@@ -93,7 +93,7 @@ tiny-sql/
 - ❌ **passphrase 不落盘**（v0.1）—— 仅会话内存。
 - ❌ **不用 regex 检测 SQL 的 LIMIT** —— 会被注释/字符串/CTE/UNION 骗，用子查询包装。
 - ❌ **不向前端泄露原始 Rust 错误** —— 必须走 i18n key。
-- ❌ **不联网**（除用户配置的 SSH/MySQL 目标）—— 无遥测/更新检查/错误上报。
+- ❌ **不上传业务数据** —— 无遥测/错误上报；业务通信只访问用户配置的 SSH/MySQL 目标，自动更新只访问 GitHub Release 正式版清单。
 - ❌ **数据库设计不定义 FOREIGN KEY**（全局规则）—— 关联由代码与索引控制。
 - ❌ **keepalive 不要 30s/1 次即报** —— 用 60s + 连续 3 次，防误报。
 - ❌ **不把暗色切成 `.dark` class 策略** —— 保持 Tailwind v4 默认 `prefers-color-scheme`（跟随系统），shadcn 主题变量在 `@media` 下随系统切换，避免现有满屏 `dark:` 工具类失效。

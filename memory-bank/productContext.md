@@ -72,7 +72,7 @@ hop[0] 仍绿 → 立刻判定是堡垒机问题
 | MySQL 版本 | 必须同时支持 5.7（`mysql_native_password`）和 8.0（`caching_sha2_password`） | 5.7 EOL 但国内仍大量在用 |
 | passphrase | 私钥 passphrase 仅会话内存，进程退出即丢，v0.1 不持久化 | 安全；v0.2 用主密码加密存储 |
 | 小库假设 | v0.1 ≤ 30 schema、≤ 200 表/schema，不做搜索/分页/cache | 控制 v0.1 复杂度 |
-| 不签名 | v0.1 无苹果开发者证书，README 教 `xattr -cr` | 避免 $99/年阻塞首发 |
+| 无 Apple Developer 代码签名 | v0.1 无苹果开发者证书，README 教 `xattr -cr`；Tauri updater 签名只校验更新包完整性 | 避免 $99/年阻塞首发 |
 
 ## 交互逻辑（具体规则）
 

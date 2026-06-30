@@ -3,6 +3,7 @@
 // Week 2 暂用静态 map 翻译错误；Week 3 接 i18next 后替换 translateError。
 
 import { invoke } from "@tauri-apps/api/core";
+import type { DownloadEvent as TauriDownloadEvent } from "@tauri-apps/plugin-updater";
 
 export function isTauriRuntime(): boolean {
   if (typeof process !== "undefined" && process.env.VITEST) return true;
@@ -79,6 +80,74 @@ export function translateError(e: unknown): string {
   const key = typeof e === "string" ? e : String(e);
   return ERROR_ZH[key] ?? key;
 }
+
+// === 应用更新 ===
+
+/** Tauri updater 检测到的新版本信息 */
+export interface UpdateInfo {
+  currentVersion: string;
+  version: string;
+  date?: string;
+  body?: string;
+}
+
+/** 更新包下载事件 */
+export type UpdateDownloadEvent = TauriDownloadEvent;
+
+export const updateApi = {
+  async getAppVersion(): Promise<string> {
+    if (!isTauriRuntime()) {
+      return process.env.NEXT_PUBLIC_APP_VERSION ?? "";
+    }
+    const { getVersion } = await import("@tauri-apps/api/app");
+    return getVersion();
+  },
+
+  async check(): Promise<UpdateInfo | null> {
+    if (!isTauriRuntime()) return null;
+
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    if (!update) return null;
+
+    try {
+      return {
+        currentVersion: update.currentVersion,
+        version: update.version,
+        date: update.date,
+        body: update.body,
+      };
+    } finally {
+      await update.close();
+    }
+  },
+
+  async downloadAndInstall(
+    onEvent?: (event: UpdateDownloadEvent) => void,
+  ): Promise<void> {
+    if (!isTauriRuntime()) {
+      throw new Error("仅桌面应用支持自动更新");
+    }
+
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    if (!update) {
+      throw new Error("当前已是最新版本");
+    }
+
+    try {
+      await update.downloadAndInstall(onEvent);
+    } finally {
+      await update.close();
+    }
+  },
+
+  async relaunch(): Promise<void> {
+    if (!isTauriRuntime()) return;
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  },
+};
 
 /** 连接管理相关 command */
 export const connectionApi = {

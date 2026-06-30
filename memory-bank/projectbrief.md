@@ -22,9 +22,9 @@
 
 ## v0.1 范围与交付物
 
-- **范围**：MySQL only（5.7 + 8.0）+ 3 跳 SSH + 拓扑图 + macOS only（arm64 + x64）+ zh-CN only + 不签名。
+- **范围**：MySQL only（5.7 + 8.0）+ 3 跳 SSH + 拓扑图 + macOS only（arm64 + x64）+ zh-CN only + 正式版自动更新；v0.1 无 Apple Developer 代码签名 / notarization。
 - **预算**：5-6 周 × 12-13 小时/周 = 60-75 小时。
-- **交付物**：GitHub Releases 上的 `.dmg`；tag `v0.1.0` 触发 CI 自动构建上传。
+- **交付物**：GitHub Releases 上的 `.dmg`、Tauri updater `.app.tar.gz` / `.sig` 与正式版 `latest.json`；tag `v0.1.0` 触发 CI 自动构建上传。
 - **发布门槛**：作者 + 2 同事 dogfooding ≥ 1 周，0 数据丢失、0 不可恢复 crash。
 
 ## 关键产品决策
@@ -32,7 +32,7 @@
 - **Approach B（Clean Workspace）**：独立 crate（`ssh-multihop` / `db-driver`），未来可独立 publish，仓库诞生即干净。
 - **v0.1 具体 struct，v0.2 才抽 trait**：避免单实现 trait 的过早抽象。
 - **best-effort 只读保护**：正则二次确认，真正只读建议用 MySQL 只读账号。
-- **仅本地、不联网**：无遥测、无更新检查、无错误上报。
+- **仅本地数据**：无遥测、无错误上报；自动更新只访问 GitHub Release 的正式版更新清单。
 
 ## 配套文档
 

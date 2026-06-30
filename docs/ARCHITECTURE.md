@@ -939,10 +939,11 @@ interface SshHop {
 
 ## 8. 安全考虑
 
-### 8.1 仅本地通信
+### 8.1 仅本地业务通信
 
-- tiny-sql **不发起任何外网请求**（除了用户配置的 SSH/MySQL 目标）
-- 无遥测、无错误上报、无更新检查（v0.1）
+- tiny-sql 不上传连接配置、SQL、查询结果或错误日志。
+- 业务通信只访问用户配置的 SSH/MySQL 目标；自动更新只访问 GitHub Release 的正式版更新清单。
+- 无遥测、无错误上报。
 - 这是开源信任的前提
 
 ### 8.2 known_hosts 隔离
@@ -1062,4 +1063,3 @@ FR-024 描述。正则 `/^\s*(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CRE
 1. **SSH keepalive 机制**（§4.4，FR-014）：设计文档未写，eng review 拍板加入
 2. **状态机 lost 状态**（§4.2）：keepalive 失败的视觉区分
 3. **每个 SshTunnelError 变体都带 hop_index**（§4.3）：FR-013 完整实现
-

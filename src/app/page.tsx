@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PlusIcon, RefreshCwIcon } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ConnectionDialogs } from "@/components/connection-dialogs";
 import { ConnectionForm } from "@/components/connection-form";
 import { SchemaBrowser } from "@/components/schema-browser";
+import { UpdateDialog } from "@/components/update-dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -13,7 +15,9 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { useUpdateChecker } from "@/hooks/use-update-checker";
 import type { StoredConnection } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
@@ -40,6 +44,14 @@ export default function Home() {
   const openConnection = useSessionStore((s) => s.open);
   const closeConnection = useSessionStore((s) => s.close);
   const confirm = useConfirmStore((s) => s.confirm);
+  const {
+    updateInfo,
+    checking: checkingUpdate,
+    checkError,
+    checkNotice,
+    manualCheck,
+    dismissUpdate,
+  } = useUpdateChecker();
 
   useEffect(() => {
     load();
@@ -104,6 +116,7 @@ export default function Home() {
     <main className="flex h-screen">
       <ConnectionDialogs />
       <ConfirmDialog />
+      <UpdateDialog updateInfo={updateInfo} onDismiss={dismissUpdate} />
 
       {/* 新建 / 编辑连接弹窗 */}
       <Dialog
@@ -137,15 +150,41 @@ export default function Home() {
               draggable={false}
             />
           </h1>
-          <button
-            onClick={startCreate}
-            className="rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
-          >
-            + 新建
-          </button>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              title={checkingUpdate ? "正在检查更新" : "检查更新"}
+              onClick={() => void manualCheck()}
+              disabled={checkingUpdate}
+            >
+              <RefreshCwIcon
+                data-icon="inline-start"
+                className={cn(checkingUpdate && "animate-spin")}
+              />
+              <span className="sr-only">检查更新</span>
+            </Button>
+            <Button type="button" size="sm" onClick={startCreate}>
+              <PlusIcon data-icon="inline-start" />
+              新建
+            </Button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {(checkError || checkNotice) && (
+            <p
+              className={cn(
+                "border-b px-3 py-2 text-xs",
+                checkError
+                  ? "border-destructive/20 text-destructive"
+                  : "border-neutral-100 text-neutral-500 dark:border-neutral-900",
+              )}
+            >
+              {checkError ? `检查更新失败：${checkError}` : checkNotice}
+            </p>
+          )}
           {loading && connections.length === 0 && (
             <p className="p-3 text-sm text-neutral-500">加载中…</p>
           )}

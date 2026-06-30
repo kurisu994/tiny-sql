@@ -6,11 +6,11 @@
 
 | 版本 | 状态 | 说明 |
 |---|---|---|
-| v0.1.0 | 🚧 开发中（Week 5 dogfooding 已启动） | MySQL + 3 跳 SSH + 拓扑图 + macOS only，预期 2026-08 月初发布 |
-| v0.2 | 规划 | PG driver + 自动更新 + passphrase 加密 + TLS + Schema-aware 联想 |
+| v0.1.0 | 🚧 开发中（Week 5 dogfooding 已启动） | MySQL + 3 跳 SSH + 拓扑图 + macOS only + 正式版自动更新，预期 2026-08 月初发布 |
+| v0.2 | 规划 | PG driver + passphrase 加密 + TLS + Schema-aware 联想 |
 | v0.3+ | 规划 | Win/Linux + crate 独立 publish + 多集群 diff |
 
-CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新；Week 5：release workflow 双架构打包与发布检查清单、连接管理 UI 接入 shadcn（右键菜单 / 弹窗 / 确认弹窗））。
+CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新；Week 5：release workflow 双架构打包 + CHANGELOG release notes 提取、Tauri updater 自动更新、发布检查清单、连接管理 UI 接入 shadcn（右键菜单 / 弹窗 / 确认弹窗））。RC 发布不消费 `[Unreleased]`，正式版才切出 `0.1.0`。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -47,10 +47,11 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 | `67a1d70` | docs: 启动 Week 5 dogfooding |
 | `b5a137d` | docs: 完善 Week 5 发布准备 |
 | `705ef8e` | feat(ui): 连接列表改用右键菜单与 shadcn 弹窗 |
-| `d91dd43` | refactor(ui): 右键菜单改用 shadcn ContextMenu（HEAD） |
+| `d91dd43` | refactor(ui): 右键菜单改用 shadcn ContextMenu |
+| `03ee5be` | docs: 同步连接列表右键菜单与 shadcn 接入（HEAD / origin/main） |
 
 > 注：`d0973ef`（含）之前已 push 到远端 `git@github.com:kurisu994/tiny-sql.git`；
-> 当前本地 `main` 较本地跟踪的 `origin/main` ahead 1（本轮提交尚未 push）；未执行 `git fetch`，远端实时状态以 GitHub 为准。
+> 当前本地 `main` 在 `03ee5be` 之后有未提交的发布/自动更新改动；发 RC 前需先整理提交并刷新远端状态。
 
 ## 重大决策与架构变更记录
 
@@ -68,7 +69,10 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 - **2026-06-27 Week 4 本地 .dmg 产出**：`pnpm tauri build` 已生成 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`；CI release workflow 使用 GitHub 官方 `macos-15` arm64 runner。
 - **2026-06-29 Week 5 dogfooding 启动**：README 更新到发布前试用口径，新增脱敏 `docs/dogfooding-log.template.md`，本地忽略的 `docs/dogfooding-log.md` 记录验证；`just check`、沙箱外 `just test-integration`、沙箱外 `just build` 均通过。
 - **2026-06-29 Week 5 release workflow 收口**：`release.yml` 从单 arm64 job 改为 `macos-15` Apple Silicon + `macos-15-intel` Intel 矩阵构建，上传 artifact 后由单独 release job 创建 GitHub Release；新增 `docs/RELEASE_CHECKLIST.md` 固化 RC、dogfooding、正式发布和延期规则。
-- **2026-06-29 连接管理 UI 接入 shadcn/ui**：连接列表去掉行内「连接」按钮改 Navicat 式右键菜单（shadcn `ContextMenu`）；新建/编辑改 `Dialog` 弹窗；二次确认用 `AlertDialog` + 全局 `confirm-store` 替代 `window.confirm`。`shadcn init` 选 radix-nova / radix；暗色改回 `prefers-color-scheme` 跟随系统（不切 `.dark` class，现有 `dark:` 零迁移），并还原 system 中文字体栈（移除 init 引入的 Geist）。提交 `705ef8e` + `d91dd43`，`tsc` / `next build` 通过，未 push。
+- **2026-06-30 release notes 自动化补齐**：publish job checkout 仓库后从 `CHANGELOG.md` 生成 GitHub Release notes；正式版取当前 tag 版本段，预发布 tag 找不到独立版本段时取 `[Unreleased]`。`v*-rc*` / beta / alpha tag 自动加 `--prerelease --latest=false`，正式版继续作为普通 Release。`just release` 也改为 RC 不切 CHANGELOG，避免 `v0.1.0` 正式版 notes 变空。
+- **2026-06-29 连接管理 UI 接入 shadcn/ui**：连接列表去掉行内「连接」按钮改 Navicat 式右键菜单（shadcn `ContextMenu`）；新建/编辑改 `Dialog` 弹窗；二次确认用 `AlertDialog` + 全局 `confirm-store` 替代 `window.confirm`。`shadcn init` 选 radix-nova / radix；暗色改回 `prefers-color-scheme` 跟随系统（不切 `.dark` class，现有 `dark:` 零迁移），并还原 system 中文字体栈（移除 init 引入的 Geist）。提交 `705ef8e` + `d91dd43`，`tsc` / `next build` 通过；后续 `03ee5be` 已把相关文档同步到 `origin/main`。
+- **2026-06-30 正式版发布准备复盘**：对照 `redis-desktop-client` 的 release-prep 经验后，tiny-sql v0.1 保持 macOS only / GitHub Release `.dmg` / 无 Apple Developer 代码签名；正式版前必须先完成 `v0.1.0-rc1` 双架构产物验证、真实 3 跳 GUI dogfooding、MySQL 5.7 验证、作者 + 2 同事 1 周试用、README/GIF 与 `CHANGELOG.md` 切版。
+- **2026-06-30 正式版自动更新接入**：提前把 `tauri-plugin-updater` / `tauri-plugin-process` 纳入 v0.1。Tauri config 启用 `bundle.createUpdaterArtifacts=true`，内置 updater 公钥和 GitHub latest `latest.json` endpoint；前端新增每日自动检查、手动检查、下载进度和安装后重启提示。Release workflow 使用 `TAURI_SIGNING_PRIVATE_KEY` 生成 `.app.tar.gz.sig`，正式版生成 `latest.json`，RC / beta / alpha 只作为手动下载预发布，不作为自动更新源。Tauri updater minisign 签名不等于 Apple Developer 代码签名，首次打开摩擦仍按 README 处理。
 
 ## 已解决的阻碍
 
@@ -86,8 +90,12 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 - **CP-4 / GUI dogfooding**：待真实环境 `pnpm tauri dev` 或安装 `.dmg`。Week 4 后需验收：配 3 跳 SSH 连真实 MySQL、TOFU 首次弹窗/已信任静默/指纹变更硬拒绝、passphrase 首次弹窗本会话静默、左侧树点表看前 1000 行、SQL 编辑器 SELECT/JOIN/聚合、`SELECT SLEEP(60)` 取消后 `SHOW PROCESSLIST` 消失、故意 kill 中间跳 sshd 验证 180s 内 hop 变 lost。
 - **CP-2** Week 2/3 累计工时检查（PLAN §3.3）：未正式记录工时，下次同步补。
 - **CP-3** MySQL 5.7 `caching_sha2`/`native_password` 兼容：推到 Week 5 dogfooding（不进 CI）。
+- **RC 产物验证**：尚未创建 `v0.1.0-rc1` / `v0.1.0` tag；release workflow 的 Apple Silicon + Intel `.dmg` 仍需通过真实 GitHub Actions run 验证。
+- **发布脚本暂存范围**：`just release` 已收窄到版本/CHANGELOG 相关文件；正式发版前仍必须确认工作区没有无关改动。
+- **自动更新 GitHub Secrets**：release workflow 依赖 `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。本地按 Redis 项目方式把真实私钥写入 ignored `.env`，`just build` 会加载；直接 `pnpm tauri build` 不经 justfile 注入 `.env`，仍需手动 export，且无密码私钥要显式保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`。
 - **R-001** Tauri+workspace 摩擦：已规避（CP-1 通过）。
 - **R-002** caching_sha2 握手：Week 5 验证。
 - **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task（PLAN §4.3 风险）。
+- **R-updater-release** 自动更新端到端仍需真实 Release 验证：本地已生成 `.app.tar.gz.sig`，但 GitHub Actions 双架构 artifact、正式版 `latest.json`、旧版本发现新正式版并安装重启仍待 RC/正式版流程验证。
 
 相关：[[activeContext]] · [[projectbrief]]

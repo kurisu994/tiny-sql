@@ -7,7 +7,18 @@
 - 平台：macOS Apple Silicon + Intel。
 - 数据库：MySQL 5.7 / 8.0 / 8.4。
 - 连接：0 跳 / 1 跳 / 3 跳 SSH；v0.1 不支持 GSSAPI / Kerberos。
-- 分发：GitHub Release `.dmg`，v0.1 不签名，README 提供右键打开与 `xattr -cr` 说明。
+- 分发：GitHub Release `.dmg` + Tauri updater 签名更新包；v0.1 无 Apple Developer 代码签名 / notarization，README 仍提供右键打开与 `xattr -cr` 说明。
+
+## 0. 自动更新签名准备
+
+自动更新使用 Tauri updater 的 minisign 签名，不等同于 macOS 代码签名。Release workflow 需要以下 GitHub Secrets：
+
+- `TAURI_SIGNING_PRIVATE_KEY`：`pnpm tauri signer generate --write-keys <path> --ci` 生成的私钥内容。
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码；当前私钥未设置密码时可留空。
+
+当前 `src-tauri/tauri.conf.json` 已启用 `bundle.createUpdaterArtifacts=true`，所以本地构建也需要提供同一组环境变量，否则 Tauri 无法生成 updater artifact。推荐按 `redis-desktop-client` 的方式写入本地 `.env`，再通过 `just build` 构建；`justfile` 会自动加载 `.env`。
+
+直接运行 `pnpm tauri build` 不会由 `justfile` 注入 `.env`，需要先手动 export 变量。本轮生成的本地 updater 私钥没有设置密码；本地验证时仍需显式传或在 `.env` 中保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`，避免 Tauri 退回交互式密码读取。
 
 ## 1. RC 前本地检查
 
@@ -24,7 +35,7 @@ just build
 
 - `just check` 通过：Rust fmt/clippy/test、Vitest、Next build 全绿。
 - `just test-integration` 在本地 MySQL 环境通过，不把 `.env` 或连接串写入日志。
-- `just build` 产出 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`。
+- `just build` 从 `.env` 读取 updater 签名变量后产出 `.dmg`、`.app.tar.gz` 与 `.sig`。
 - `CHANGELOG.md` 的 `[Unreleased]` 段覆盖本次用户可见变更。
 
 ## 2. RC 发布
@@ -39,7 +50,10 @@ GitHub Actions 期望产物：
 
 - Apple Silicon `.dmg`：`macos-15` runner 构建。
 - Intel `.dmg`：`macos-15-intel` runner 构建。
-- `Publish GitHub Release` job 等两个 `.dmg` artifact 都上传后再创建 GitHub Release。
+- 每个架构同时上传 `.dmg`、`.app.tar.gz` 与 `.sig`。
+- `Publish GitHub Release` job 等两个架构 artifact 都上传后再创建 GitHub Release。
+- GitHub Release notes 从 `CHANGELOG.md` 提取：正式版优先取对应版本段，RC 若没有独立版本段则取 `[Unreleased]`；RC tag 会标记为 prerelease，且不设为 latest。
+- RC 不生成 `latest.json`，不会成为应用内自动更新源。
 
 RC 下载后至少验证：
 
@@ -87,7 +101,9 @@ tiny-sql v0.1.0-rc1 试用：
 - CP-6：作者 + 2 同事试用 1 周，0 数据丢失，0 不可恢复 crash。
 - README 已包含右键打开说明；真实 GIF 若尚未录制，必须明确延期并不在发布文案里承诺。
 - `CHANGELOG.md` 已从 `[Unreleased]` 切出 `0.1.0`。
-- GitHub Release 中有 Apple Silicon 与 Intel 两个 `.dmg`。
+- GitHub Secrets 已配置 updater 私钥。
+- GitHub Release 中有 Apple Silicon 与 Intel 两个 `.dmg`，并有两个架构的 `.app.tar.gz` / `.sig`。
+- GitHub Release 中有 `latest.json`，且 `platforms.darwin-aarch64` / `platforms.darwin-x86_64` 的 URL 指向当前 tag 资产。
 
 正式发布命令：
 
@@ -98,6 +114,8 @@ just release v0.1.0
 发布后检查：
 
 - GitHub Release 页面能下载两个 `.dmg`。
+- GitHub Release 页面能下载 `latest.json`，应用内手动检查更新能发现正式版（从旧版本验证）。
+- Release notes 与 `CHANGELOG.md` 的 `0.1.0` 版本段一致。
 - 下载产物能在一台干净 Mac 上打开并连接测试库。
 - README 的下载链接、右键打开说明与当前 Release 一致。
 

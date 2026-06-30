@@ -27,6 +27,8 @@
 - 测试基础设施：前端 `vitest` + `@testing-library/react`；`db-driver` integration 测试连本地 MySQL（`TINY_SQL_TEST_MYSQL_URL`，默认 `#[ignore]`）。
 - GitHub Actions CI（macOS arm64）：`cargo fmt --check` + `clippy` + `cargo test` + `vitest` + 前端 build。
 - GitHub Actions release job：`v0.1.*` tag 触发 macOS Apple Silicon + Intel 双架构 Tauri build，并在两个 `.dmg` 都上传后创建 GitHub Release。
+- GitHub Release notes 改为从 `CHANGELOG.md` 提取；正式版取对应版本段，RC 可直接复用 `[Unreleased]`，且 `v*-rc*` tag 自动标记为 prerelease、不设为 latest。
+- GitHub Actions release job 接入 Tauri updater 签名：构建 `.dmg`、`.app.tar.gz` 与 `.sig`，正式版发布时额外生成 `latest.json`；RC / beta / alpha 不生成自动更新源。
 - ⏸️ playwright E2E 因 Tauri WebDriver 不支持 macOS 推迟（留将来 Linux CI / Week 5 dogfooding）。
 
 ### ✨ 新功能
@@ -56,6 +58,7 @@
 - **持久连接**：`connection_open` / `connection_close` 把（可选）SSH 隧道 + MySQL 连接池存入 `AppState` 活跃注册表，生命周期绑定（先关 pool 后关隧道）；私钥 passphrase 首次输入后**会话内缓存**（NFR-011），下次打开静默。
 - 前端：左侧连接列表 + 右侧编辑表单（`zustand`），SSH 跳板折叠区可配 N 跳（增删 / 调序）；TOFU 指纹确认、passphrase、隧道断开提示弹窗。
 - 拓扑图：按“本机 → hop[0..N-1] → MySQL”绘制纯 CSS 静态链路，节点状态支持 `pending` / `connected` / `failed` / `lost`；运行期 lost 继续来自 `ssh:hop-status`，连接阶段 pending/connected/failed 由 Tauri command 补齐。
+- **自动更新**：接入 `tauri-plugin-updater` + `tauri-plugin-process`，启动后每日检查一次 GitHub Release 正式版，也可手动检查；发现更新后展示版本说明、下载进度，并在安装完成后提示重启。
 
 #### 数据浏览（src-tauri + 前端）
 

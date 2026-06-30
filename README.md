@@ -17,7 +17,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 - **keepalive 感知断开**，隧道任意一跳挂掉 180s 内推送到 UI
 - 纯 Rust 异步 SSH（russh），跨平台无需系统 `ssh` / `sshpass`
 
-自用 + 同事可用 + 开源。不收费、不联网、仅本地。
+自用 + 同事可用 + 开源。不收费、无遥测、业务数据仅本地；自动更新只访问 GitHub Release 的正式版清单。
 
 ## v0.1 当前能力
 
@@ -26,7 +26,8 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 - SQL 执行：拒绝空 SQL / 多语句，`SELECT` / `WITH` 后端子查询包装，SQL 编辑器结果上限 10 万行。
 - SQL 取消：执行时记录 MySQL `CONNECTION_ID()`，取消时通过独立 control pool 发 `KILL QUERY`。
 - 拓扑状态：本机 → N 跳 → MySQL 的只读拓扑图，支持 `pending` / `connected` / `failed` / `lost`。
-- macOS 打包：本地已能产出 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`，GitHub Release workflow 监听 `v0.1.*` tag。
+- macOS 打包：GitHub Release workflow 监听 `v0.1.*` tag，产出 Apple Silicon + Intel `.dmg`，正式版同时发布 Tauri 自动更新清单。
+- 自动更新：桌面端启动后每日检查一次正式版更新，也可在左侧工具区手动检查；RC / beta / alpha 不作为自动更新源。
 
 ## 技术栈
 
@@ -38,7 +39,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 | SSH 隧道 | russh 0.54（N 跳，纯 Rust 异步） |
 | 数据库 | sqlx 0.8（MySQL；v0.2 加 PostgreSQL） |
 
-> v0.2 之后再考虑 PostgreSQL、自动更新、MySQL TLS、SQL 历史、导出与 schema-aware 智能联想。详见 [ROADMAP](./docs/ROADMAP.md)。
+> v0.2 之后再考虑 PostgreSQL、MySQL TLS、SQL 历史、导出与 schema-aware 智能联想。详见 [ROADMAP](./docs/ROADMAP.md)。
 
 ## 开发环境准备
 
@@ -119,9 +120,11 @@ justfile                    # 项目命令入口
 
 v0.1 仅提供 **macOS（Apple Silicon + Intel）** `.dmg`；Windows / Linux 推到 v0.3。
 
+正式版会在 GitHub Release 中附带 `latest.json` 与签名更新包，应用内自动更新只跟随 GitHub 的 latest 正式版。`v*-rc*`、beta、alpha 预发布版本仍需手动下载验证。
+
 ### macOS 首次打开
 
-v0.1 暂未配置代码签名证书。安装 `.dmg` 后首次打开时，优先在 Finder 中对 `tiny-sql.app` 右键选择「打开」，再在系统弹窗中确认打开。
+v0.1 暂未配置 Apple Developer 代码签名 / notarization。安装 `.dmg` 后首次打开时，优先在 Finder 中对 `tiny-sql.app` 右键选择「打开」，再在系统弹窗中确认打开。
 
 如果仍提示**"已损坏，无法打开"**，在终端执行：
 
