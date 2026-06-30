@@ -22,9 +22,9 @@
 
 ## v0.1 范围与交付物
 
-- **范围**：MySQL only（5.7 + 8.0）+ 3 跳 SSH + 拓扑图 + macOS only（arm64 + x64）+ zh-CN only + 正式版自动更新；v0.1 无 Apple Developer 代码签名 / notarization。
+- **范围**：MySQL only（5.7 + 8.0）+ 3 跳 SSH + 拓扑图 + macOS arm64/x64、Windows x64、Linux x64 打包 + zh-CN only + 正式版自动更新；v0.1 无 Apple Developer 代码签名 / notarization。
 - **预算**：5-6 周 × 12-13 小时/周 = 60-75 小时。
-- **交付物**：GitHub Releases 上的 `.dmg`、Tauri updater `.app.tar.gz` / `.sig` 与正式版 `latest.json`；tag `v0.1.0` 触发 CI 自动构建上传。
+- **交付物**：GitHub Releases 上的 `.dmg` / `.exe` / `.AppImage`、Tauri updater artifact / `.sig` 与正式版 `latest.json`；tag `v0.1.0` 触发 CI 自动构建上传。
 - **发布门槛**：作者 + 2 同事 dogfooding ≥ 1 周，0 数据丢失、0 不可恢复 crash。
 
 ## 关键产品决策

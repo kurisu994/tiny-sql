@@ -26,12 +26,13 @@
 - 连接配置加密：复用 AES-256-GCM + master key（0600），tiny-sql 对**整个 `connections.enc` 文件**加密（满足 FR-001：明文 host/user/password 不落盘）。
 - 测试基础设施：前端 `vitest` + `@testing-library/react`；`db-driver` integration 测试连本地 MySQL（`TINY_SQL_TEST_MYSQL_URL`，默认 `#[ignore]`）。
 - GitHub Actions CI（macOS arm64）：`cargo fmt --check` + `clippy` + `cargo test` + `vitest` + 前端 build。
-- GitHub Actions release job：`v0.1.*` tag 触发 macOS Apple Silicon + Intel 双架构 Tauri build，并在两个 `.dmg` 都上传后创建 GitHub Release。
+- GitHub Actions release job：`v0.1.*` tag 触发 macOS Apple Silicon + Intel、Windows x64、Linux x64 Tauri build，并在全平台产物都上传后创建 GitHub Release。
 - GitHub Actions CI 对 `just release` 产生的版本号 / CHANGELOG 提交启用路径忽略，发布时只由 tag 触发 `release.yml` 打包，避免同一发布流程重复跑 `ci.yml`。
 - GitHub Release notes 改为从 `CHANGELOG.md` 提取；正式版取对应版本段，RC 可直接复用 `[Unreleased]`，且 `v*-rc*` tag 自动标记为 prerelease、不设为 latest。
-- GitHub Actions release job 接入 Tauri updater 签名：构建 `.dmg`、`.app.tar.gz` 与 `.sig`，正式版发布时额外生成 `latest.json`；RC / beta / alpha 不生成自动更新源。
+- GitHub Actions release job 接入 Tauri updater 签名：构建 macOS `.dmg` / `.app.tar.gz`、Windows `.exe`、Linux `.AppImage` / `.AppImage.tar.gz` 与对应 `.sig`，正式版发布时额外生成 `latest.json`；RC / beta / alpha 不生成自动更新源。
 - 修复 GitHub Actions release job 上传路径：Tauri workspace 构建产物位于根目录 `target/release/bundle`，避免 `upload-artifact` 继续读取 `src-tauri/target/...` 后报 `No files were found`。
 - 升级 GitHub Actions 中的 `checkout` / `setup-node` / `pnpm/action-setup` / artifact actions 到 Node 24 runtime 版本，消除 Node.js 20 deprecation warning。
+- `just version` 同步刷新 `Cargo.lock` 中 `tiny-sql` 本地 package 的版本号，避免 release 提交遗漏 lockfile 版本变更。
 - ⏸️ playwright E2E 因 Tauri WebDriver 不支持 macOS 推迟（留将来 Linux CI / Week 5 dogfooding）。
 
 ### ✨ 新功能
@@ -70,7 +71,7 @@
 - 结果表格改为 `react-virtuoso` 虚拟滚动，复用表浏览与 SQL 编辑器结果展示。
 - TOFU 信任库 `known_hosts.json`（自有 store，**不碰** `~/.ssh/known_hosts`，NFR-012）。
 
-#### macOS 打包
+#### 桌面打包
 
 - 本地 `pnpm tauri build` 已产出 `/target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`。
 

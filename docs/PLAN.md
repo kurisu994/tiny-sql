@@ -260,7 +260,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 - [ ] 长查询取消：control conn KILL QUERY 发出，`SHOW PROCESSLIST` 中 query 消失
 - [ ] 只读保护：DROP/DELETE/UPDATE 命中弹确认
 - [ ] 拓扑图按"本地 → hop[..] → MySQL"画对，节点状态实时变化
-- [ ] tag `v0.1.0-rc1` 后 GitHub Releases 出现 .dmg
+- [ ] tag `v0.1.0-rc1` 后 GitHub Releases 出现 macOS / Windows / Linux 桌面安装包
 - [ ] **CP-4 dogfooding 准入**
 
 ### 5.3 Week 4 末检查点（CP-4，dogfooding 准入）
@@ -292,20 +292,20 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 
 **T5.1 [自然 1 周，约 5h dev]** 作者自用，每次问题写一行 `docs/dogfooding-log.md`（不公开）。优先级：crash/数据错 > 连接失败 > UX 别扭 > 美化
 
-**T5.2 [自然 1 周，约 0 dev]** 同事试用：找 2 位同事发 .dmg，配自己的 3 跳生产环境用 1 周，每人 ≥ 5 条反馈。**其中 1 位用 MySQL 5.7 验证 caching_sha2 兼容（CP-3 在此完成，非 CI）**
+**T5.2 [自然 1 周，约 0 dev]** 同事试用：找 2 位同事发对应系统安装包，配自己的 3 跳生产环境用 1 周，每人 ≥ 5 条反馈。**其中 1 位用 MySQL 5.7 验证 caching_sha2 兼容（CP-3 在此完成，非 CI）**
 
 **T5.3 [4h] 修 critical bug**：仅修 dogfooding 暴露的 P0/P1，P2 推 v0.1.1
 
 **T5.4 [2h] README + GIF**：顶部"右键打开"GIF；中部核心卖点 GIF（3 跳隧道 + 拓扑图 + 故意挂第 2 跳变红）；中文 README 为主，英文留 placeholder
 
-**T5.5 [2h] 发布**：CHANGELOG 0.1.0 → bump version → tag v0.1.0 push → CI 出 .dmg → GitHub Releases → Discussions 发帖
+**T5.5 [2h] 发布**：CHANGELOG 0.1.0 → bump version → tag v0.1.0 push → CI 出全平台桌面安装包 → GitHub Releases → Discussions 发帖
 
 ### 6.2 验收点
 
 - [ ] 作者 + 2 同事用 ≥ 1 周，0 数据丢失，0 不可恢复 crash（FR-041）
 - [ ] **CP-3**：MySQL 5.7 在同事环境验证通过
 - [ ] README 含右键打开 GIF + 3 跳隧道 GIF
-- [ ] tag v0.1.0 发布成功，下载的 .dmg 能跑
+- [ ] tag v0.1.0 发布成功，下载的 macOS / Windows / Linux 安装包能跑
 
 ### 6.3 风险
 

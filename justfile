@@ -109,6 +109,8 @@ version bump:
     sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml && rm src-tauri/Cargo.toml.bak
     # tauri.conf.json
     sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json && rm src-tauri/tauri.conf.json.bak
+    # 刷新 Cargo.lock 里本地 tiny-sql package 的版本号，避免重新解依赖导致 lockfile 漂移。
+    perl -0pi -e "s/(\[\[package\]\]\nname = \"tiny-sql\"\nversion = \")[^\"]+(\")/\${1}${VERSION}\${2}/s or die \"tiny-sql package not found in Cargo.lock\n\"" Cargo.lock
     echo "✅ Version updated to $VERSION"
 
 # 打包发布全流程（更新版本号、提交、推主干、打 Tag 触发云端构建）

@@ -26,7 +26,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 - SQL 执行：拒绝空 SQL / 多语句，`SELECT` / `WITH` 后端子查询包装，SQL 编辑器结果上限 10 万行。
 - SQL 取消：执行时记录 MySQL `CONNECTION_ID()`，取消时通过独立 control pool 发 `KILL QUERY`。
 - 拓扑状态：本机 → N 跳 → MySQL 的只读拓扑图，支持 `pending` / `connected` / `failed` / `lost`。
-- macOS 打包：GitHub Release workflow 监听 `v0.1.*` tag，产出 Apple Silicon + Intel `.dmg`，正式版同时发布 Tauri 自动更新清单。
+- 跨平台打包：GitHub Release workflow 监听 `v0.1.*` tag，产出 macOS Apple Silicon + Intel `.dmg`、Windows x64 `.exe`、Linux x64 `.AppImage`，正式版同时发布 Tauri 自动更新清单。
 - 自动更新：桌面端启动后每日检查一次正式版更新，也可在左侧工具区手动检查；RC / beta / alpha 不作为自动更新源。
 
 ## 技术栈
@@ -116,9 +116,9 @@ justfile                    # 项目命令入口
 
 ## 安装
 
-> v0.1 尚未正式发布。Week 5 dogfooding 使用本地或 GitHub Release 产出的 `.dmg`；正式发布后前往 [Releases](https://github.com/kurisu994/tiny-sql/releases) 下载。
+> v0.1 尚未正式发布。Week 5 dogfooding 使用本地或 GitHub Release 产出的桌面安装包；正式发布后前往 [Releases](https://github.com/kurisu994/tiny-sql/releases) 下载。
 
-v0.1 仅提供 **macOS（Apple Silicon + Intel）** `.dmg`；Windows / Linux 推到 v0.3。
+v0.1 先提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`；Windows / Linux 产物先用于 dogfooding 与兼容验证。
 
 正式版会在 GitHub Release 中附带 `latest.json` 与签名更新包，应用内自动更新只跟随 GitHub 的 latest 正式版。`v*-rc*`、beta、alpha 预发布版本仍需手动下载验证。
 
