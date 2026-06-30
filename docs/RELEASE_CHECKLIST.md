@@ -40,7 +40,7 @@ just build
 
 ## 2. RC 发布
 
-`just release` 会修改版本、提交、push、打 tag 并触发 GitHub Release。执行前确认工作区只包含发布相关改动。
+`just release` 会修改版本、提交、push、打 tag 并触发 GitHub Release。版本提交只包含 `package.json`、`Cargo.lock`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 和必要的 `CHANGELOG.md` 时，`ci.yml` 会跳过该分支 push，随后由 tag push 触发 `release.yml` 打包。执行前确认工作区只包含发布相关改动。
 
 ```bash
 just release v0.1.0-rc1

@@ -73,6 +73,7 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 - **2026-06-29 连接管理 UI 接入 shadcn/ui**：连接列表去掉行内「连接」按钮改 Navicat 式右键菜单（shadcn `ContextMenu`）；新建/编辑改 `Dialog` 弹窗；二次确认用 `AlertDialog` + 全局 `confirm-store` 替代 `window.confirm`。`shadcn init` 选 radix-nova / radix；暗色改回 `prefers-color-scheme` 跟随系统（不切 `.dark` class，现有 `dark:` 零迁移），并还原 system 中文字体栈（移除 init 引入的 Geist）。提交 `705ef8e` + `d91dd43`，`tsc` / `next build` 通过；后续 `03ee5be` 已把相关文档同步到 `origin/main`。
 - **2026-06-30 正式版发布准备复盘**：对照 `redis-desktop-client` 的 release-prep 经验后，tiny-sql v0.1 保持 macOS only / GitHub Release `.dmg` / 无 Apple Developer 代码签名；正式版前必须先完成 `v0.1.0-rc1` 双架构产物验证、真实 3 跳 GUI dogfooding、MySQL 5.7 验证、作者 + 2 同事 1 周试用、README/GIF 与 `CHANGELOG.md` 切版。
 - **2026-06-30 正式版自动更新接入**：提前把 `tauri-plugin-updater` / `tauri-plugin-process` 纳入 v0.1。Tauri config 启用 `bundle.createUpdaterArtifacts=true`，内置 updater 公钥和 GitHub latest `latest.json` endpoint；前端新增每日自动检查、手动检查、下载进度和安装后重启提示。Release workflow 使用 `TAURI_SIGNING_PRIVATE_KEY` 生成 `.app.tar.gz.sig`，正式版生成 `latest.json`，RC / beta / alpha 只作为手动下载预发布，不作为自动更新源。Tauri updater minisign 签名不等于 Apple Developer 代码签名，首次打开摩擦仍按 README 处理。
+- **2026-06-30 release 与 CI 触发分流**：`ci.yml` 在 `push.main` 下对 `CHANGELOG.md`、`Cargo.lock`、`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 设置 `paths-ignore`，让 `just release` 产生的 release-only 版本提交不重复触发 CI；PR 仍完整跑 CI。`just release` 暂存范围补入 `Cargo.lock`，tag push 继续触发 `release.yml` 双架构打包。
 
 ## 已解决的阻碍
 
@@ -91,7 +92,7 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 - **CP-2** Week 2/3 累计工时检查（PLAN §3.3）：未正式记录工时，下次同步补。
 - **CP-3** MySQL 5.7 `caching_sha2`/`native_password` 兼容：推到 Week 5 dogfooding（不进 CI）。
 - **RC 产物验证**：尚未创建 `v0.1.0-rc1` / `v0.1.0` tag；release workflow 的 Apple Silicon + Intel `.dmg` 仍需通过真实 GitHub Actions run 验证。
-- **发布脚本暂存范围**：`just release` 已收窄到版本/CHANGELOG 相关文件；正式发版前仍必须确认工作区没有无关改动。
+- **发布脚本暂存范围**：`just release` 已收窄到版本/CHANGELOG/Cargo.lock 相关文件；正式发版前仍必须确认工作区没有无关改动。
 - **自动更新 GitHub Secrets**：release workflow 依赖 `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。本地按 Redis 项目方式把真实私钥写入 ignored `.env`，`just build` 会加载；直接 `pnpm tauri build` 不经 justfile 注入 `.env`，仍需手动 export，且无密码私钥要显式保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`。
 - **R-001** Tauri+workspace 摩擦：已规避（CP-1 通过）。
 - **R-002** caching_sha2 握手：Week 5 验证。

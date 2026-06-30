@@ -3,6 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+    # just release 会先推送只含版本号 / CHANGELOG 的发布提交，再推送 tag。
+    # 这些提交交给 release.yml 的 tag workflow 验证打包，避免重复跑 CI。
+    paths-ignore:
+      - "CHANGELOG.md"
+      - "Cargo.lock"
+      - "package.json"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/tauri.conf.json"
   pull_request:
     branches: [main]
 

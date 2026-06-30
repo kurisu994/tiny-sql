@@ -6,11 +6,12 @@
 
 ## 当前状态
 
-**Week 5 进行中（正式版发布准备 + 自动更新已接入，dogfooding 待完成）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地；连接管理交互已改成 Navicat 风格并接入 shadcn/ui。本轮在确认“自动更新只跟随正式版、RC 不作为更新源”后，把 `tauri-plugin-updater` 接入 v0.1：应用启动后每日检查一次 GitHub latest 正式版，左侧工具区可手动检查，release workflow 生成 signed updater artifact 和正式版 `latest.json`。
+**Week 5 进行中（正式版发布准备 + 自动更新已接入，dogfooding 待完成）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地；连接管理交互已改成 Navicat 风格并接入 shadcn/ui。本轮在确认“自动更新只跟随正式版、RC 不作为更新源”后，把 `tauri-plugin-updater` 接入 v0.1：应用启动后每日检查一次 GitHub latest 正式版，左侧工具区可手动检查，release workflow 生成 signed updater artifact 和正式版 `latest.json`。随后收敛发布触发链路：`just release` 推送版本提交时不再重复触发 `ci.yml`，后续由 tag push 触发 `release.yml` 打包发布。
 
 - ✅ 连接列表交互重做：去掉行内「连接」按钮，改右键菜单（连接 / 断开 / 进入命令列界面 / 编辑 / 复制 / 删除）+ 单击选中 + 双击连接；新建/编辑改 shadcn `Dialog` 弹窗；删除与写操作确认从 `window.confirm` 换成 shadcn `AlertDialog`（全局 `confirm-store`）。
 - ✅ 接入 shadcn/ui（radix-nova、radix 基库）：`components.json` + `src/lib/utils.ts` + `src/components/ui/*`；暗色保持 `prefers-color-scheme` 跟随系统（不切 `.dark` class），还原 system 中文字体栈（移除 init 引入的 Geist Google 字体）。
 - ✅ 自动更新：后端注册 `tauri-plugin-updater` / `tauri-plugin-process`；前端新增 `updateApi`、`useUpdateChecker` 和 `UpdateDialog`；release workflow 用 `TAURI_SIGNING_PRIVATE_KEY` 签名 `.app.tar.gz`，正式版生成 `latest.json`，RC / beta / alpha 跳过。
+- ✅ 发布触发分流：`ci.yml` 对 `just release` 产生的版本号 / CHANGELOG 提交启用 `paths-ignore`，`just release` 同步暂存 `Cargo.lock`；tag push 仍由 `release.yml` 执行双架构打包和 GitHub Release。
 - ✅ 验证：`just check` 全绿；`just build` 在沙箱外从本地 `.env` 加载 updater 私钥通过，产出 `.dmg`、`.app.tar.gz` 和 `.sig`；`.github/workflows/release.yml` YAML 解析通过；未把私钥内容写入仓库。
 
 此前 Week 5 dogfooding 准备同样完成（保留）：
@@ -38,7 +39,8 @@
 - `src/components/{schema-browser,topology-graph,connection-dialogs}.tsx` — SQL 面板、虚拟滚动表格、拓扑图、事件监听 runtime guard。
 - `public/logo.svg` + `src/app/page.tsx` — 左上角品牌 logo。
 - `src/stores/{session-store,connection-store}.ts` + `src/lib/{tauri-api,sql-guard}.ts` — 会话状态、SQL guard、Tauri API 参数与 Web 预览降级。
-- `.github/workflows/release.yml` — `v0.1.*` tag 构建 macOS Apple Silicon + Intel `.dmg` / `.app.tar.gz` / `.sig`，再统一创建 GitHub Release；正式版生成 `latest.json`，RC 不生成自动更新源。
+- `.github/workflows/{ci.yml,release.yml}` — `ci.yml` 忽略 release-only 版本提交，`release.yml` 监听 `v0.1.*` tag 构建 macOS Apple Silicon + Intel `.dmg` / `.app.tar.gz` / `.sig`，再统一创建 GitHub Release；正式版生成 `latest.json`，RC 不生成自动更新源。
+- `justfile` — `release` 版本提交暂存 `Cargo.lock`，避免 tag 对应版本与 lockfile 状态不一致。
 - `README.md` + `docs/dogfooding-log.template.md` — Week 5 dogfooding 说明、macOS 首次打开说明与脱敏记录模板。
 - `docs/RELEASE_CHECKLIST.md` + `CHANGELOG.md` — v0.1 RC/正式发布检查、双架构 release、updater 签名与 stable-only 自动更新说明。
 - `.env`（ignored）+ `.env.example` — 本地 updater 签名变量；`.env` 已按 Redis 项目格式写入真实私钥，`.env.example` 只保留空占位。
@@ -64,6 +66,7 @@
 - **自动更新只跟随正式版**：updater endpoint 固定 GitHub latest release 的 `latest.json`；workflow 对 `v*-rc*` / beta / alpha 只上传构建产物，不生成 `latest.json`，避免旧正式版升级到 RC。
 - **Tauri updater 签名不等于 Apple Developer 代码签名**：v0.1 仍无 notarization，README 继续保留右键打开 / `xattr -cr`；updater minisign 只用于校验更新包完整性。
 - **CI 重命名 updater artifact**：Tauri 默认产物名为 `tiny-sql.app.tar.gz`，双架构会同名；release workflow 按 `matrix.arch` 重命名为 `*_arm64.app.tar.gz` / `*_x64.app.tar.gz` 后再生成平台清单。
+- **release-only push 不跑 CI**：`just release` 会先 push 版本提交再 push tag；`ci.yml` 只在该分支 push 全部改动都属于版本号 / CHANGELOG / lockfile 时跳过，避免发布流程同时跑 CI 和 Release。普通 PR 仍不启用 `paths-ignore`，继续跑完整 CI。
 - **本地 Tauri build 也需要 signing env**：`bundle.createUpdaterArtifacts=true` 后，本地构建必须提供 `TAURI_SIGNING_PRIVATE_KEY`；按 Redis 项目方式把真实私钥放入 ignored `.env`，通过 `just build` 由 justfile 自动加载。直接跑 `pnpm tauri build` 不会经 just 注入 `.env`，需先手动 export；无密码私钥也要保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`。
 - **接入 shadcn/ui（radix-nova）而非自研弹窗**：确认框用 `AlertDialog`、表单用 `Dialog`、右键菜单用 `ContextMenu`，统一交互与无障碍；保留命令式 `confirm-store` 包一层，让多处 `await confirm()` 调用最省事。
 - **暗色保持 `prefers-color-scheme` 跟随系统**：shadcn init 默认把暗色切到 `.dark` class，会让现有满屏 `dark:` 失效；改回 media 策略并把 shadcn 变量塞进 `@media`，现有 `dark:` 零迁移、无需 JS、无闪烁。
@@ -73,7 +76,7 @@
 ## 下一步（Week 5）
 
 1. RC 前：把 `.env` 中的 updater 私钥内容配置到 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。刷新远端状态，确认工作区只含发布相关改动；跑 `just check`、`just test-integration`、`just build`，并用本地 `.dmg` 做 GUI smoke。
-2. RC：先发 `v0.1.0-rc1`，验证 GitHub Release 里 Apple Silicon + Intel 两个 `.dmg` / `.app.tar.gz` / `.sig` 都存在，RC 标记为 prerelease 且没有 `latest.json`。
+2. RC：先发 `v0.1.0-rc1`，验证版本提交没有重复触发 `ci.yml`，并确认 GitHub Release 里 Apple Silicon + Intel 两个 `.dmg` / `.app.tar.gz` / `.sig` 都存在，RC 标记为 prerelease 且没有 `latest.json`。
 3. Dogfooding：安装 RC，用真实 3 跳 SSH + MySQL 验证连接、TOFU、passphrase、表浏览、SQL 执行、取消和拓扑状态；应用稳定运行 ≥30 分钟，至少 10 条 SQL，故意断中间跳验证 180s 内 lost。
 4. 同事试用：作者 + 2 位同事各试用 1 周，每人至少 5 条反馈；至少 1 位同事覆盖 MySQL 5.7 连接与 SELECT 验证。
 5. 正式发布：修完 P0/P1 后把 `CHANGELOG.md` 从 `[Unreleased]` 切出 `0.1.0`，README 明确下载/右键打开/无 Apple Developer 代码签名/真实 GIF 状态，再打 `v0.1.0`；发布后从旧版本手动检查更新，验证能发现正式版并安装重启。

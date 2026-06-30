@@ -147,7 +147,7 @@ release tag:
     fi
 
     echo "3️⃣ 提交本次发布变更到 Git..."
-    git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+    git add package.json Cargo.lock src-tauri/Cargo.toml src-tauri/tauri.conf.json
     if [ "$IS_PRERELEASE" -eq 0 ]; then
         git add CHANGELOG.md
     fi
