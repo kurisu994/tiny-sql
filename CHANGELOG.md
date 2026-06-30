@@ -12,10 +12,6 @@
 
 - 修复 GitHub Actions release job 生成 `latest.json` 时错误查找 Linux `.AppImage.tar.gz` 的问题，改为使用 Tauri 实际产出的 `.AppImage` 与 `.AppImage.sig`。
 
----
-
-## [0.0.1] — 2026-06-30
-
 ### 🎨 体验调整
 
 - 首页连接列表去掉行内「连接」按钮，改为 Navicat 式右键菜单（连接 / 断开连接 / 进入命令列界面 / 编辑连接 / 复制连接 / 删除连接）：单击选中、双击连接、右键唤出更多操作。
