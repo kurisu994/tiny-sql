@@ -52,7 +52,7 @@ jobs:
       - name: Normalize updater artifact names
         run: |
           shopt -s nullglob
-          for file in src-tauri/target/release/bundle/macos/*.app.tar.gz; do
+          for file in target/release/bundle/macos/*.app.tar.gz; do
             renamed="${file%.app.tar.gz}_${{ matrix.arch }}.app.tar.gz"
             mv "$file" "$renamed"
             if [ -f "$file.sig" ]; then
@@ -65,9 +65,9 @@ jobs:
         with:
           name: tiny-sql-${{ matrix.arch }}-bundle
           path: |
-            src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/target/release/bundle/**/*.tar.gz
-            src-tauri/target/release/bundle/**/*.sig
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.tar.gz
+            target/release/bundle/**/*.sig
           if-no-files-found: error
 
   release:

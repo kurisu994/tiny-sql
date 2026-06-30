@@ -13,6 +13,7 @@
 - ✅ 自动更新：后端注册 `tauri-plugin-updater` / `tauri-plugin-process`；前端新增 `updateApi`、`useUpdateChecker` 和 `UpdateDialog`；release workflow 用 `TAURI_SIGNING_PRIVATE_KEY` 签名 `.app.tar.gz`，正式版生成 `latest.json`，RC / beta / alpha 跳过。
 - ✅ 发布触发分流：`ci.yml` 对 `just release` 产生的版本号 / CHANGELOG 提交启用 `paths-ignore`，`just release` 同步暂存 `Cargo.lock`；tag push 仍由 `release.yml` 执行双架构打包和 GitHub Release。
 - ✅ 验证：`just check` 全绿；`just build` 在沙箱外从本地 `.env` 加载 updater 私钥通过，产出 `.dmg`、`.app.tar.gz` 和 `.sig`；`.github/workflows/release.yml` YAML 解析通过；未把私钥内容写入仓库。
+- ✅ GitHub Release workflow 首次云端上传失败已修复：Tauri workspace 构建产物在根目录 `target/release/bundle/...`，`release.yml` 的重命名和 `upload-artifact` 已改为读取该路径；下一步重跑失败的 tag workflow 验证。
 
 此前 Week 5 dogfooding 准备同样完成（保留）：
 
@@ -75,11 +76,12 @@
 
 ## 下一步（Week 5）
 
-1. RC 前：把 `.env` 中的 updater 私钥内容配置到 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。刷新远端状态，确认工作区只含发布相关改动；跑 `just check`、`just test-integration`、`just build`，并用本地 `.dmg` 做 GUI smoke。
-2. RC：先发 `v0.1.0-rc1`，验证版本提交没有重复触发 `ci.yml`，并确认 GitHub Release 里 Apple Silicon + Intel 两个 `.dmg` / `.app.tar.gz` / `.sig` 都存在，RC 标记为 prerelease 且没有 `latest.json`。
-3. Dogfooding：安装 RC，用真实 3 跳 SSH + MySQL 验证连接、TOFU、passphrase、表浏览、SQL 执行、取消和拓扑状态；应用稳定运行 ≥30 分钟，至少 10 条 SQL，故意断中间跳验证 180s 内 lost。
-4. 同事试用：作者 + 2 位同事各试用 1 周，每人至少 5 条反馈；至少 1 位同事覆盖 MySQL 5.7 连接与 SELECT 验证。
-5. 正式发布：修完 P0/P1 后把 `CHANGELOG.md` 从 `[Unreleased]` 切出 `0.1.0`，README 明确下载/右键打开/无 Apple Developer 代码签名/真实 GIF 状态，再打 `v0.1.0`；发布后从旧版本手动检查更新，验证能发现正式版并安装重启。
+1. 重跑失败的 tag workflow，确认 GitHub Release 里 Apple Silicon + Intel 两个 `.dmg` / `.app.tar.gz` / `.sig` 都存在，RC 标记为 prerelease 且没有 `latest.json`。
+2. RC 前：把 `.env` 中的 updater 私钥内容配置到 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。刷新远端状态，确认工作区只含发布相关改动；跑 `just check`、`just test-integration`、`just build`，并用本地 `.dmg` 做 GUI smoke。
+3. 后续 RC：若需要新 RC tag，先发 `v0.1.0-rcN`，验证版本提交没有重复触发 `ci.yml`，并确认双架构产物齐全。
+4. Dogfooding：安装 RC，用真实 3 跳 SSH + MySQL 验证连接、TOFU、passphrase、表浏览、SQL 执行、取消和拓扑状态；应用稳定运行 ≥30 分钟，至少 10 条 SQL，故意断中间跳验证 180s 内 lost。
+5. 同事试用：作者 + 2 位同事各试用 1 周，每人至少 5 条反馈；至少 1 位同事覆盖 MySQL 5.7 连接与 SELECT 验证。
+6. 正式发布：修完 P0/P1 后把 `CHANGELOG.md` 从 `[Unreleased]` 切出 `0.1.0`，README 明确下载/右键打开/无 Apple Developer 代码签名/真实 GIF 状态，再打 `v0.1.0`；发布后从旧版本手动检查更新，验证能发现正式版并安装重启。
 
 ## 阻塞 / 待确认
 
@@ -89,6 +91,7 @@
 - **CP-3** MySQL 5.7 兼容仍留 Week 5 dogfooding。
 - README 中仍缺真实 GIF；当前仅补了文字说明和试用 checklist。
 - 尚未发 `v0.1.0-rc1`，也尚未验证云端 release workflow 的双架构产物。
+- GitHub Release workflow bundle 路径已修复，仍需通过真实 GitHub Actions 重跑验证双架构产物上传。
 - `just release` 已收窄暂存范围；发版前仍需确认 dirty worktree 中没有无关文件，避免把非发布改动留到 release commit 前后造成混淆。
 - 未执行 `git fetch`，远端实时状态未刷新；发 RC/正式版前需要刷新并确认 tag 不冲突。
 

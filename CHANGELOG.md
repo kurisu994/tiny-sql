@@ -30,6 +30,7 @@
 - GitHub Actions CI 对 `just release` 产生的版本号 / CHANGELOG 提交启用路径忽略，发布时只由 tag 触发 `release.yml` 打包，避免同一发布流程重复跑 `ci.yml`。
 - GitHub Release notes 改为从 `CHANGELOG.md` 提取；正式版取对应版本段，RC 可直接复用 `[Unreleased]`，且 `v*-rc*` tag 自动标记为 prerelease、不设为 latest。
 - GitHub Actions release job 接入 Tauri updater 签名：构建 `.dmg`、`.app.tar.gz` 与 `.sig`，正式版发布时额外生成 `latest.json`；RC / beta / alpha 不生成自动更新源。
+- 修复 GitHub Actions release job 上传路径：Tauri workspace 构建产物位于根目录 `target/release/bundle`，避免 `upload-artifact` 继续读取 `src-tauri/target/...` 后报 `No files were found`。
 - ⏸️ playwright E2E 因 Tauri WebDriver 不支持 macOS 推迟（留将来 Linux CI / Week 5 dogfooding）。
 
 ### ✨ 新功能
