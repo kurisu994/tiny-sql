@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 🐛 修复
+
+- 修复 GitHub Actions release job 生成 `latest.json` 时错误查找 Linux `.AppImage.tar.gz` 的问题，改为使用 Tauri 实际产出的 `.AppImage` 与 `.AppImage.sig`。
+
 ---
 
 ## [0.0.1] — 2026-06-30
@@ -33,7 +37,7 @@
 - GitHub Actions release job：`v0.1.*` tag 触发 macOS Apple Silicon + Intel、Windows x64、Linux x64 Tauri build，并在全平台产物都上传后创建 GitHub Release。
 - GitHub Actions CI 对 `just release` 产生的版本号 / CHANGELOG 提交启用路径忽略，发布时只由 tag 触发 `release.yml` 打包，避免同一发布流程重复跑 `ci.yml`。
 - GitHub Release notes 改为从 `CHANGELOG.md` 提取；正式版取对应版本段，RC 可直接复用 `[Unreleased]`，且 `v*-rc*` tag 自动标记为 prerelease、不设为 latest。
-- GitHub Actions release job 接入 Tauri updater 签名：构建 macOS `.dmg` / `.app.tar.gz`、Windows `.exe`、Linux `.AppImage` / `.AppImage.tar.gz` 与对应 `.sig`，正式版发布时额外生成 `latest.json`；RC / beta / alpha 不生成自动更新源。
+- GitHub Actions release job 接入 Tauri updater 签名：构建 macOS `.dmg` / `.app.tar.gz`、Windows `.exe`、Linux `.AppImage` 与对应 `.sig`，正式版发布时额外生成 `latest.json`；RC / beta / alpha 不生成自动更新源。
 - 修复 GitHub Actions release job 上传路径：Tauri workspace 构建产物位于根目录 `target/release/bundle`，避免 `upload-artifact` 继续读取 `src-tauri/target/...` 后报 `No files were found`。
 - 升级 GitHub Actions 中的 `checkout` / `setup-node` / `pnpm/action-setup` / artifact actions 到 Node 24 runtime 版本，消除 Node.js 20 deprecation warning。
 - `just version` 同步刷新 `Cargo.lock` 中 `tiny-sql` 本地 package 的版本号，避免 release 提交遗漏 lockfile 版本变更。

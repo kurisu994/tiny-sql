@@ -10,7 +10,7 @@
 | v0.2 | 规划 | PG driver + passphrase 加密 + TLS + Schema-aware 联想 |
 | v0.3+ | 规划 | 平台安装体验打磨 + crate 独立 publish + 多集群 diff |
 
-CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新；Week 5：release workflow 全平台打包 + CHANGELOG release notes 提取、Tauri updater 自动更新、发布检查清单、连接管理 UI 接入 shadcn（右键菜单 / 弹窗 / 确认弹窗））。RC 发布不消费 `[Unreleased]`，正式版才切出 `0.1.0`。
+CHANGELOG 已有 `[0.0.1]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新；Week 5：release workflow 全平台打包 + CHANGELOG release notes 提取、Tauri updater 自动更新、发布检查清单、连接管理 UI 接入 shadcn（右键菜单 / 弹窗 / 确认弹窗））。当前 `[Unreleased]` 记录 release workflow Linux `latest.json` 产物匹配修复。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -69,7 +69,8 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 - **2026-06-27 Week 4 本地 .dmg 产出**：`pnpm tauri build` 已生成 `target/release/bundle/dmg/tiny-sql_0.1.0_aarch64.dmg`；CI release workflow 使用 GitHub 官方 `macos-15` arm64 runner。
 - **2026-06-29 Week 5 dogfooding 启动**：README 更新到发布前试用口径，新增脱敏 `docs/dogfooding-log.template.md`，本地忽略的 `docs/dogfooding-log.md` 记录验证；`just check`、沙箱外 `just test-integration`、沙箱外 `just build` 均通过。
 - **2026-06-29 Week 5 release workflow 收口**：`release.yml` 从单 arm64 job 改为 `macos-15` Apple Silicon + `macos-15-intel` Intel 矩阵构建，上传 artifact 后由单独 release job 创建 GitHub Release；新增 `docs/RELEASE_CHECKLIST.md` 固化 RC、dogfooding、正式发布和延期规则。
-- **2026-06-30 release workflow 扩到全平台**：`release.yml` 继续沿用“多构建 + 单发布”结构，把矩阵扩到 macOS arm64/x64、Windows x64、Linux x64；Windows 产 NSIS `.exe`，Linux 产 `.AppImage` 和 updater `.AppImage.tar.gz`，正式版 `latest.json` 同时生成 `darwin-*` / `windows-x86_64` / `linux-x86_64` 平台入口。README、CHANGELOG、发布清单、需求和路线图同步从原 macOS 发布范围改成全平台先行。
+- **2026-06-30 release workflow 扩到全平台**：`release.yml` 继续沿用“多构建 + 单发布”结构，把矩阵扩到 macOS arm64/x64、Windows x64、Linux x64；Windows 产 NSIS `.exe`，Linux 产 `.AppImage` 和 `.AppImage.sig`，正式版 `latest.json` 同时生成 `darwin-*` / `windows-x86_64` / `linux-x86_64` 平台入口。README、CHANGELOG、发布清单、需求和路线图同步从原 macOS 发布范围改成全平台先行。
+- **2026-06-30 release workflow Linux manifest 修复**：正式版 tag workflow 在 `Generate updater manifest` 步骤失败，错误为 `missing updater artifact for linux-x86_64`；实际可用文件只有 `tiny-sql_0.0.1_amd64.AppImage` 与 `.sig`。根因是脚本误找 `*.AppImage.tar.gz`，已改为匹配 `.AppImage` 本体并读取同名 `.sig`。
 - **2026-06-30 release notes 自动化补齐**：publish job checkout 仓库后从 `CHANGELOG.md` 生成 GitHub Release notes；正式版取当前 tag 版本段，预发布 tag 找不到独立版本段时取 `[Unreleased]`。`v*-rc*` / beta / alpha tag 自动加 `--prerelease --latest=false`，正式版继续作为普通 Release。`just release` 也改为 RC 不切 CHANGELOG，避免 `v0.1.0` 正式版 notes 变空。
 - **2026-06-29 连接管理 UI 接入 shadcn/ui**：连接列表去掉行内「连接」按钮改 Navicat 式右键菜单（shadcn `ContextMenu`）；新建/编辑改 `Dialog` 弹窗；二次确认用 `AlertDialog` + 全局 `confirm-store` 替代 `window.confirm`。`shadcn init` 选 radix-nova / radix；暗色改回 `prefers-color-scheme` 跟随系统（不切 `.dark` class，现有 `dark:` 零迁移），并还原 system 中文字体栈（移除 init 引入的 Geist）。提交 `705ef8e` + `d91dd43`，`tsc` / `next build` 通过；后续 `03ee5be` 已把相关文档同步到 `origin/main`。
 - **2026-06-30 正式版发布准备复盘**：对照 `redis-desktop-client` 的 release-prep 经验后，tiny-sql v0.1 曾先按 macOS `.dmg` / 无 Apple Developer 代码签名收口；随后发布策略调整为全平台先行。正式版前必须先完成 `v0.1.0-rc1` 全平台产物验证、真实 3 跳 GUI dogfooding、MySQL 5.7 验证、作者 + 2 同事 1 周试用、README/GIF 与 `CHANGELOG.md` 切版。
@@ -86,6 +87,7 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 | CP-1（Tauri+workspace 摩擦，Week 1 最大风险） | — | 已验证通过，`cargo check --workspace` 正常引用 crate |
 | Turbopack 在沙箱内 build 失败 | Next/Turbopack 处理 CSS 时需创建子进程并绑定本地端口，沙箱返回 `Operation not permitted` | `just check` / `pnpm tauri build` 在沙箱外重跑通过；代码无改动 workaround |
 | 普通浏览器预览报 Tauri IPC 错 | `@tauri-apps/api` 在无 Tauri runtime 时调用 `invoke/listen` | 增加 `isTauriRuntime()` guard：Web 预览为空列表、跳过事件监听；Tauri/Vitest 不受影响 |
+| 正式版 `latest.json` 生成失败 | Linux updater artifact 实际是 `.AppImage` + `.AppImage.sig`，workflow 误按 `.AppImage.tar.gz` 查找 | `release.yml` 改为匹配 `*x86_64*.AppImage` / `*amd64*.AppImage` / `*x64*.AppImage` / `*.AppImage`，本地用失败文件名集合模拟 manifest 生成通过 |
 
 ## 待验证 / 风险跟踪
 
@@ -98,6 +100,6 @@ CHANGELOG 当前全部在 `[Unreleased]` 段（Week 1-4：脚手架 + 加密 sto
 - **R-001** Tauri+workspace 摩擦：已规避（CP-1 通过）。
 - **R-002** caching_sha2 握手：Week 5 验证。
 - **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task（PLAN §4.3 风险）。
-- **R-updater-release** 自动更新端到端仍需真实 Release 验证：本地已生成 `.app.tar.gz.sig`，但 GitHub Actions 全平台 artifact、正式版 `latest.json`、旧版本发现新正式版并安装重启仍待 RC/正式版流程验证。
+- **R-updater-release** 自动更新端到端仍需真实 Release 验证：本地已生成 macOS `.app.tar.gz.sig`，Linux manifest 已修正为 `.AppImage` + `.sig`；GitHub Actions 全平台 artifact、正式版 `latest.json`、旧版本发现新正式版并安装重启仍待 RC/正式版流程验证。
 
 相关：[[activeContext]] · [[projectbrief]]

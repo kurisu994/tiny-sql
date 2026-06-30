@@ -51,7 +51,7 @@ GitHub Actions 期望产物：
 - Apple Silicon `.dmg` / `.app.tar.gz`：`macos-15` runner 构建。
 - Intel `.dmg` / `.app.tar.gz`：`macos-15-intel` runner 构建。
 - Windows x64 `.exe`：`windows-latest` runner 构建。
-- Linux x64 `.AppImage` / `.AppImage.tar.gz`：`ubuntu-22.04` runner 构建。
+- Linux x64 `.AppImage`：`ubuntu-22.04` runner 构建；updater 使用 `.AppImage.sig` 签名，不生成额外 `.AppImage.tar.gz`。
 - 每个平台同时上传安装包、updater artifact 与 `.sig`。
 - `Publish GitHub Release` job 等全平台 artifact 都上传后再创建 GitHub Release。
 - GitHub Release notes 从 `CHANGELOG.md` 提取：正式版优先取对应版本段，RC 若没有独立版本段则取 `[Unreleased]`；RC tag 会标记为 prerelease，且不设为 latest。

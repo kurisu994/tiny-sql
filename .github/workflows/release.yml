@@ -202,7 +202,7 @@ jobs:
               "darwin-aarch64": ["*aarch64*.tar.gz", "*arm64*.tar.gz"],
               "darwin-x86_64": ["*x86_64*.tar.gz", "*x64*.tar.gz"],
               "windows-x86_64": ["*.exe"],
-              "linux-x86_64": ["*.AppImage.tar.gz"],
+              "linux-x86_64": ["*x86_64*.AppImage", "*amd64*.AppImage", "*x64*.AppImage", "*.AppImage"],
           }.items():
               asset = find_update_asset(platform, patterns)
               sig = pathlib.Path(str(asset) + ".sig")
