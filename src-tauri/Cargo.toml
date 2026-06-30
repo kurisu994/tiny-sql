@@ -1,6 +1,6 @@
 [package]
 name = "tiny-sql"
-version = "0.0.1-rc3"
+version = "0.0.1"
 description = "多级跳板机友好的 MySQL 桌面客户端"
 edition.workspace = true
 rust-version.workspace = true
