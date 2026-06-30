@@ -1,6 +1,6 @@
 {
   "name": "tiny-sql",
-  "version": "0.0.1-rc1",
+  "version": "0.0.1-rc2",
   "private": true,
   "type": "module",
   "scripts": {
