@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**Week 5 进行中（正式版发布准备 + 自动更新已接入，dogfooding 待完成）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地；连接管理交互已改成 Navicat 风格并接入 shadcn/ui。本轮在确认“自动更新只跟随正式版、RC 不作为更新源”后，把 `tauri-plugin-updater` 接入 v0.1：应用启动后每日检查一次 GitHub latest 正式版，左侧工具区可手动检查，release workflow 生成 signed updater artifact 和正式版 `latest.json`。随后收敛发布触发链路：`just release` 推送版本提交时不再重复触发 `ci.yml`，后续由 tag push 触发 `release.yml` 全平台打包发布。最新一次正式版 workflow 卡在 `latest.json` 生成：脚本误找 Linux `.AppImage.tar.gz`，但 Tauri 实际产出 `.AppImage` + `.AppImage.sig`；本轮已修正 manifest 匹配和发布文档。
+**Week 5 进行中（正式版发布准备 + 自动更新已接入，dogfooding 待完成）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地；连接管理交互已改成 Navicat 风格并接入 shadcn/ui。本轮在确认“自动更新只跟随正式版、RC 不作为更新源”后，把 `tauri-plugin-updater` 接入 v0.1：应用启动后每日检查一次 GitHub latest 正式版，左侧工具区可手动检查，release workflow 生成 signed updater artifact 和正式版 `latest.json`。随后收敛发布触发链路：`just release` 推送版本提交时不再重复触发 `ci.yml`，后续由 tag push 触发 `release.yml` 全平台打包发布。最新一次正式版 workflow 卡在 `latest.json` 生成：脚本误找 Linux `.AppImage.tar.gz`，但 Tauri 实际产出 `.AppImage` + `.AppImage.sig`；本轮已修正 manifest 匹配和发布文档。当前 `CHANGELOG.md` 已按用户可见功能大项重写，不再按 crate、workflow、API 和产物路径展开技术细节。
 
 - ✅ 连接列表交互重做：去掉行内「连接」按钮，改右键菜单（连接 / 断开 / 进入命令列界面 / 编辑 / 复制 / 删除）+ 单击选中 + 双击连接；新建/编辑改 shadcn `Dialog` 弹窗；删除与写操作确认从 `window.confirm` 换成 shadcn `AlertDialog`（全局 `confirm-store`）。
 - ✅ 接入 shadcn/ui（radix-nova、radix 基库）：`components.json` + `src/lib/utils.ts` + `src/components/ui/*`；暗色保持 `prefers-color-scheme` 跟随系统（不切 `.dark` class），还原 system 中文字体栈（移除 init 引入的 Geist Google 字体）。
@@ -18,6 +18,7 @@
 - ✅ GitHub Release workflow 首次云端上传失败已修复：Tauri workspace 构建产物在根目录 `target/release/bundle/...`，`release.yml` 的重命名和 `upload-artifact` 已改为读取该路径；下一步重跑失败的 tag workflow 验证。
 - ✅ GitHub Actions Node 20 deprecation warning 已处理：`ci.yml` / `release.yml` 中的 `checkout`、`setup-node`、`pnpm/action-setup`、`upload-artifact`、`download-artifact` 已升级到声明 `runs.using: node24` 的版本。
 - ✅ GitHub Release `latest.json` Linux artifact 匹配已修复：正式版 `v0.0.1` workflow 失败日志显示只有 `tiny-sql_0.0.1_amd64.AppImage` 与 `.sig`，没有 `.AppImage.tar.gz`；`release.yml` 已改为优先匹配 `*x86_64*.AppImage` / `*amd64*.AppImage` / `*x64*.AppImage`，本地用失败文件名集合模拟生成 manifest 通过。
+- ✅ `CHANGELOG.md` 写法收敛：保留 `[Unreleased]`，按新功能、体验优化、安全与稳定性、发布准备和待验证分组，只说明功能大项，不再列内部实现细节。
 
 此前 Week 5 dogfooding 准备同样完成（保留）：
 
@@ -79,6 +80,7 @@
 - **接入 shadcn/ui（radix-nova）而非自研弹窗**：确认框用 `AlertDialog`、表单用 `Dialog`、右键菜单用 `ContextMenu`，统一交互与无障碍；保留命令式 `confirm-store` 包一层，让多处 `await confirm()` 调用最省事。
 - **暗色保持 `prefers-color-scheme` 跟随系统**：shadcn init 默认把暗色切到 `.dark` class，会让现有满屏 `dark:` 失效；改回 media 策略并把 shadcn 变量塞进 `@media`，现有 `dark:` 零迁移、无需 JS、无闪烁。
 - **还原 system 中文字体栈**：移除 init 引入的 Geist（`next/font/google`），避免 Tauri 构建期联网拉字体且更适配中文。
+- **CHANGELOG 面向使用者写功能大项**：发布说明只写用户可见能力、体验变化、安全稳定性和发布准备，不再记录 crate、workflow、API、字段名或具体产物路径等内部实现细节。
 - 沿用：整体文件加密、playwright 推迟、移除 test_select_1。
 
 ## 下一步（Week 5）

@@ -10,7 +10,7 @@
 | v0.2 | 规划 | PG driver + passphrase 加密 + TLS + Schema-aware 联想 |
 | v0.3+ | 规划 | 平台安装体验打磨 + crate 独立 publish + 多集群 diff |
 
-CHANGELOG 已有 `[0.0.1]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SSH（keepalive/错误模型/TOFU）/ MySQL driver / 连接管理 / 数据浏览 / SQL 执行与取消 / 拓扑图 / .dmg 打包 + 测试基建 + 应用图标更新；Week 5：release workflow 全平台打包 + CHANGELOG release notes 提取、Tauri updater 自动更新、发布检查清单、连接管理 UI 接入 shadcn（右键菜单 / 弹窗 / 确认弹窗））。当前 `[Unreleased]` 记录 release workflow Linux `latest.json` 产物匹配修复。
+CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级写法：只概括连接管理、多跳 SSH、数据浏览、SQL 执行、配置加密、自动更新、体验优化、安全稳定性、发布准备和待验证事项，不再按 crate、workflow、API、字段名或具体产物路径展开内部实现细节。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -76,6 +76,7 @@ CHANGELOG 已有 `[0.0.1]` 段（Week 1-4：脚手架 + 加密 store + 多跳 SS
 - **2026-06-30 正式版发布准备复盘**：对照 `redis-desktop-client` 的 release-prep 经验后，tiny-sql v0.1 曾先按 macOS `.dmg` / 无 Apple Developer 代码签名收口；随后发布策略调整为全平台先行。正式版前必须先完成 `v0.1.0-rc1` 全平台产物验证、真实 3 跳 GUI dogfooding、MySQL 5.7 验证、作者 + 2 同事 1 周试用、README/GIF 与 `CHANGELOG.md` 切版。
 - **2026-06-30 正式版自动更新接入**：提前把 `tauri-plugin-updater` / `tauri-plugin-process` 纳入 v0.1。Tauri config 启用 `bundle.createUpdaterArtifacts=true`，内置 updater 公钥和 GitHub latest `latest.json` endpoint；前端新增每日自动检查、手动检查、下载进度和安装后重启提示。Release workflow 使用 `TAURI_SIGNING_PRIVATE_KEY` 生成 `.app.tar.gz.sig`，正式版生成 `latest.json`，RC / beta / alpha 只作为手动下载预发布，不作为自动更新源。Tauri updater minisign 签名不等于 Apple Developer 代码签名，首次打开摩擦仍按 README 处理。
 - **2026-06-30 release 与 CI 触发分流**：`ci.yml` 在 `push.main` 下对 `CHANGELOG.md`、`Cargo.lock`、`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 设置 `paths-ignore`，让 `just release` 产生的 release-only 版本提交不重复触发 CI；PR 仍完整跑 CI。`just version` 定向刷新 `Cargo.lock` 中 `tiny-sql` 本地 package 版本，`just release` 暂存范围补入 `Cargo.lock`，tag push 继续触发 `release.yml` 全平台打包。
+- **2026-06-30 CHANGELOG 写法收敛**：按用户要求把 `CHANGELOG.md` 从模块/实现细节清单改为功能大项概览；后续发布说明应继续面向使用者，只写主要功能、体验变化、安全稳定性、发布准备和待验证事项。
 
 ## 已解决的阻碍
 
