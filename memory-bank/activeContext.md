@@ -14,6 +14,7 @@
 - ✅ 发布触发分流：`ci.yml` 对 `just release` 产生的版本号 / CHANGELOG 提交启用 `paths-ignore`，`just release` 同步暂存 `Cargo.lock`；tag push 仍由 `release.yml` 执行双架构打包和 GitHub Release。
 - ✅ 验证：`just check` 全绿；`just build` 在沙箱外从本地 `.env` 加载 updater 私钥通过，产出 `.dmg`、`.app.tar.gz` 和 `.sig`；`.github/workflows/release.yml` YAML 解析通过；未把私钥内容写入仓库。
 - ✅ GitHub Release workflow 首次云端上传失败已修复：Tauri workspace 构建产物在根目录 `target/release/bundle/...`，`release.yml` 的重命名和 `upload-artifact` 已改为读取该路径；下一步重跑失败的 tag workflow 验证。
+- ✅ GitHub Actions Node 20 deprecation warning 已处理：`ci.yml` / `release.yml` 中的 `checkout`、`setup-node`、`pnpm/action-setup`、`upload-artifact`、`download-artifact` 已升级到声明 `runs.using: node24` 的版本。
 
 此前 Week 5 dogfooding 准备同样完成（保留）：
 
@@ -40,7 +41,7 @@
 - `src/components/{schema-browser,topology-graph,connection-dialogs}.tsx` — SQL 面板、虚拟滚动表格、拓扑图、事件监听 runtime guard。
 - `public/logo.svg` + `src/app/page.tsx` — 左上角品牌 logo。
 - `src/stores/{session-store,connection-store}.ts` + `src/lib/{tauri-api,sql-guard}.ts` — 会话状态、SQL guard、Tauri API 参数与 Web 预览降级。
-- `.github/workflows/{ci.yml,release.yml}` — `ci.yml` 忽略 release-only 版本提交，`release.yml` 监听 `v0.1.*` tag 构建 macOS Apple Silicon + Intel `.dmg` / `.app.tar.gz` / `.sig`，再统一创建 GitHub Release；正式版生成 `latest.json`，RC 不生成自动更新源。
+- `.github/workflows/{ci.yml,release.yml}` — `ci.yml` 忽略 release-only 版本提交，两个 workflow 的官方 actions 已升级到 Node 24 runtime；`release.yml` 监听 `v0.1.*` tag 构建 macOS Apple Silicon + Intel `.dmg` / `.app.tar.gz` / `.sig`，再统一创建 GitHub Release；正式版生成 `latest.json`，RC 不生成自动更新源。
 - `justfile` — `release` 版本提交暂存 `Cargo.lock`，避免 tag 对应版本与 lockfile 状态不一致。
 - `README.md` + `docs/dogfooding-log.template.md` — Week 5 dogfooding 说明、macOS 首次打开说明与脱敏记录模板。
 - `docs/RELEASE_CHECKLIST.md` + `CHANGELOG.md` — v0.1 RC/正式发布检查、双架构 release、updater 签名与 stable-only 自动更新说明。
@@ -92,6 +93,7 @@
 - README 中仍缺真实 GIF；当前仅补了文字说明和试用 checklist。
 - 尚未发 `v0.1.0-rc1`，也尚未验证云端 release workflow 的双架构产物。
 - GitHub Release workflow bundle 路径已修复，仍需通过真实 GitHub Actions 重跑验证双架构产物上传。
+- GitHub Actions Node 24 action 升级已做本地 YAML 校验，仍需通过真实 GitHub Actions run 验证 marketplace action 版本可用性与 artifact 兼容性。
 - `just release` 已收窄暂存范围；发版前仍需确认 dirty worktree 中没有无关文件，避免把非发布改动留到 release commit 前后造成混淆。
 - 未执行 `git fetch`，远端实时状态未刷新；发 RC/正式版前需要刷新并确认 tag 不冲突。
 

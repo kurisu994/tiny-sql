@@ -31,6 +31,7 @@
 - GitHub Release notes 改为从 `CHANGELOG.md` 提取；正式版取对应版本段，RC 可直接复用 `[Unreleased]`，且 `v*-rc*` tag 自动标记为 prerelease、不设为 latest。
 - GitHub Actions release job 接入 Tauri updater 签名：构建 `.dmg`、`.app.tar.gz` 与 `.sig`，正式版发布时额外生成 `latest.json`；RC / beta / alpha 不生成自动更新源。
 - 修复 GitHub Actions release job 上传路径：Tauri workspace 构建产物位于根目录 `target/release/bundle`，避免 `upload-artifact` 继续读取 `src-tauri/target/...` 后报 `No files were found`。
+- 升级 GitHub Actions 中的 `checkout` / `setup-node` / `pnpm/action-setup` / artifact actions 到 Node 24 runtime 版本，消除 Node.js 20 deprecation warning。
 - ⏸️ playwright E2E 因 Tauri WebDriver 不支持 macOS 推迟（留将来 Linux CI / Week 5 dogfooding）。
 
 ### ✨ 新功能
