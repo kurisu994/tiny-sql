@@ -9,6 +9,7 @@ import {
   connectionApi,
   dbApi,
   translateError,
+  type CreateDatabaseInput,
   type DatabaseMeta,
   type HopStatusPayload,
   type RowSet,
@@ -89,6 +90,7 @@ interface SessionState {
   submitPassphrase: (passphrase: string) => Promise<void>;
   cancelPassphrase: () => void;
   selectDb: (db: string) => Promise<void>;
+  createDatabase: (id: string, input: CreateDatabaseInput) => Promise<void>;
   selectTable: (table: string) => Promise<void>;
   setSqlText: (sql: string) => void;
   executeSql: (
@@ -208,6 +210,40 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ tables, loadingData: false });
     } catch (e) {
       set({ errorMsg: translateError(e), loadingData: false });
+    }
+  },
+
+  createDatabase: async (id, input) => {
+    const { openId } = get();
+    if (openId !== id) {
+      const err = "error.connection.not_open";
+      set({ errorMsg: translateError(err) });
+      return Promise.reject(err);
+    }
+    const name = input.name.trim();
+    set({
+      loadingData: true,
+      errorMsg: null,
+      queryErrorMsg: null,
+    });
+    try {
+      await dbApi.createDatabase(id, {
+        name,
+        charset: input.charset,
+        collation: input.collation,
+      });
+      const databases = await dbApi.listDatabases(id);
+      set({
+        databases,
+        selectedDb: name,
+        tables: [],
+        selectedTable: null,
+        rowSet: null,
+        loadingData: false,
+      });
+    } catch (e) {
+      set({ errorMsg: translateError(e), loadingData: false });
+      throw e;
     }
   },
 

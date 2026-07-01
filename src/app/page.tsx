@@ -6,6 +6,7 @@ import { PlusIcon } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ConnectionDialogs } from "@/components/connection-dialogs";
 import { ConnectionForm } from "@/components/connection-form";
+import { CreateDatabaseDialog } from "@/components/create-database-dialog";
 import { SchemaBrowser } from "@/components/schema-browser";
 import { UpdateDialog } from "@/components/update-dialog";
 import {
@@ -37,6 +38,8 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // 表单弹窗状态
   const [form, setForm] = useState<FormState>(null);
+  const [databaseDialogConn, setDatabaseDialogConn] =
+    useState<StoredConnection | null>(null);
 
   const sessionStatus = useSessionStore((s) => s.status);
   const openId = useSessionStore((s) => s.openId);
@@ -117,6 +120,13 @@ export default function Home() {
       <ConnectionDialogs />
       <ConfirmDialog />
       <UpdateDialog updateInfo={updateInfo} onDismiss={dismissUpdate} />
+      <CreateDatabaseDialog
+        open={databaseDialogConn !== null}
+        connection={databaseDialogConn}
+        onOpenChange={(open) => {
+          if (!open) setDatabaseDialogConn(null);
+        }}
+      />
 
       {/* 新建 / 编辑连接弹窗 */}
       <Dialog
@@ -181,6 +191,7 @@ export default function Home() {
           <ul>
             {connections.map((c) => {
               const isOpen = openId === c.id;
+              const isConnected = isOpen && sessionStatus === "connected";
               const connecting = sessionStatus === "connecting";
               return (
                 <li
@@ -233,6 +244,12 @@ export default function Home() {
                         onSelect={() => openSession(c)}
                       >
                         进入命令列界面
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        disabled={!isConnected}
+                        onSelect={() => setDatabaseDialogConn(c)}
+                      >
+                        新建数据库
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem onSelect={() => openEdit(c)}>

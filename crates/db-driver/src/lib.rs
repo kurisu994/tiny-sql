@@ -42,6 +42,8 @@ pub enum DriverError {
     WriteRequiresConfirmation,
     #[error("error.driver.query_cancelled")]
     QueryCancelled,
+    #[error("error.driver.invalid_identifier")]
+    InvalidIdentifier,
 }
 
 impl DriverError {
@@ -53,6 +55,7 @@ impl DriverError {
             Self::MultipleStatements => "error.driver.multiple_statements",
             Self::WriteRequiresConfirmation => "error.driver.write_requires_confirmation",
             Self::QueryCancelled => "error.driver.query_cancelled",
+            Self::InvalidIdentifier => "error.driver.invalid_identifier",
         }
     }
 }
@@ -296,6 +299,21 @@ impl MySqlDriver {
             .collect())
     }
 
+    /// 创建 database。库名使用反引号安全转义；字符集 / 排序规则只允许 MySQL 标识符字符。
+    pub async fn create_database(
+        &self,
+        name: &str,
+        charset: Option<&str>,
+        collation: Option<&str>,
+    ) -> Result<(), DriverError> {
+        let sql = build_create_database_sql(name, charset, collation)?;
+        sqlx::query(&sql)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        Ok(())
+    }
+
     /// 列出指定 database 下的所有表。
     pub async fn list_tables(&self, database: &str) -> Result<Vec<TableMeta>, DriverError> {
         // table_rows 是 BIGINT UNSIGNED，CAST 成 SIGNED 避免 unsigned 解码踩坑
@@ -519,6 +537,52 @@ async fn connect_pool(
 
 fn non_empty_path(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn build_create_database_sql(
+    name: &str,
+    charset: Option<&str>,
+    collation: Option<&str>,
+) -> Result<String, DriverError> {
+    let name = validate_database_name(name)?;
+    let mut sql = format!("CREATE DATABASE {}", quote_mysql_identifier(name));
+
+    if let Some(charset) = normalize_mysql_option_ident(charset)? {
+        sql.push_str(" DEFAULT CHARACTER SET = ");
+        sql.push_str(charset);
+    }
+    if let Some(collation) = normalize_mysql_option_ident(collation)? {
+        sql.push_str(" DEFAULT COLLATE = ");
+        sql.push_str(collation);
+    }
+
+    Ok(sql)
+}
+
+fn validate_database_name(name: &str) -> Result<&str, DriverError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 64 || name.contains('\0') {
+        return Err(DriverError::InvalidIdentifier);
+    }
+    Ok(name)
+}
+
+fn normalize_mysql_option_ident(value: Option<&str>) -> Result<Option<&str>, DriverError> {
+    let Some(value) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        Ok(Some(value))
+    } else {
+        Err(DriverError::InvalidIdentifier)
+    }
+}
+
+fn quote_mysql_identifier(value: &str) -> String {
+    format!("`{}`", value.replace('`', "``"))
 }
 
 fn url_has_ssl_mode(url: &str) -> bool {
@@ -842,5 +906,30 @@ mod tests {
             MySqlTlsMode::VerifyIdentity
         );
         assert!("unknown".parse::<MySqlTlsMode>().is_err());
+    }
+
+    #[test]
+    fn create_database_sql_quotes_name_and_options() {
+        assert_eq!(
+            build_create_database_sql("app", None, None).unwrap(),
+            "CREATE DATABASE `app`"
+        );
+        assert_eq!(
+            build_create_database_sql("new`db", Some("utf8mb4"), Some("utf8mb4_unicode_ci"))
+                .unwrap(),
+            "CREATE DATABASE `new``db` DEFAULT CHARACTER SET = utf8mb4 DEFAULT COLLATE = utf8mb4_unicode_ci"
+        );
+    }
+
+    #[test]
+    fn create_database_sql_rejects_invalid_identifiers() {
+        assert!(matches!(
+            build_create_database_sql("", None, None),
+            Err(DriverError::InvalidIdentifier)
+        ));
+        assert!(matches!(
+            build_create_database_sql("app", Some("utf8mb4;DROP"), None),
+            Err(DriverError::InvalidIdentifier)
+        ));
     }
 }

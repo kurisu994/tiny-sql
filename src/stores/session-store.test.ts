@@ -90,6 +90,39 @@ describe("session-store", () => {
     expect(useSessionStore.getState().rowSet?.rows).toHaveLength(1);
   });
 
+  it("createDatabase 成功后刷新列表并选中新库", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      status: "connected",
+      databases: [{ name: "app" }],
+      selectedDb: "app",
+      tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
+      rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+    });
+    routeInvoke({
+      db_create_database: undefined,
+      db_list_databases: [{ name: "app" }, { name: "new_db" }],
+    });
+
+    await useSessionStore.getState().createDatabase("c1", {
+      name: " new_db ",
+      charset: "utf8mb4",
+      collation: "",
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("db_create_database", {
+      id: "c1",
+      name: "new_db",
+      charset: "utf8mb4",
+      collation: null,
+    });
+    const s = useSessionStore.getState();
+    expect(s.databases).toEqual([{ name: "app" }, { name: "new_db" }]);
+    expect(s.selectedDb).toBe("new_db");
+    expect(s.tables).toEqual([]);
+    expect(s.rowSet).toBeNull();
+  });
+
   it("executeSql 使用 10w 默认上限并可取消 query", async () => {
     useSessionStore.setState({ openId: "c1" });
     routeInvoke({

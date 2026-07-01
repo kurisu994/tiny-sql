@@ -34,6 +34,22 @@ pub async fn db_list_databases(
         .map_err(|e| e.i18n_key().to_string())
 }
 
+/// 创建 database，并由 db-driver 负责标识符转义与字符集参数校验。
+#[tauri::command]
+pub async fn db_create_database(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    charset: Option<String>,
+    collation: Option<String>,
+) -> Result<(), String> {
+    driver_of(&state, &id)
+        .await?
+        .create_database(&name, charset.as_deref(), collation.as_deref())
+        .await
+        .map_err(|e| e.i18n_key().to_string())
+}
+
 /// 列出指定 database 下所有表。
 #[tauri::command]
 pub async fn db_list_tables(

@@ -6,6 +6,9 @@ describe("translateError", () => {
   it("已知 i18n key 翻译成中文", () => {
     expect(translateError("error.driver.connect_failed")).toBe("MySQL 连接失败");
     expect(translateError("error.ssh.auth_failed")).toBe("SSH 认证失败");
+    expect(translateError("error.driver.invalid_identifier")).toBe(
+      "数据库名称或字符集配置不合法",
+    );
   });
 
   it("未知 key 原样返回", () => {

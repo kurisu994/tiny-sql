@@ -104,6 +104,7 @@ export const ERROR_ZH: Record<string, string> = {
   "error.driver.multiple_statements": "一次只能执行一条 SQL",
   "error.driver.write_requires_confirmation": "检测到写操作，需要二次确认",
   "error.driver.query_cancelled": "SQL 已取消",
+  "error.driver.invalid_identifier": "数据库名称或字符集配置不合法",
   "error.connection.not_found": "连接配置不存在",
   "error.connection.not_open": "连接尚未打开",
 };
@@ -241,10 +242,24 @@ export interface QueryOptions {
   allowWrite?: boolean;
 }
 
+/** 新建 database 入参 */
+export interface CreateDatabaseInput {
+  name: string;
+  charset?: string | null;
+  collation?: string | null;
+}
+
 /** 基于已打开连接的数据浏览 command */
 export const dbApi = {
   listDatabases: (id: string) =>
     invoke<DatabaseMeta[]>("db_list_databases", { id }),
+  createDatabase: (id: string, input: CreateDatabaseInput) =>
+    invoke<void>("db_create_database", {
+      id,
+      name: input.name,
+      charset: input.charset?.trim() ? input.charset.trim() : null,
+      collation: input.collation?.trim() ? input.collation.trim() : null,
+    }),
   listTables: (id: string, database: string) =>
     invoke<TableMeta[]>("db_list_tables", { id, database }),
   listColumns: (id: string, database: string, table: string) =>
