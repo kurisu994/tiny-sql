@@ -116,6 +116,11 @@ export function translateError(e: unknown): string {
 
 // === 应用更新 ===
 
+/** 应用级原生菜单事件 */
+export const APP_EVENTS = {
+  checkUpdate: "app:check-update",
+} as const;
+
 /** Tauri updater 检测到的新版本信息 */
 export interface UpdateInfo {
   currentVersion: string;

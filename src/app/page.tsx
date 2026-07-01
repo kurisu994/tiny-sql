@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PlusIcon, RefreshCwIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ConnectionDialogs } from "@/components/connection-dialogs";
@@ -46,10 +46,8 @@ export default function Home() {
   const confirm = useConfirmStore((s) => s.confirm);
   const {
     updateInfo,
-    checking: checkingUpdate,
     checkError,
     checkNotice,
-    manualCheck,
     dismissUpdate,
   } = useUpdateChecker();
 
@@ -153,20 +151,6 @@ export default function Home() {
             />
           </h1>
           <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              title={checkingUpdate ? "正在检查更新" : "检查更新"}
-              onClick={() => void manualCheck()}
-              disabled={checkingUpdate}
-            >
-              <RefreshCwIcon
-                data-icon="inline-start"
-                className={cn(checkingUpdate && "animate-spin")}
-              />
-              <span className="sr-only">检查更新</span>
-            </Button>
             <Button type="button" size="sm" onClick={startCreate}>
               <PlusIcon data-icon="inline-start" />
               新建

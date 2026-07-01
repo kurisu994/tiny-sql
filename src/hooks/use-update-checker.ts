@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { listen } from "@tauri-apps/api/event";
+
 import {
+  APP_EVENTS,
   isTauriRuntime,
   translateError,
   updateApi,
@@ -61,6 +64,17 @@ export function useUpdateChecker() {
       setChecking(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const un = listen(APP_EVENTS.checkUpdate, () => {
+      void checkForUpdate(true);
+    });
+
+    return () => {
+      un.then((f) => f());
+    };
+  }, [checkForUpdate]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;

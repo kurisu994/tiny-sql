@@ -6,10 +6,11 @@
 
 ## 当前状态
 
-**Week 5 进行中（正式版发布准备 + 自动更新已接入，dogfooding 待完成）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地；连接管理交互已改成 Navicat 风格并接入 shadcn/ui。本轮在确认“自动更新只跟随正式版、RC 不作为更新源”后，把 `tauri-plugin-updater` 接入 v0.1：应用启动后每日检查一次 GitHub latest 正式版，左侧工具区可手动检查，release workflow 生成 signed updater artifact 和正式版 `latest.json`。随后收敛发布触发链路：`just release` 推送版本提交时不再重复触发 `ci.yml`，后续由 tag push 触发 `release.yml` 全平台打包发布。最新一次正式版 workflow 卡在 `latest.json` 生成：脚本误找 Linux `.AppImage.tar.gz`，但 Tauri 实际产出 `.AppImage` + `.AppImage.sig`；本轮已修正 manifest 匹配和发布文档。当前 `CHANGELOG.md` 已按用户可见功能大项重写，不再按 crate、workflow、API 和产物路径展开技术细节。最新一轮把新建 / 编辑连接弹窗改成标签页布局，常规、SSH、SSL 和高级设置分开，并把 SSL / 高级配置纳入连接配置契约。
+**Week 5 进行中（正式版发布准备 + 自动更新已接入，dogfooding 待完成）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地；连接管理交互已改成 Navicat 风格并接入 shadcn/ui。本轮在确认“自动更新只跟随正式版、RC 不作为更新源”后，把 `tauri-plugin-updater` 接入 v0.1：应用启动后每日检查一次 GitHub latest 正式版，macOS 应用菜单可手动检查，release workflow 生成 signed updater artifact 和正式版 `latest.json`。随后收敛发布触发链路：`just release` 推送版本提交时不再重复触发 `ci.yml`，后续由 tag push 触发 `release.yml` 全平台打包发布。最新一次正式版 workflow 卡在 `latest.json` 生成：脚本误找 Linux `.AppImage.tar.gz`，但 Tauri 实际产出 `.AppImage` + `.AppImage.sig`；本轮已修正 manifest 匹配和发布文档。当前 `CHANGELOG.md` 已按用户可见功能大项重写，不再按 crate、workflow、API 和产物路径展开技术细节。最新一轮把新建 / 编辑连接弹窗改成标签页布局，常规、SSH、SSL 和高级设置分开，并把 SSL / 高级配置纳入连接配置契约；随后把检查更新入口从连接列表头部移到 macOS 应用菜单。
 
 - ✅ 连接列表交互重做：去掉行内「连接」按钮，改右键菜单（连接 / 断开 / 进入命令列界面 / 编辑 / 复制 / 删除）+ 单击选中 + 双击连接；新建/编辑改 shadcn `Dialog` 弹窗；删除与写操作确认从 `window.confirm` 换成 shadcn `AlertDialog`（全局 `confirm-store`）。
 - ✅ 连接表单标签页：新增本地 shadcn/radix 风格 `Tabs` 组件；新建 / 编辑连接弹窗拆为常规 / SSH / SSL / 高级；SSL mode 与证书路径持久化并传给 `db-driver`；高级设置保存保持连接、连接 / 读取 / 写入超时、压缩、自动连接，其中连接超时已接入 MySQL 连接建立路径。
+- ✅ 检查更新入口迁移：连接列表头部不再显示更新按钮；macOS 应用菜单新增 `Check for Updates...`，点击后通过 `app:check-update` 事件复用现有手动检查、无更新提示和更新弹窗逻辑。
 - ✅ 接入 shadcn/ui（radix-nova、radix 基库）：`components.json` + `src/lib/utils.ts` + `src/components/ui/*`；暗色保持 `prefers-color-scheme` 跟随系统（不切 `.dark` class），还原 system 中文字体栈（移除 init 引入的 Geist Google 字体）。
 - ✅ 自动更新：后端注册 `tauri-plugin-updater` / `tauri-plugin-process`；前端新增 `updateApi`、`useUpdateChecker` 和 `UpdateDialog`；release workflow 用 `TAURI_SIGNING_PRIVATE_KEY` 签名各平台 updater artifact，正式版生成 `latest.json`，RC / beta / alpha 跳过。
 - ✅ 发布触发分流：`ci.yml` 对 `just release` 产生的版本号 / CHANGELOG 提交启用 `paths-ignore`，`just version` 会刷新 `Cargo.lock` 中 `tiny-sql` 本地 package 版本，`just release` 同步暂存 `Cargo.lock`；tag push 仍由 `release.yml` 执行全平台打包和 GitHub Release。
@@ -51,8 +52,8 @@
 - `README.md` + `docs/dogfooding-log.template.md` — Week 5 dogfooding 说明、macOS 首次打开说明与脱敏记录模板。
 - `docs/RELEASE_CHECKLIST.md` + `CHANGELOG.md` — v0.1 RC/正式发布检查、全平台 release、updater 签名与 stable-only 自动更新说明。
 - `.env`（ignored）+ `.env.example` — 本地 updater 签名变量；`.env` 已按 Redis 项目格式写入真实私钥，`.env.example` 只保留空占位。
-- `src-tauri/{Cargo.toml,tauri.conf.json,capabilities/default.json,src/lib.rs}` — Tauri updater/process 插件、updater 公钥、GitHub latest endpoint、权限配置。
-- `src/lib/tauri-api.ts` + `src/hooks/use-update-checker.ts` + `src/components/update-dialog.tsx` — 前端 updater API、每日/手动检查逻辑、下载安装弹窗。
+- `src-tauri/{Cargo.toml,tauri.conf.json,capabilities/default.json,src/lib.rs}` — Tauri updater/process 插件、updater 公钥、GitHub latest endpoint、权限配置，以及 macOS 应用菜单 `Check for Updates...` 事件触发。
+- `src/lib/tauri-api.ts` + `src/hooks/use-update-checker.ts` + `src/components/update-dialog.tsx` — 前端 updater API、每日检查、菜单触发的手动检查、下载安装弹窗。
 - `src/components/ui/{dialog,alert-dialog,context-menu,button,tabs}.tsx` + `src/lib/utils.ts` — shadcn/ui 组件与 `cn`。
 - `src/components/confirm-dialog.tsx` + `src/stores/confirm-store.ts` — 全局命令式确认弹窗（替代 `window.confirm`）。
 - `src/app/{page.tsx,globals.css,layout.tsx}` — 连接列表右键菜单 + 表单弹窗、shadcn 主题变量（暗色跟随系统）、字体还原。
@@ -74,6 +75,7 @@
 - **Linux updater 产物用 `.AppImage` 本体**：Tauri 2 Linux AppImage 构建实际生成 `tiny-sql_*_amd64.AppImage` 与同名 `.sig`；`latest.json` 的 `linux-x86_64.url` 应指向 `.AppImage`，不要再找 `.AppImage.tar.gz`。
 - **Release notes 以 CHANGELOG 为准**：publish job checkout 后优先从 `CHANGELOG.md` 的 `## [${version}]` 段提取 notes；预发布 tag 找不到独立版本段时改用 `[Unreleased]`，最后才降级为 `tiny-sql ${GITHUB_REF_NAME}`；RC tag 自动带 `--prerelease --latest=false`。
 - **自动更新只跟随正式版**：updater endpoint 固定 GitHub latest release 的 `latest.json`；workflow 对 `v*-rc*` / beta / alpha 只上传构建产物，不生成 `latest.json`，避免旧正式版升级到 RC。
+- **手动检查更新走 macOS 应用菜单**：连接列表头部只保留连接管理动作；`Check for Updates...` 位于系统应用菜单，Rust 侧发 `app:check-update`，前端 `useUpdateChecker` 复用原来的手动检查和弹窗状态。
 - **Tauri updater 签名不等于 Apple Developer 代码签名**：v0.1 仍无 notarization，README 继续保留右键打开 / `xattr -cr`；updater minisign 只用于校验更新包完整性。
 - **CI 重命名 macOS updater artifact**：Tauri 默认 macOS 产物名为 `tiny-sql.app.tar.gz`，双架构会同名；release workflow 按 `matrix.arch` 重命名为 `*_arm64.app.tar.gz` / `*_x64.app.tar.gz` 后再生成平台清单。
 - **v0.1 全平台先覆盖主流 x64**：本轮先把发布平台扩到 macOS arm64/x64、Windows x64、Linux x64；Linux ARM、Windows ARM 和平台代码签名留后续打磨。
@@ -88,7 +90,7 @@
 
 ## 下一步（Week 5）
 
-1. 用真实 Tauri GUI 点新建 / 编辑连接弹窗，确认常规 / SSH / SSL / 高级标签页焦点、滚动、保存和测试连接手感正常。
+1. 用真实 Tauri GUI 点新建 / 编辑连接弹窗和 macOS 应用菜单 `Check for Updates...`，确认常规 / SSH / SSL / 高级标签页焦点、滚动、保存、测试连接、菜单检查更新和无更新/有更新反馈手感正常。
 2. 提交并重新触发正式版 tag workflow，确认 GitHub Release 里 macOS `.dmg` / `.app.tar.gz` / `.sig`、Windows `.exe` / `.sig`、Linux `.AppImage` / `.sig` 都存在，正式版附带 `latest.json`。
 3. RC 前：把 `.env` 中的 updater 私钥内容配置到 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。刷新远端状态，确认工作区只含发布相关改动；跑 `just check`、`just test-integration`、`just build`，并至少用本机平台产物做 GUI smoke。
 4. 后续 RC：若需要新 RC tag，先发 `v0.1.0-rcN`，验证版本提交没有重复触发 `ci.yml`，并确认全平台产物齐全。
@@ -98,7 +100,7 @@
 
 ## 阻塞 / 待确认
 
-- **连接列表和 tab 表单待真实 GUI 验证**：右键菜单 → 编辑/删除弹窗的焦点、表单弹窗内再叠确认弹窗、以及常规 / SSH / SSL / 高级标签页布局只过了 `tsc` / `vitest` / `cargo test` / `clippy` / `next build` 静态验证；本轮内置浏览器工具无可用实例，未能自动截图目检，也未在 Tauri 实机点过。
+- **连接列表、tab 表单和更新菜单待真实 GUI 验证**：右键菜单 → 编辑/删除弹窗的焦点、表单弹窗内再叠确认弹窗、常规 / SSH / SSL / 高级标签页布局，以及 macOS 应用菜单 `Check for Updates...` 只过了 `tsc` / `vitest` / `cargo test` / `clippy` / `next build` 静态验证；本轮未在 Tauri 实机点过。
 - **自动更新端到端待云端验证**：本地 macOS 已生成 updater tar/signature；Linux manifest 已改为 `.AppImage` + `.sig`，但尚未通过 GitHub Actions 全平台 release 生成真实 `latest.json`，也尚未从旧版本验证应用内更新。
 - **CP-4 GUI/dogfooding 仍待真实环境**：本轮只做静态验证、浏览器首屏目检和本地 .dmg 打包；未连真实 3 跳 SSH/MySQL，也未验证 `SHOW PROCESSLIST` 中 KILL 后 query 消失。
 - **CP-3** MySQL 5.7 兼容仍留 Week 5 dogfooding。

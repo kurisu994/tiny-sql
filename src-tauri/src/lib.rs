@@ -3,6 +3,8 @@
 //! 组装层：把前端 IPC 转给 config（加密 store）/ db-driver（MySQL）/ ssh-multihop（隧道）。
 //! command 实现见 [`commands`]，全局状态见 [`state`]。
 
+#[cfg(desktop)]
+use tauri::Emitter;
 use tauri::Manager;
 
 pub mod commands;
@@ -10,14 +12,49 @@ pub mod config;
 pub mod state;
 pub mod tofu;
 
+#[cfg(desktop)]
+const CHECK_UPDATE_MENU_ID: &str = "check_update";
+#[cfg(desktop)]
+const CHECK_UPDATE_EVENT: &str = "app:check-update";
+
+#[cfg(target_os = "macos")]
+fn setup_app_menu<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind};
+
+    let menu = Menu::default(app.handle())?;
+    if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
+        let check_update = MenuItem::with_id(
+            app.handle(),
+            CHECK_UPDATE_MENU_ID,
+            "Check for Updates...",
+            true,
+            None::<&str>,
+        )?;
+        app_menu.insert(&check_update, 1)?;
+    }
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_process::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_process::init());
+
+    #[cfg(desktop)]
+    let builder = builder.on_menu_event(|app, event| {
+        if event.id() == CHECK_UPDATE_MENU_ID {
+            let _ = app.emit(CHECK_UPDATE_EVENT, ());
+        }
+    });
+
+    builder
         .setup(|app| {
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            #[cfg(target_os = "macos")]
+            setup_app_menu(app)?;
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
