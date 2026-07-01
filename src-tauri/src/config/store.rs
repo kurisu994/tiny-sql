@@ -34,6 +34,12 @@ pub struct StoredConnection {
     /// SSH 隧道配置（Week 3 填充，Week 2 默认 disabled）
     #[serde(default)]
     pub ssh: SshConfig,
+    /// MySQL SSL 配置。v0.1 默认禁用，避免 sqlx Preferred 在内网库上误握手。
+    #[serde(default)]
+    pub ssl: SslConfig,
+    /// 连接高级设置。部分字段先持久化，driver 支持后逐步接线。
+    #[serde(default)]
+    pub advanced: AdvancedConfig,
     /// 最近使用时间（ISO 8601），用于列表排序（FR-003）
     #[serde(default)]
     pub last_used_at: Option<String>,
@@ -49,6 +55,74 @@ pub struct SshConfig {
     pub hops: Vec<SshHop>,
 }
 
+/// MySQL SSL 配置 —— mode 取 disabled/preferred/required/verify_ca/verify_identity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SslConfig {
+    #[serde(default = "default_ssl_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub ca_path: String,
+    #[serde(default)]
+    pub client_cert_path: String,
+    #[serde(default)]
+    pub client_key_path: String,
+}
+
+impl Default for SslConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_ssl_mode(),
+            ca_path: String::new(),
+            client_cert_path: String::new(),
+            client_key_path: String::new(),
+        }
+    }
+}
+
+/// 连接高级设置 —— 与前端高级 tab 保持 camelCase 对齐
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedConfig {
+    #[serde(default)]
+    pub keep_alive_enabled: bool,
+    #[serde(default = "default_keep_alive_interval_seconds")]
+    pub keep_alive_interval_seconds: u64,
+    #[serde(default = "default_true")]
+    pub connect_timeout_enabled: bool,
+    #[serde(default = "default_timeout_seconds")]
+    pub connect_timeout_seconds: u64,
+    #[serde(default)]
+    pub read_timeout_enabled: bool,
+    #[serde(default = "default_timeout_seconds")]
+    pub read_timeout_seconds: u64,
+    #[serde(default = "default_true")]
+    pub write_timeout_enabled: bool,
+    #[serde(default = "default_timeout_seconds")]
+    pub write_timeout_seconds: u64,
+    #[serde(default)]
+    pub compression_enabled: bool,
+    #[serde(default)]
+    pub auto_connect: bool,
+}
+
+impl Default for AdvancedConfig {
+    fn default() -> Self {
+        Self {
+            keep_alive_enabled: false,
+            keep_alive_interval_seconds: default_keep_alive_interval_seconds(),
+            connect_timeout_enabled: true,
+            connect_timeout_seconds: default_timeout_seconds(),
+            read_timeout_enabled: false,
+            read_timeout_seconds: default_timeout_seconds(),
+            write_timeout_enabled: true,
+            write_timeout_seconds: default_timeout_seconds(),
+            compression_enabled: false,
+            auto_connect: false,
+        }
+    }
+}
+
 /// 单跳 SSH 节点（持久化模型，不含 passphrase）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +136,22 @@ pub struct SshHop {
     pub password: Option<String>,
     #[serde(default)]
     pub private_key_path: Option<String>,
+}
+
+fn default_ssl_mode() -> String {
+    "disabled".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_timeout_seconds() -> u64 {
+    30
+}
+
+fn default_keep_alive_interval_seconds() -> u64 {
+    240
 }
 
 /// 连接存储管理器 —— 负责连接配置的加密读写
@@ -159,6 +249,8 @@ mod tests {
             password: "p@ss-w0rd".to_string(),
             database: "app".to_string(),
             ssh: SshConfig::default(),
+            ssl: SslConfig::default(),
+            advanced: AdvancedConfig::default(),
             last_used_at: None,
         }
     }
@@ -175,6 +267,27 @@ mod tests {
         assert_eq!(loaded[0].password, "p@ss-w0rd");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_ssl_and_advanced_get_defaults() {
+        let raw = r#"{
+            "id": "c1",
+            "name": "legacy",
+            "host": "127.0.0.1",
+            "port": 3306,
+            "user": "root",
+            "password": "",
+            "database": "",
+            "ssh": { "enabled": false, "hops": [] }
+        }"#;
+        let conn: StoredConnection = serde_json::from_str(raw).unwrap();
+
+        assert_eq!(conn.ssl.mode, "disabled");
+        assert!(conn.advanced.connect_timeout_enabled);
+        assert_eq!(conn.advanced.connect_timeout_seconds, 30);
+        assert_eq!(conn.advanced.keep_alive_interval_seconds, 240);
+        assert!(conn.advanced.write_timeout_enabled);
     }
 
     #[test]

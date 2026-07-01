@@ -24,6 +24,24 @@ describe("ConnectionForm", () => {
       password: "",
       database: "",
       ssh: { enabled: false, hops: [] },
+      ssl: {
+        mode: "disabled",
+        caPath: "",
+        clientCertPath: "",
+        clientKeyPath: "",
+      },
+      advanced: {
+        keepAliveEnabled: false,
+        keepAliveIntervalSeconds: 240,
+        connectTimeoutEnabled: true,
+        connectTimeoutSeconds: 30,
+        readTimeoutEnabled: false,
+        readTimeoutSeconds: 30,
+        writeTimeoutEnabled: true,
+        writeTimeoutSeconds: 30,
+        compressionEnabled: false,
+        autoConnect: false,
+      },
     };
     render(<ConnectionForm editing={conn} onDone={() => {}} />);
     expect(screen.getByText(/编辑连接：prod-db/)).toBeInTheDocument();

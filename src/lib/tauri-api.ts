@@ -26,6 +26,35 @@ export interface SshConfig {
   hops: SshHopConfig[];
 }
 
+export type SslMode =
+  | "disabled"
+  | "preferred"
+  | "required"
+  | "verify_ca"
+  | "verify_identity";
+
+/** MySQL SSL 配置 */
+export interface SslConfig {
+  mode: SslMode;
+  caPath: string;
+  clientCertPath: string;
+  clientKeyPath: string;
+}
+
+/** 连接高级配置 */
+export interface AdvancedConfig {
+  keepAliveEnabled: boolean;
+  keepAliveIntervalSeconds: number;
+  connectTimeoutEnabled: boolean;
+  connectTimeoutSeconds: number;
+  readTimeoutEnabled: boolean;
+  readTimeoutSeconds: number;
+  writeTimeoutEnabled: boolean;
+  writeTimeoutSeconds: number;
+  compressionEnabled: boolean;
+  autoConnect: boolean;
+}
+
 /** 持久化的连接配置（与后端 StoredConnection 对齐，camelCase） */
 export interface StoredConnection {
   id: string;
@@ -36,6 +65,8 @@ export interface StoredConnection {
   password: string;
   database: string;
   ssh: SshConfig;
+  ssl: SslConfig;
+  advanced: AdvancedConfig;
   lastUsedAt?: string | null;
 }
 
@@ -48,6 +79,8 @@ export interface ConnectionInput {
   password: string;
   database: string;
   ssh: SshConfig;
+  ssl: SslConfig;
+  advanced: AdvancedConfig;
 }
 
 /** 错误 i18n key → 中文文案 */

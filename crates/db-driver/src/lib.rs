@@ -10,11 +10,13 @@
 //! Week 2 范围：connect / ping / list_databases / list_tables / list_columns / query。
 //! query 的子查询包装防 OOM、10w 行截断、独立 control connection KILL QUERY 取消留 Week 4。
 
+use std::str::FromStr;
 use std::time::Duration;
 
 use futures_util::TryStreamExt;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow, MySqlSslMode};
 use sqlx::{Column, ConnectOptions, Executor, MySqlPool, Row, TypeInfo, ValueRef};
+use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 /// 表浏览默认服务端行数上限（FR-021）。
@@ -143,6 +145,56 @@ pub struct MySqlDriver {
     control_pool: MySqlPool,
 }
 
+/// MySQL SSL 模式。默认禁用以适配内网 MySQL；需要 TLS 时由连接配置显式启用。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MySqlTlsMode {
+    #[default]
+    Disabled,
+    Preferred,
+    Required,
+    VerifyCa,
+    VerifyIdentity,
+}
+
+impl MySqlTlsMode {
+    fn to_sqlx(self) -> MySqlSslMode {
+        match self {
+            Self::Disabled => MySqlSslMode::Disabled,
+            Self::Preferred => MySqlSslMode::Preferred,
+            Self::Required => MySqlSslMode::Required,
+            Self::VerifyCa => MySqlSslMode::VerifyCa,
+            Self::VerifyIdentity => MySqlSslMode::VerifyIdentity,
+        }
+    }
+}
+
+impl FromStr for MySqlTlsMode {
+    type Err = DriverError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "disabled" => Ok(Self::Disabled),
+            "preferred" => Ok(Self::Preferred),
+            "required" => Ok(Self::Required),
+            "verify_ca" => Ok(Self::VerifyCa),
+            "verify_identity" => Ok(Self::VerifyIdentity),
+            _ => Err(DriverError::ConnectFailed(format!(
+                "invalid mysql ssl mode: {value}"
+            ))),
+        }
+    }
+}
+
+/// MySQL 连接参数。除账号/地址外的可选项集中在这里，便于 UI 配置逐步接线。
+#[derive(Debug, Clone, Default)]
+pub struct MySqlConnectSettings {
+    pub ssl_mode: MySqlTlsMode,
+    pub ssl_ca_path: Option<String>,
+    pub ssl_client_cert_path: Option<String>,
+    pub ssl_client_key_path: Option<String>,
+    pub connect_timeout: Option<Duration>,
+}
+
 impl MySqlDriver {
     /// 建立连接池。`database` 为空字符串表示不指定默认库。
     pub async fn connect(
@@ -151,6 +203,26 @@ impl MySqlDriver {
         username: &str,
         password: &str,
         database: &str,
+    ) -> Result<Self, DriverError> {
+        Self::connect_with_settings(
+            host,
+            port,
+            username,
+            password,
+            database,
+            MySqlConnectSettings::default(),
+        )
+        .await
+    }
+
+    /// 按指定连接参数建立连接池。`database` 为空字符串表示不指定默认库。
+    pub async fn connect_with_settings(
+        host: &str,
+        port: u16,
+        username: &str,
+        password: &str,
+        database: &str,
+        settings: MySqlConnectSettings,
     ) -> Result<Self, DriverError> {
         // 用 ConnectOptions 而非 URL 拼接，避免密码里的特殊字符需要 URL 编码
         let mut opts = MySqlConnectOptions::new()
@@ -163,21 +235,20 @@ impl MySqlDriver {
         }
         // v0.1 不启用 MySQL TLS；sqlx 默认 PREFERRED 会在部分内网 MySQL 上握手失败。
         opts = opts
-            .ssl_mode(MySqlSslMode::Disabled)
+            .ssl_mode(settings.ssl_mode.to_sqlx())
             .log_statements(log::LevelFilter::Off);
+        if let Some(path) = non_empty_path(settings.ssl_ca_path.as_deref()) {
+            opts = opts.ssl_ca(path);
+        }
+        if let Some(path) = non_empty_path(settings.ssl_client_cert_path.as_deref()) {
+            opts = opts.ssl_client_cert(path);
+        }
+        if let Some(path) = non_empty_path(settings.ssl_client_key_path.as_deref()) {
+            opts = opts.ssl_client_key(path);
+        }
 
-        let pool = MySqlPoolOptions::new()
-            .max_connections(5)
-            .acquire_timeout(Duration::from_secs(10))
-            .connect_with(opts.clone())
-            .await
-            .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
-        let control_pool = MySqlPoolOptions::new()
-            .max_connections(1)
-            .acquire_timeout(Duration::from_secs(10))
-            .connect_with(opts)
-            .await
-            .map_err(|e| DriverError::ConnectFailed(e.to_string()))?;
+        let pool = connect_pool(opts.clone(), 5, settings.connect_timeout).await?;
+        let control_pool = connect_pool(opts, 1, settings.connect_timeout).await?;
 
         Ok(Self { pool, control_pool })
     }
@@ -424,6 +495,30 @@ fn mysql_options_from_url(url: &str) -> Result<MySqlConnectOptions, DriverError>
         opts = opts.ssl_mode(MySqlSslMode::Disabled);
     }
     Ok(opts.log_statements(log::LevelFilter::Off))
+}
+
+async fn connect_pool(
+    opts: MySqlConnectOptions,
+    max_connections: u32,
+    connect_timeout: Option<Duration>,
+) -> Result<MySqlPool, DriverError> {
+    let fut = MySqlPoolOptions::new()
+        .max_connections(max_connections)
+        .acquire_timeout(Duration::from_secs(10))
+        .connect_with(opts);
+    match connect_timeout {
+        Some(duration) => timeout(duration, fut)
+            .await
+            .map_err(|_| DriverError::ConnectFailed("connection timeout".to_string()))?
+            .map_err(|e| DriverError::ConnectFailed(e.to_string())),
+        None => fut
+            .await
+            .map_err(|e| DriverError::ConnectFailed(e.to_string())),
+    }
+}
+
+fn non_empty_path(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
 }
 
 fn url_has_ssl_mode(url: &str) -> bool {
@@ -738,5 +833,14 @@ mod tests {
                 .expect("URL 应能解析");
 
         assert!(matches!(opts.get_ssl_mode(), MySqlSslMode::Preferred));
+    }
+
+    #[test]
+    fn mysql_tls_mode_parses_frontend_values() {
+        assert_eq!(
+            "verify_identity".parse::<MySqlTlsMode>().unwrap(),
+            MySqlTlsMode::VerifyIdentity
+        );
+        assert!("unknown".parse::<MySqlTlsMode>().is_err());
     }
 }

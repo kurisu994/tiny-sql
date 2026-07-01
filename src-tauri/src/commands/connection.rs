@@ -1,10 +1,11 @@
 //! 连接管理命令 —— CRUD + 测试连接
 //!
-//! Week 2：纯本地连接 CRUD 与测试。connection_test 已支持可选多跳 SSH（复用
-//! ssh-multihop），但 SSH 配置 UI 留 Week 3，所以 UI 此阶段只填直连字段。
+//! 负责纯本地连接 CRUD 与测试。connection_test 支持可选多跳 SSH，并把
+//! SSL / 高级连接参数转换给 db-driver。
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
+use db_driver::{MySqlConnectSettings, MySqlTlsMode};
 use serde::{Deserialize, Serialize};
 use ssh_multihop::{
     HopStatusCallback, HopStatusEvent, HostKeyDecision, HostKeyQuery, HostKeyVerifier, SshAuth,
@@ -12,7 +13,7 @@ use ssh_multihop::{
 };
 use tauri::{AppHandle, Emitter, State};
 
-use crate::config::store::{self, SshConfig, StoredConnection};
+use crate::config::store::{self, AdvancedConfig, SshConfig, SslConfig, StoredConnection};
 use crate::state::{AppState, OpenConnection};
 
 /// 前端传入的连接配置（create / test 用，不含 id 与 last_used_at）
@@ -29,6 +30,10 @@ pub struct ConnectionInput {
     pub database: String,
     #[serde(default)]
     pub ssh: SshConfig,
+    #[serde(default)]
+    pub ssl: SslConfig,
+    #[serde(default)]
+    pub advanced: AdvancedConfig,
 }
 
 /// 列出所有连接，按最近使用时间倒序（FR-003）。
@@ -58,6 +63,8 @@ pub async fn connection_create(
         password: input.password,
         database: input.database,
         ssh: input.ssh,
+        ssl: input.ssl,
+        advanced: input.advanced,
         last_used_at: None,
     };
     state.store.lock().unwrap().upsert(conn.clone())?;
@@ -102,10 +109,17 @@ pub async fn connection_test(input: ConnectionInput) -> Result<(), String> {
         (addr.ip().to_string(), addr.port(), Some(tunnel))
     };
 
-    let driver =
-        db_driver::MySqlDriver::connect(&host, port, &input.user, &input.password, &input.database)
-            .await
-            .map_err(|e| e.i18n_key().to_string())?;
+    let settings = build_mysql_settings(&input.ssl, &input.advanced)?;
+    let driver = db_driver::MySqlDriver::connect_with_settings(
+        &host,
+        port,
+        &input.user,
+        &input.password,
+        &input.database,
+        settings,
+    )
+    .await
+    .map_err(|e| e.i18n_key().to_string())?;
     let result = driver.ping().await;
     driver.close().await;
     result.map_err(|e| e.i18n_key().to_string())?;
@@ -139,6 +153,37 @@ fn to_runtime_hop(hop: &store::SshHop, passphrase: Option<&str>) -> Result<SshHo
         username: hop.username.clone(),
         auth,
     })
+}
+
+/// 把前端连接配置里的 SSL/高级设置转成 db-driver 连接参数。
+fn build_mysql_settings(
+    ssl: &SslConfig,
+    advanced: &AdvancedConfig,
+) -> Result<MySqlConnectSettings, String> {
+    let ssl_mode = ssl
+        .mode
+        .parse::<MySqlTlsMode>()
+        .map_err(|e| e.i18n_key().to_string())?;
+    let connect_timeout = advanced
+        .connect_timeout_enabled
+        .then(|| Duration::from_secs(advanced.connect_timeout_seconds.max(1)));
+
+    Ok(MySqlConnectSettings {
+        ssl_mode,
+        ssl_ca_path: non_empty_owned(&ssl.ca_path),
+        ssl_client_cert_path: non_empty_owned(&ssl.client_cert_path),
+        ssl_client_key_path: non_empty_owned(&ssl.client_key_path),
+        connect_timeout,
+    })
+}
+
+fn non_empty_owned(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 /// keepalive 断开等运行期跳状态，emit 给前端的载荷
@@ -211,10 +256,17 @@ pub async fn connection_open(
         (conn.host.clone(), conn.port, None)
     };
 
-    let driver =
-        db_driver::MySqlDriver::connect(&host, port, &conn.user, &conn.password, &conn.database)
-            .await
-            .map_err(|e| e.i18n_key().to_string())?;
+    let settings = build_mysql_settings(&conn.ssl, &conn.advanced)?;
+    let driver = db_driver::MySqlDriver::connect_with_settings(
+        &host,
+        port,
+        &conn.user,
+        &conn.password,
+        &conn.database,
+        settings,
+    )
+    .await
+    .map_err(|e| e.i18n_key().to_string())?;
     // 立即 ping 确认握手成功（隧道桥接 + MySQL 认证）
     driver.ping().await.map_err(|e| e.i18n_key().to_string())?;
 

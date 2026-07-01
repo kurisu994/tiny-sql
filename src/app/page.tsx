@@ -94,6 +94,8 @@ export default function Home() {
       password: c.password,
       database: c.database,
       ssh: c.ssh,
+      ssl: c.ssl,
+      advanced: c.advanced,
     });
   }
 
@@ -125,7 +127,7 @@ export default function Home() {
           if (!open) closeForm();
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogTitle className="sr-only">
             {form?.mode === "edit" ? "编辑连接" : "新建连接"}
           </DialogTitle>

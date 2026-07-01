@@ -9,6 +9,24 @@ import type { StoredConnection } from "@/lib/tauri-api";
 import { useConnectionStore } from "@/stores/connection-store";
 
 const mockInvoke = vi.mocked(invoke);
+const defaultSsl = {
+  mode: "disabled" as const,
+  caPath: "",
+  clientCertPath: "",
+  clientKeyPath: "",
+};
+const defaultAdvanced = {
+  keepAliveEnabled: false,
+  keepAliveIntervalSeconds: 240,
+  connectTimeoutEnabled: true,
+  connectTimeoutSeconds: 30,
+  readTimeoutEnabled: false,
+  readTimeoutSeconds: 30,
+  writeTimeoutEnabled: true,
+  writeTimeoutSeconds: 30,
+  compressionEnabled: false,
+  autoConnect: false,
+};
 
 const sampleConn: StoredConnection = {
   id: "1",
@@ -19,6 +37,8 @@ const sampleConn: StoredConnection = {
   password: "",
   database: "",
   ssh: { enabled: false, hops: [] },
+  ssl: defaultSsl,
+  advanced: defaultAdvanced,
 };
 
 beforeEach(() => {
@@ -51,6 +71,8 @@ describe("connection-store", () => {
       password: "",
       database: "",
       ssh: { enabled: false, hops: [] },
+      ssl: defaultSsl,
+      advanced: defaultAdvanced,
     });
     expect(mockInvoke).toHaveBeenCalledWith("connection_create", {
       input: expect.objectContaining({ name: "a" }),

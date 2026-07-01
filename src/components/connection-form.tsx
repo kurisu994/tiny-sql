@@ -6,13 +6,24 @@ import { EyeIcon, EyeOffIcon } from "@/components/icons";
 import {
   connectionApi,
   translateError,
+  type AdvancedConfig,
   type ConnectionInput,
+  type SslConfig,
+  type SslMode,
   type SshConfig,
   type SshHopConfig,
   type StoredConnection,
 } from "@/lib/tauri-api";
+import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useConnectionStore } from "@/stores/connection-store";
+import { Button } from "@/components/ui/button";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 
 interface FormFields {
   name: string;
@@ -32,6 +43,36 @@ const EMPTY: FormFields = {
   database: "",
 };
 
+const DEFAULT_SSH: SshConfig = { enabled: false, hops: [] };
+
+const DEFAULT_SSL: SslConfig = {
+  mode: "disabled",
+  caPath: "",
+  clientCertPath: "",
+  clientKeyPath: "",
+};
+
+const DEFAULT_ADVANCED: AdvancedConfig = {
+  keepAliveEnabled: false,
+  keepAliveIntervalSeconds: 240,
+  connectTimeoutEnabled: true,
+  connectTimeoutSeconds: 30,
+  readTimeoutEnabled: false,
+  readTimeoutSeconds: 30,
+  writeTimeoutEnabled: true,
+  writeTimeoutSeconds: 30,
+  compressionEnabled: false,
+  autoConnect: false,
+};
+
+const SSL_MODE_OPTIONS: { value: SslMode; label: string }[] = [
+  { value: "disabled", label: "禁用" },
+  { value: "preferred", label: "优先使用" },
+  { value: "required", label: "必须使用" },
+  { value: "verify_ca", label: "验证 CA" },
+  { value: "verify_identity", label: "验证主机名" },
+];
+
 type TestState =
   | { kind: "idle" }
   | { kind: "testing" }
@@ -41,7 +82,7 @@ type TestState =
 /**
  * 连接编辑表单 —— 新建（editing=null）或编辑已有连接。
  *
- * Week 2 仅直连字段，SSH 跳板配置留 Week 3。父组件用 key 强制重挂载以重置表单。
+ * 父组件用 key 强制重挂载以重置表单。
  */
 export function ConnectionForm({
   editing,
@@ -67,7 +108,13 @@ export function ConnectionForm({
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
   const [ssh, setSsh] = useState<SshConfig>(
-    () => editing?.ssh ?? { enabled: false, hops: [] },
+    () => editing?.ssh ?? DEFAULT_SSH,
+  );
+  const [ssl, setSsl] = useState<SslConfig>(
+    () => ({ ...DEFAULT_SSL, ...editing?.ssl }),
+  );
+  const [advanced, setAdvanced] = useState<AdvancedConfig>(
+    () => ({ ...DEFAULT_ADVANCED, ...editing?.advanced }),
   );
 
   const toInput = (): ConnectionInput => ({
@@ -78,6 +125,8 @@ export function ConnectionForm({
     password: form.password,
     database: form.database,
     ssh,
+    ssl,
+    advanced,
   });
 
   const set = <K extends keyof FormFields>(key: K, value: FormFields[K]) =>
@@ -131,49 +180,81 @@ export function ConnectionForm({
         {editing ? `编辑连接：${editing.name}` : "新建连接"}
       </h2>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="连接名称" value={form.name} onChange={(v) => set("name", v)} />
-        <Field label="数据库（可空）" value={form.database} onChange={(v) => set("database", v)} />
-        <Field label="主机" value={form.host} onChange={(v) => set("host", v)} />
-        <Field
-          label="端口"
-          type="number"
-          value={String(form.port)}
-          onChange={(v) => set("port", Number(v))}
-        />
-        <Field label="用户" value={form.user} onChange={(v) => set("user", v)} />
-        <Field
-          label="密码"
-          type="password"
-          value={form.password}
-          onChange={(v) => set("password", v)}
-        />
-      </div>
+      <Tabs defaultValue="general">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="general">常规</TabsTrigger>
+          <TabsTrigger value="ssh">SSH</TabsTrigger>
+          <TabsTrigger value="ssl">SSL</TabsTrigger>
+          <TabsTrigger value="advanced">高级</TabsTrigger>
+        </TabsList>
 
-      <SshSection ssh={ssh} onChange={setSsh} />
+        <TabsContent value="general">
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="连接名称"
+              value={form.name}
+              onChange={(v) => set("name", v)}
+            />
+            <Field
+              label="数据库（可空）"
+              value={form.database}
+              onChange={(v) => set("database", v)}
+            />
+            <Field label="主机" value={form.host} onChange={(v) => set("host", v)} />
+            <Field
+              label="端口"
+              type="number"
+              value={String(form.port)}
+              onChange={(v) => set("port", Number(v))}
+            />
+            <Field label="用户" value={form.user} onChange={(v) => set("user", v)} />
+            <Field
+              label="密码"
+              type="password"
+              value={form.password}
+              onChange={(v) => set("password", v)}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="ssh">
+          <SshSection ssh={ssh} onChange={setSsh} />
+        </TabsContent>
+
+        <TabsContent value="ssl">
+          <SslSection ssl={ssl} onChange={setSsl} />
+        </TabsContent>
+
+        <TabsContent value="advanced">
+          <AdvancedSection advanced={advanced} onChange={setAdvanced} />
+        </TabsContent>
+      </Tabs>
 
       <div className="flex items-center gap-3">
-        <button
+        <Button
+          type="button"
+          variant="outline"
           onClick={onTest}
           disabled={test.kind === "testing"}
-          className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
         >
           {test.kind === "testing" ? "测试中…" : "测试连接"}
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
           onClick={onSave}
           disabled={!canSave || saving}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {saving ? "保存中…" : "保存"}
-        </button>
+        </Button>
         {editing && (
-          <button
+          <Button
+            type="button"
+            variant="destructive"
             onClick={onDelete}
-            className="ml-auto rounded-md px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+            className="ml-auto"
           >
             删除
-          </button>
+          </Button>
         )}
       </div>
 
@@ -196,11 +277,13 @@ function Field({
   value,
   onChange,
   type = "text",
+  disabled = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   type?: string;
+  disabled?: boolean;
 }) {
   const isPassword = type === "password";
   const [show, setShow] = useState(false);
@@ -213,15 +296,17 @@ function Field({
         <input
           type={inputType}
           value={value}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
           // 关闭 WKWebView 的自动首字母大写 / 纠错 / 自动填充 / 拼写检查
           autoCapitalize="none"
           autoCorrect="off"
           autoComplete="off"
           spellCheck={false}
-          className={`w-full rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900 ${
-            isPassword ? "pr-9" : ""
-          }`}
+          className={cn(
+            "w-full rounded-md border border-neutral-300 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-600 dark:bg-neutral-900",
+            isPassword && "pr-9",
+          )}
         />
         {isPassword && (
           <button
@@ -229,6 +314,7 @@ function Field({
             onClick={() => setShow((s) => !s)}
             tabIndex={-1}
             title={show ? "隐藏" : "显示"}
+            disabled={disabled}
             className="absolute inset-y-0 right-0 flex items-center px-2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
           >
             {show ? (
@@ -241,6 +327,192 @@ function Field({
       </div>
     </label>
   );
+}
+
+/** SSL 配置区 —— v0.1 默认禁用；启用后传给 sqlx MySQL SSL mode。 */
+function SslSection({
+  ssl,
+  onChange,
+}: {
+  ssl: SslConfig;
+  onChange: (ssl: SslConfig) => void;
+}) {
+  const enabled = ssl.mode !== "disabled";
+  const set = <K extends keyof SslConfig>(key: K, value: SslConfig[K]) =>
+    onChange({ ...ssl, [key]: value });
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-neutral-600 dark:text-neutral-400">SSL 模式</span>
+        <select
+          value={ssl.mode}
+          onChange={(e) => set("mode", e.target.value as SslMode)}
+          className="rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900"
+        >
+          {SSL_MODE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field
+          label="CA 证书路径"
+          value={ssl.caPath}
+          disabled={!enabled}
+          onChange={(v) => set("caPath", v)}
+        />
+        <Field
+          label="客户端证书路径"
+          value={ssl.clientCertPath}
+          disabled={!enabled}
+          onChange={(v) => set("clientCertPath", v)}
+        />
+        <Field
+          label="客户端私钥路径"
+          value={ssl.clientKeyPath}
+          disabled={!enabled}
+          onChange={(v) => set("clientKeyPath", v)}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** 高级连接参数区 —— 保存截图中的 MySQL 客户端常见连接选项。 */
+function AdvancedSection({
+  advanced,
+  onChange,
+}: {
+  advanced: AdvancedConfig;
+  onChange: (advanced: AdvancedConfig) => void;
+}) {
+  const set = <K extends keyof AdvancedConfig>(
+    key: K,
+    value: AdvancedConfig[K],
+  ) => onChange({ ...advanced, [key]: value });
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+      <AdvancedNumberOption
+        label="保持连接间隔（秒）"
+        enabled={advanced.keepAliveEnabled}
+        value={advanced.keepAliveIntervalSeconds}
+        onEnabledChange={(checked) => set("keepAliveEnabled", checked)}
+        onValueChange={(value) => set("keepAliveIntervalSeconds", value)}
+      />
+      <AdvancedNumberOption
+        label="连接超时（秒）"
+        enabled={advanced.connectTimeoutEnabled}
+        value={advanced.connectTimeoutSeconds}
+        onEnabledChange={(checked) => set("connectTimeoutEnabled", checked)}
+        onValueChange={(value) => set("connectTimeoutSeconds", value)}
+      />
+      <AdvancedNumberOption
+        label="读取超时（秒）"
+        enabled={advanced.readTimeoutEnabled}
+        value={advanced.readTimeoutSeconds}
+        onEnabledChange={(checked) => set("readTimeoutEnabled", checked)}
+        onValueChange={(value) => set("readTimeoutSeconds", value)}
+      />
+      <AdvancedNumberOption
+        label="写入超时（秒）"
+        enabled={advanced.writeTimeoutEnabled}
+        value={advanced.writeTimeoutSeconds}
+        onEnabledChange={(checked) => set("writeTimeoutEnabled", checked)}
+        onValueChange={(value) => set("writeTimeoutSeconds", value)}
+      />
+      <AdvancedToggle
+        label="使用压缩"
+        checked={advanced.compressionEnabled}
+        onChange={(checked) => set("compressionEnabled", checked)}
+      />
+      <AdvancedToggle
+        label="自动连接"
+        checked={advanced.autoConnect}
+        onChange={(checked) => set("autoConnect", checked)}
+      />
+    </div>
+  );
+}
+
+function AdvancedNumberOption({
+  label,
+  enabled,
+  value,
+  onEnabledChange,
+  onValueChange,
+}: {
+  label: string;
+  enabled: boolean;
+  value: number;
+  onEnabledChange: (checked: boolean) => void;
+  onValueChange: (value: number) => void;
+}) {
+  return (
+    <label className="grid grid-cols-[1rem_minmax(0,1fr)_8rem] items-center gap-3 text-sm">
+      <input
+        type="checkbox"
+        checked={enabled}
+        onChange={(e) => onEnabledChange(e.target.checked)}
+        className="size-4 accent-primary"
+      />
+      <span
+        className={cn(
+          "font-medium",
+          !enabled && "text-muted-foreground",
+        )}
+      >
+        {label}
+      </span>
+      <input
+        type="number"
+        min={1}
+        value={value}
+        disabled={!enabled}
+        onChange={(e) => onValueChange(normalizePositiveInt(e.target.value, value))}
+        className="h-8 rounded-md border border-neutral-300 px-2 text-right disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-600 dark:bg-neutral-900"
+      />
+    </label>
+  );
+}
+
+function AdvancedToggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="grid grid-cols-[1rem_minmax(0,1fr)] items-center gap-3 text-sm">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="size-4 accent-primary"
+      />
+      <span
+        className={cn(
+          "font-medium",
+          !checked && "text-muted-foreground",
+        )}
+      >
+        {label}
+      </span>
+    </label>
+  );
+}
+
+function normalizePositiveInt(value: string, fallback: number): number {
+  const next = Number(value);
+  if (!Number.isFinite(next) || next < 1) return fallback;
+  return Math.floor(next);
 }
 
 const EMPTY_HOP: SshHopConfig = {
