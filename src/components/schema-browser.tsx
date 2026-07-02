@@ -5,6 +5,7 @@ import { Virtuoso } from "react-virtuoso";
 import { TopologyGraph } from "@/components/topology-graph";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
 import type { RowSet, StoredConnection } from "@/lib/tauri-api";
+import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
 
@@ -110,14 +111,16 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
             <div key={db.name}>
               <button
                 onClick={() => selectDb(db.name)}
-                className={`flex w-full items-center gap-1 px-3 py-1.5 text-left text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900 ${
+                title={db.name}
+                className={`flex w-full min-w-0 items-center gap-1.5 px-3 py-1.5 text-left text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900 ${
                   selectedDb === db.name ? "font-medium" : ""
                 }`}
               >
-                <span className="text-neutral-400">
+                <span className="w-3 shrink-0 text-neutral-400">
                   {selectedDb === db.name ? "▾" : "▸"}
                 </span>
-                {db.name}
+                <DatabaseTreeIcon active={selectedDb === db.name} />
+                <span className="min-w-0 truncate">{db.name}</span>
               </button>
               {selectedDb === db.name && (
                 <ul className="pb-1">
@@ -131,13 +134,14 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                       <button
                         onClick={() => selectTable(t.name)}
                         title={t.comment ?? undefined}
-                        className={`block w-full truncate px-3 py-1 pl-7 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
+                        className={`flex w-full min-w-0 items-center gap-1.5 px-3 py-1 pl-8 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
                           selectedTable === t.name
                             ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
                             : "text-neutral-600 dark:text-neutral-400"
                         }`}
                       >
-                        {t.name}
+                        <TableTreeIcon active={selectedTable === t.name} />
+                        <span className="min-w-0 truncate">{t.name}</span>
                       </button>
                     </li>
                   ))}
@@ -207,6 +211,48 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         </section>
       </div>
     </div>
+  );
+}
+
+function DatabaseTreeIcon({ active }: { active: boolean }) {
+  return (
+    <span className="relative h-4 w-4 shrink-0" aria-hidden="true">
+      <span
+        className={cn(
+          "absolute left-[2px] top-[3px] h-[11px] w-3 rounded-b-[3px] border-x border-b bg-gradient-to-b shadow-sm",
+          active
+            ? "border-emerald-700/40 from-emerald-400 via-emerald-500 to-emerald-700"
+            : "border-slate-500/35 from-slate-300 via-slate-400 to-slate-600 dark:from-slate-500 dark:via-slate-600 dark:to-slate-800",
+        )}
+      />
+      <span
+        className={cn(
+          "absolute left-[2px] top-0 h-[6px] w-3 rounded-[50%] border bg-gradient-to-b shadow-sm",
+          active
+            ? "border-emerald-700/40 from-emerald-200 to-emerald-500"
+            : "border-slate-500/35 from-slate-100 to-slate-400 dark:from-slate-300 dark:to-slate-600",
+        )}
+      />
+    </span>
+  );
+}
+
+function TableTreeIcon({ active }: { active: boolean }) {
+  return (
+    <span
+      className={cn(
+        "grid h-4 w-4 shrink-0 grid-cols-2 grid-rows-2 gap-px rounded-[3px] p-[2px] shadow-sm ring-1",
+        active
+          ? "bg-blue-600 ring-blue-700/30"
+          : "bg-sky-600 ring-sky-700/25 dark:bg-sky-500",
+      )}
+      aria-hidden="true"
+    >
+      <span className="rounded-[1px] bg-sky-100/90" />
+      <span className="rounded-[1px] bg-sky-200/90" />
+      <span className="rounded-[1px] bg-sky-200/90" />
+      <span className="rounded-[1px] bg-sky-100/90" />
+    </span>
   );
 }
 
