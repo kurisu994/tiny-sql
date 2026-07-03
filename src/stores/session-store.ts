@@ -68,6 +68,8 @@ interface SessionState {
   /** 需要私钥 passphrase 时挂起的连接 id（触发弹窗） */
   passphraseFor: string | null;
   databases: DatabaseMeta[];
+  /** 左侧 schema 树当前展开的 database；只控制折叠视觉状态 */
+  expandedDb: string | null;
   selectedDb: string | null;
   tables: TableMeta[];
   selectedTable: string | null;
@@ -90,7 +92,7 @@ interface SessionState {
   submitPassphrase: (passphrase: string) => Promise<void>;
   cancelPassphrase: () => void;
   selectDb: (db: string) => Promise<void>;
-  collapseDb: () => void;
+  toggleExpandedDb: (db: string) => void;
   createDatabase: (id: string, input: CreateDatabaseInput) => Promise<void>;
   selectTable: (table: string) => Promise<void>;
   setSqlText: (sql: string) => void;
@@ -110,6 +112,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   errorMsg: null,
   passphraseFor: null,
   databases: [],
+  expandedDb: null,
   selectedDb: null,
   tables: [],
   selectedTable: null,
@@ -139,6 +142,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activeConnection: connection ?? get().activeConnection,
         status: "connected",
         databases,
+        expandedDb: null,
         selectedDb: null,
         tables: [],
         selectedTable: null,
@@ -177,6 +181,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       errorMsg: null,
       passphraseFor: null,
       databases: [],
+      expandedDb: null,
       selectedDb: null,
       tables: [],
       selectedTable: null,
@@ -198,10 +203,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   cancelPassphrase: () => set({ passphraseFor: null, status: "idle" }),
 
   selectDb: async (db) => {
-    const { openId } = get();
+    const { openId, selectedDb } = get();
     if (!openId) return;
+    if (selectedDb === db) {
+      set({ expandedDb: db });
+      return;
+    }
     set({
+      expandedDb: db,
       selectedDb: db,
+      tables: [],
       selectedTable: null,
       rowSet: null,
       loadingData: true,
@@ -216,13 +227,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  collapseDb: () =>
-    set({
-      selectedDb: null,
-      tables: [],
-      selectedTable: null,
-      rowSet: null,
-      loadingData: false,
+  toggleExpandedDb: (db) =>
+    set((s) => {
+      if (s.selectedDb !== db) return s;
+      return { expandedDb: s.expandedDb === db ? null : db };
     }),
 
   createDatabase: async (id, input) => {
@@ -247,6 +255,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const databases = await dbApi.listDatabases(id);
       set({
         databases,
+        expandedDb: name,
         selectedDb: name,
         tables: [],
         selectedTable: null,

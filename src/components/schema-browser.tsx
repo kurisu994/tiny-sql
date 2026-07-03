@@ -20,6 +20,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const {
     status,
     databases,
+    expandedDb,
     selectedDb,
     tables,
     selectedTable,
@@ -32,7 +33,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     lostHops,
     errorMsg,
     selectDb,
-    collapseDb,
+    toggleExpandedDb,
     selectTable,
     setSqlText,
     executeSql,
@@ -112,9 +113,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           {connected && databases.map((db) => (
             <div key={db.name}>
               <button
-                onClick={() =>
-                  selectedDb === db.name ? collapseDb() : selectDb(db.name)
-                }
+                onClick={() => toggleExpandedDb(db.name)}
+                onDoubleClick={() => selectDb(db.name)}
                 title={db.name}
                 className={`flex w-full min-w-0 items-center gap-1.5 px-3 py-1.5 text-left text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900 ${
                   selectedDb === db.name ? "font-medium" : ""
@@ -123,7 +123,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 <DatabaseTreeIcon active={selectedDb === db.name} />
                 <span className="min-w-0 truncate">{db.name}</span>
               </button>
-              {selectedDb === db.name && (
+              {expandedDb === db.name && (
                 <ul className="pb-1">
                   {tables.length === 0 && (
                     <li className="px-3 py-1 pl-7 text-xs text-neutral-400">

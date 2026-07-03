@@ -13,7 +13,7 @@
 - ✅ 检查更新入口迁移：连接列表头部不再显示更新按钮；macOS 应用菜单新增 `Check for Updates...`，点击后通过 `app:check-update` 事件复用现有手动检查、无更新提示和更新弹窗逻辑。
 - ✅ 新建数据库：已连接的连接右键菜单新增「新建数据库」；弹窗包含常规 / SQL 预览、数据库名称、字符集、排序规则；后端通过 `db_create_database` 调用 `db-driver::create_database`，由 driver 负责库名反引号转义和字符集 / 排序规则标识符校验，成功后刷新并选中新库。
 - ✅ Schema 树图标：已连接后的左侧 database / table 树新增固定尺寸图标，并去掉 database 名前的三角展开箭头；database 选中时用绿色圆柱强调，table 用蓝色表格图标，长名称仍走截断不撑开侧栏。
-- ✅ Schema 树折叠修复：数据库展开后再次点击同一库会收起并清空当前表选择 / 结果；`selectDb` 也会忽略过期的异步表列表返回，避免切换或折叠后旧请求覆盖当前状态。
+- ✅ Schema 树折叠修复：数据库行双击才打开 / 切换，单击只对已打开的 database 做折叠 / 展开；新增独立 `expandedDb` 区分折叠状态和当前 database，收起树不重置当前表选择 / 结果，只有切换数据库时才清表选择和结果，`selectDb` 也会忽略切库后的过期表列表返回。
 - ✅ SQL 编辑区接入 CodeMirror 6：已替换裸 `textarea`，支持 MySQL 语法高亮、行号、schema/table 补全、本地结构错误 gutter、MySQL `line N` 执行错误行标识和 `Cmd/Ctrl+Enter` 快捷执行；当前仍复用既有执行、取消、写操作确认和结果表格链路。
 - ✅ 接入 shadcn/ui（radix-nova、radix 基库）：`components.json` + `src/lib/utils.ts` + `src/components/ui/*`；暗色保持 `prefers-color-scheme` 跟随系统（不切 `.dark` class），还原 system 中文字体栈（移除 init 引入的 Geist Google 字体）。
 - ✅ 自动更新：后端注册 `tauri-plugin-updater` / `tauri-plugin-process`；前端新增 `updateApi`、`useUpdateChecker` 和 `UpdateDialog`；release workflow 用 `TAURI_SIGNING_PRIVATE_KEY` 签名各平台 updater artifact，正式版生成 `latest.json`，RC / beta / alpha 跳过。

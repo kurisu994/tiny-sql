@@ -25,6 +25,7 @@ beforeEach(() => {
     errorMsg: null,
     passphraseFor: null,
     databases: [],
+    expandedDb: null,
     selectedDb: null,
     tables: [],
     selectedTable: null,
@@ -90,8 +91,9 @@ describe("session-store", () => {
     expect(useSessionStore.getState().rowSet?.rows).toHaveLength(1);
   });
 
-  it("collapseDb 收起当前 database 并清空表选择", () => {
+  it("toggleExpandedDb 只收起当前 database，不重置当前表和结果", () => {
     useSessionStore.setState({
+      expandedDb: "app",
       selectedDb: "app",
       tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
       selectedTable: "users",
@@ -99,17 +101,94 @@ describe("session-store", () => {
       loadingData: true,
     });
 
-    useSessionStore.getState().collapseDb();
+    useSessionStore.getState().toggleExpandedDb("app");
 
     const s = useSessionStore.getState();
-    expect(s.selectedDb).toBeNull();
-    expect(s.tables).toEqual([]);
-    expect(s.selectedTable).toBeNull();
-    expect(s.rowSet).toBeNull();
-    expect(s.loadingData).toBe(false);
+    expect(s.expandedDb).toBeNull();
+    expect(s.selectedDb).toBe("app");
+    expect(s.tables).toEqual([
+      { name: "users", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    expect(s.selectedTable).toBe("users");
+    expect(s.rowSet).toEqual({ columns: ["id"], rows: [["1"]], truncated: false });
+    expect(s.loadingData).toBe(true);
   });
 
-  it("selectDb 过期返回不会覆盖当前 database 的表列表", async () => {
+  it("toggleExpandedDb 不打开未选中的 database", () => {
+    useSessionStore.setState({
+      expandedDb: "app",
+      selectedDb: "app",
+    });
+
+    useSessionStore.getState().toggleExpandedDb("billing");
+
+    const s = useSessionStore.getState();
+    expect(s.expandedDb).toBe("app");
+    expect(s.selectedDb).toBe("app");
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it("toggleExpandedDb 可重新展开当前 database", () => {
+    useSessionStore.setState({
+      expandedDb: null,
+      selectedDb: "app",
+    });
+
+    useSessionStore.getState().toggleExpandedDb("app");
+
+    expect(useSessionStore.getState().expandedDb).toBe("app");
+  });
+
+  it("selectDb 重新展开当前 database 时不重置当前表和结果", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      expandedDb: null,
+      selectedDb: "app",
+      tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
+      selectedTable: "users",
+      rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+    });
+
+    await useSessionStore.getState().selectDb("app");
+
+    const s = useSessionStore.getState();
+    expect(mockInvoke).not.toHaveBeenCalledWith("db_list_tables", expect.anything());
+    expect(s.expandedDb).toBe("app");
+    expect(s.selectedDb).toBe("app");
+    expect(s.selectedTable).toBe("users");
+    expect(s.rowSet).toEqual({ columns: ["id"], rows: [["1"]], truncated: false });
+  });
+
+  it("selectDb 切换 database 时才重置表选择和结果", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      expandedDb: "app",
+      selectedDb: "app",
+      tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
+      selectedTable: "users",
+      rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+    });
+    routeInvoke({
+      db_list_tables: [{ name: "orders", tableType: "BASE TABLE", rows: null, comment: null }],
+    });
+
+    await useSessionStore.getState().selectDb("billing");
+
+    const s = useSessionStore.getState();
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_tables", {
+      id: "c1",
+      database: "billing",
+    });
+    expect(s.expandedDb).toBe("billing");
+    expect(s.selectedDb).toBe("billing");
+    expect(s.tables).toEqual([
+      { name: "orders", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    expect(s.selectedTable).toBeNull();
+    expect(s.rowSet).toBeNull();
+  });
+
+  it("收起树后当前 database 的表列表仍可加载完成", async () => {
     let resolveTables: (value: unknown) => void = () => {};
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "db_list_tables") {
@@ -122,14 +201,52 @@ describe("session-store", () => {
     useSessionStore.setState({ openId: "c1" });
 
     const pending = useSessionStore.getState().selectDb("app");
-    useSessionStore.getState().collapseDb();
+    useSessionStore.getState().toggleExpandedDb("app");
     resolveTables([{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }]);
     await pending;
 
     const s = useSessionStore.getState();
-    expect(s.selectedDb).toBeNull();
-    expect(s.tables).toEqual([]);
+    expect(s.expandedDb).toBeNull();
+    expect(s.selectedDb).toBe("app");
+    expect(s.tables).toEqual([
+      { name: "users", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
     expect(s.loadingData).toBe(false);
+  });
+
+  it("selectDb 切换 database 后旧请求不会覆盖新表列表", async () => {
+    let resolveAppTables: (value: unknown) => void = () => {};
+    let resolveBillingTables: (value: unknown) => void = () => {};
+    mockInvoke.mockImplementation((cmd: string, args) => {
+      if (cmd === "db_list_tables") {
+        const database = (args as { database: string }).database;
+        return new Promise((resolve) => {
+          if (database === "app") {
+            resolveAppTables = resolve;
+          } else {
+            resolveBillingTables = resolve;
+          }
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    useSessionStore.setState({ openId: "c1" });
+
+    const appPending = useSessionStore.getState().selectDb("app");
+    const billingPending = useSessionStore.getState().selectDb("billing");
+    resolveBillingTables([
+      { name: "orders", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    await billingPending;
+    resolveAppTables([{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }]);
+    await appPending;
+
+    const s = useSessionStore.getState();
+    expect(s.expandedDb).toBe("billing");
+    expect(s.selectedDb).toBe("billing");
+    expect(s.tables).toEqual([
+      { name: "orders", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
   });
 
   it("createDatabase 成功后刷新列表并选中新库", async () => {
