@@ -19,9 +19,10 @@
 | class-variance-authority / clsx / tailwind-merge | ^0.7 / ^2.1 / ^3.6 | shadcn 组件 variant + `cn()` className 合并 |
 | tw-animate-css | ^1.4.0 | shadcn 弹窗 / 菜单动画 |
 | react-virtuoso | ^4.18.9 | 结果表格虚拟滚动 |
+| codemirror / @codemirror/* | codemirror ^6.0.2；lang-sql ^6.10.0；lint ^6.9.7；state ^6.7.0；view ^6.43.4 | SQL 编辑器、MySQL 高亮、基础 schema/table 补全和错误 gutter |
 
-> **已装**：`zustand` 5（状态）、`vitest` + `@testing-library/react`（前端单测）、`react-virtuoso`（虚拟滚动）、shadcn/ui 体系（`shadcn` CLI + `radix-ui` + `lucide-react` + `class-variance-authority` + `clsx` + `tailwind-merge` + `tw-animate-css`）。
-> **规划未装**：`i18next`/`react-i18next`、`sonner`（toast）、`playwright`（推迟）；拓扑图最终用纯 CSS，未引入 `@xyflow/react`。
+> **已装**：`zustand` 5（状态）、`vitest` + `@testing-library/react`（前端单测）、`react-virtuoso`（虚拟滚动）、CodeMirror 6 SQL 编辑器、shadcn/ui 体系（`shadcn` CLI + `radix-ui` + `lucide-react` + `class-variance-authority` + `clsx` + `tailwind-merge` + `tw-animate-css`）。
+> **规划未装**：`i18next`/`react-i18next`、`sonner`（toast）、`playwright`（推迟）、`@xyflow/react`（拓扑图最终用纯 CSS）。
 
 ### 后端 Rust（workspace.dependencies — 实际已装）
 
@@ -30,14 +31,15 @@
 | tokio | 1（features = full） | 异步运行时 |
 | russh | 0.54 | 纯 Rust 异步 SSH，多跳隧道 |
 | sqlx | 0.8（default-features=false, `mysql` + `runtime-tokio-rustls`） | MySQL driver |
+| tokio-util | 0.7 | `CancellationToken` 查询取消 |
 | thiserror | 2 | 错误派生 |
 | serde | 1（derive） | 序列化 |
 | log | 0.4 | 日志 facade |
 
-`src-tauri` 额外：`tauri` 2、`tauri-plugin-log` 2、`serde_json` 1、`aes-gcm` 0.10 + `base64` 0.22（加密 store）、`uuid` 1（连接 id）、`chrono` 0.4（最近使用时间戳）、`tauri-build` 2（build-dep）。
+`src-tauri` 额外：`tauri` 2、`tauri-plugin-log` 2、`tauri-plugin-updater` 2、`tauri-plugin-process` 2、`serde_json` 1、`aes-gcm` 0.10 + `base64` 0.22（加密 store）、`uuid` 1（连接 id）、`chrono` 0.4（最近使用时间戳）、`tauri-build` 2（build-dep）。
 
 > **AppState 注册表**实际用 `std`/`tokio` 的 `Mutex<HashMap>` 而非 `dashmap`（够用、少依赖）。
-> **规划未引入**：`tokio-util`（CancellationToken）、`sqlparser-rs`（拒多语句）、前端 `react-virtuoso`（Week 4 的 10w 行虚拟滚动）、`@xyflow/react`（Week 4 拓扑图）。
+> **规划未引入**：`sqlparser-rs`（拒多语句当前用自有 SQL 分析 / 分号状态机）。
 
 ### 工具链版本
 
@@ -47,7 +49,7 @@
 | MSRV | 1.77.2 | `rust-version` |
 | Node | 见 `.nvmrc` | CI 用 Node 24 |
 | pnpm | 11+ | pnpm-workspace.yaml |
-| 应用版本 | 0.1.0 | package.json / src-tauri/Cargo.toml / tauri.conf.json |
+| 应用版本 | 0.0.2 | package.json / src-tauri/Cargo.toml / tauri.conf.json |
 
 ## 构建命令（justfile，`set dotenv-load`）
 
@@ -85,9 +87,8 @@
 ## 当前 command（src-tauri 实际）
 
 - 连接：`connection_create/list/update/delete/test`（CRUD + 瞬时测试）、`connection_open/close`（持久连接，存 AppState 注册表）。
-- 数据浏览：`db_list_databases/db_list_tables/db_list_columns/db_query`（基于已打开连接）。
+- 数据浏览：`db_list_databases/db_list_tables/db_list_columns/db_query/db_query_cancel/db_create_database`（基于已打开连接）。
 - TOFU：`ssh_tofu_decision(connectionId, hopIndex, accept)`。
 - 事件（后端 emit → 前端 listen）：`ssh:tofu-request`（指纹确认）、`ssh:hop-status`（keepalive 断开）。
-- 规划 command（Week 4）：`query_execute/cancel`（子查询包装 + KILL QUERY）。
 
 相关：[[systemPatterns]] · [[progress]]

@@ -23,11 +23,11 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 
 - N 跳 SSH 配置与连接：密码 / 私钥认证、passphrase 会话缓存、TOFU host key 校验、指纹变更硬拒绝。
 - MySQL 数据浏览：列出 database / table / columns，点表浏览前 1000 行。
-- SQL 执行：拒绝空 SQL / 多语句，`SELECT` / `WITH` 后端子查询包装，SQL 编辑器结果上限 10 万行。
+- SQL 执行：CodeMirror SQL 编辑器支持语法高亮、行号、基础 schema/table 补全和快捷执行；后端拒绝空 SQL / 多语句，`SELECT` / `WITH` 子查询包装，结果上限 10 万行。
 - SQL 取消：执行时记录 MySQL `CONNECTION_ID()`，取消时通过独立 control pool 发 `KILL QUERY`。
 - 拓扑状态：本机 → N 跳 → MySQL 的只读拓扑图，支持 `pending` / `connected` / `failed` / `lost`。
 - 跨平台打包：GitHub Release workflow 监听 `v0.1.*` tag，产出 macOS Apple Silicon + Intel `.dmg`、Windows x64 `.exe`、Linux x64 `.AppImage`，正式版同时发布 Tauri 自动更新清单。
-- 自动更新：桌面端启动后每日检查一次正式版更新，也可在左侧工具区手动检查；RC / beta / alpha 不作为自动更新源。
+- 自动更新：桌面端启动后每日检查一次正式版更新，macOS 应用菜单可手动检查；RC / beta / alpha 不作为自动更新源。
 
 ## 技术栈
 

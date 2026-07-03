@@ -76,8 +76,8 @@ hop[0] 仍绿 → 立刻判定是堡垒机问题
 
 ## 交互逻辑（具体规则）
 
-- **结果集防 OOM 三道闸**：拒多语句 + 子查询包装 `SELECT * FROM (<sql>) AS tiny_sql_limited LIMIT 1000` + 客户端 `take(100000)` 硬上限。
-- **SQL 取消**：`tokio::select!` + cancel token 中止客户端等待，**同时**从独立 control connection 发 `KILL QUERY` 中止远端，不留服务端幽灵查询。
+- **结果集防 OOM 三道闸**：拒多语句 + 子查询包装 `SELECT * FROM (<sql>) AS tiny_sql_limited LIMIT <rowLimit + 1>` + `rowLimit` 后端 clamp 到 100000（表浏览 1000，SQL 编辑器 100000）。
+- **SQL 取消**：`tokio::select!` + cancel token 中止客户端等待，**同时**从独立 control pool 发 `KILL QUERY` 中止远端，不留服务端幽灵查询。
 - **隧道断开感知**：每跳 keepalive 60s 一次，**连续 3 次失败（≈180s）才判定断开**（防弱网/bastion ratelimit 误报）。
 - **错误归因**：每个 `SshTunnelError` 变体带 `hop_index`，从后端原样透传到前端拓扑节点。
 - **错误展示**：所有用户可见错误用稳定 i18n key（`error.ssh.*` / `error.driver.*`）翻译成中文，禁止显示原始 Rust 错误。

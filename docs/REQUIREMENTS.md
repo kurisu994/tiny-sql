@@ -37,7 +37,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 - **场景 A1：高频日常查询**。开机后 30s 内打开 tiny-sql，连接列表第一个就是"生产读库 RO"，双击连接，3 跳隧道自动建立，左侧列出所有 schema，点 `orders` schema 点 `t_order` 表，看前 1000 行核对昨天的促销数据。整个流程预期 15s 内完成。
 - **场景 A2：故障排查**。线上告警，需要立刻连库 SELECT 状态。点开"生产读库 RO"连接，第 2 跳堡垒机因为业务方网络抖动连不上，UI 上 hop[1] 节点变红，tooltip 提示"connection timeout"。立刻判定是堡垒机的问题，不浪费时间排查本地网络或 MySQL。
-- **场景 A3：执行修复 SQL**。需要 `UPDATE t_order SET status = ... WHERE id IN (...)` 一行修数据。粘贴 SQL 进 textarea，点执行，弹出"检测到 UPDATE 操作，确认执行？"对话框，输 yes 二次确认。执行成功显示影响行数。
+- **场景 A3：执行修复 SQL**。需要 `UPDATE t_order SET status = ... WHERE id IN (...)` 一行修数据。粘贴 SQL 进编辑器，点执行，弹出"检测到 UPDATE 操作，确认执行？"对话框，输 yes 二次确认。执行成功显示影响行数。
 
 ### 2.2 用户画像 B：同事推广
 
@@ -59,7 +59,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **关键痛点**：
 - 不一定有 4 层堡垒，但 1-2 跳很常见（个人 VPS 上的 MySQL 通过 1 跳 SSH 访问）。
-- 多语言但首发只需 zh-CN；i18next 留扩展口。
+- 多语言但首发只需 zh-CN；后端错误继续返回稳定 i18n key，前端 v0.1 用静态中文映射，完整 i18n runtime 留后续版本接入。
 - 期待 GitHub 上的 issue 和 PR 得到回应。
 
 **典型场景**：
@@ -156,8 +156,8 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **FR-015 [P0] 拓扑图视图**
 
-- 连接面板顶部用 `@xyflow/react` 画静态拓扑：节点 = 本地 / hop[0] / hop[1] / ... / hop[N-1] / MySQL；边 = TCP 通道。
-- 节点状态：`pending`（灰色）/ `connected`（绿色）/ `failed`（红色）/ `lost`（红色 + 闪烁，区别于 failed）。
+- 连接面板顶部用纯 CSS 线性拓扑展示：节点 = 本地 / hop[0] / hop[1] / ... / hop[N-1] / MySQL；边 = TCP 通道。
+- 节点状态：`pending`（灰色）/ `connected`（绿色）/ `failed`（红色）/ `lost`（红色）。
 - 状态通过 tauri event `ssh:hop-status` 推送，payload schema 见 [ARCHITECTURE.md](./ARCHITECTURE.md#7-前后端事件契约)。
 - v0.1 节点状态简化为 4 态（pending / connected / failed / lost），**不**做"实时延迟动画"（推 v0.2）。
 - **验收标准**：
@@ -179,7 +179,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-021 [P0] 浏览表前 1000 行**
 
 - 点击 table 节点 → 右侧打开"数据"标签页，显示前 1000 行。
-- **子查询包装注入 LIMIT**（不是 regex 检测）：`SELECT * FROM (<原 SQL>) AS tiny_sql_limited LIMIT 1000`，MySQL 原生语义、零误判；用户手写 LIMIT 装在内部、外层取小，意图一致。避免大表 OOM。
+- **子查询包装按 rowLimit 注入 LIMIT**（不是 regex 检测）：表浏览 `rowLimit=1000`，内部外层 `LIMIT 1001` 多取 1 行判断 truncated，返回前只保留 1000 行。用户手写 LIMIT 装在内部，取小意图一致。避免大表 OOM。
 - 用 `react-virtuoso` 虚拟滚动渲染，列宽可拖拽调整。
 - **验收标准**：
   - 表 100 万行 → 服务端只回 1000 行，UI 流畅滚动。
@@ -187,7 +187,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **FR-022 [P0] SQL 执行**
 
-- 顶部 textarea（**不上 Monaco Editor**，v0.1 砍代码补全），用户输入 SQL，点"执行"按钮跑。
+- 顶部 SQL 编辑器基于 CodeMirror 6，支持 MySQL 语法高亮、行号、基础 database/table 补全、本地结构错误提示、MySQL 错误行标识和 `Cmd/Ctrl+Enter` 快捷执行。
 - 结果以表格展示，复用 FR-021 的虚拟滚动组件。
 - **客户端结果集硬上限 10w 行**：超出截断并显示提示"已截断到 10w 行，请加 LIMIT"。
 - **验收标准**：
@@ -198,7 +198,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-023 [P0] SQL 取消**
 
 - 执行按钮旁有"取消"按钮，执行中点取消能立刻中止 query（不等结果回来）。
-- 后端用 `tokio::select!` + cancel token 中止客户端等待；**同时从一条独立 control connection（主 MySqlPool 之外、同一隧道独立本地端口）发 `KILL QUERY <connection_id>` 中止远端执行**。独立 control conn 保证 pool 满时 KILL 仍能发出，不留服务端"幽灵查询"。
+- 后端用 `tokio::select!` + cancel token 中止客户端等待；执行前记录 MySQL `CONNECTION_ID()`，取消分支从独立 control pool（主 MySqlPool 之外、同一隧道独立本地端口）发 `KILL QUERY <connection_id>` 中止远端执行。独立 control pool 保证主 pool 满时 KILL 仍能发出，不留服务端"幽灵查询"。
 - **验收标准**：
   - 跑 `SELECT SLEEP(60)` → 5s 后点取消 → 1s 内停止，UI 显示"已取消"。
   - 取消后 MySQL `SHOW PROCESSLIST` 中该 query 消失（服务端确实被 KILL）。
@@ -235,8 +235,8 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-030 [P0] 中文（zh-CN）**
 
 - v0.1 UI 全中文。
-- i18next runtime 保留，方便 v0.2 加英文。
-- en bundle 留 placeholder（key 全有，value 待填）。
+- 后端错误对外返回稳定 i18n key，前端 v0.1 用静态 `ERROR_ZH` map 翻译。
+- 英文 UI 与 i18next / react-i18next runtime 留到 v0.2+。
 - **验收标准**：
   - 切换语言下拉框只能选"中文"（en 选项灰色 + tooltip "v0.2"）。
 
@@ -257,7 +257,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 - 接入 `tauri-plugin-updater`，为 macOS / Windows / Linux 构建 updater artifact 与 `.sig` 更新包。
 - tag `v0.1.0` 正式版发布时生成 GitHub Release `latest.json`；`v*-rc*` / beta / alpha 不生成 `latest.json`，不作为自动更新源。
-- 应用启动后每日检查一次正式版更新，左侧工具区支持手动检查。
+- 应用启动后每日检查一次正式版更新，macOS 应用菜单支持手动检查。
 - 发现更新后展示版本号、release notes、下载进度；安装完成后提示重启。
 - **验收标准**：
   - 从旧正式版手动检查能发现新正式版。
@@ -347,7 +347,7 @@ v0.1 **不做**的事情，全部有明确理由：
 ### 5.1 数据库范围之外
 
 - **PostgreSQL / SQLite / Oracle / SQL Server / MongoDB / Redis**：v0.1 不实现；v0.2 加 PG 时 extract trait（NFR-042）。理由：dogfooding 场景 100% MySQL，无优先级。
-- **MySQL 写操作的图形化编辑器**（点表格 cell 改值后写回）：FR-024 的 SQL textarea 是 v0.1 写操作上限。理由：图形化编辑器需要 2-3 周额外工作量，60-75h 预算装不下。
+- **MySQL 写操作的图形化编辑器**（点表格 cell 改值后写回）：FR-024 的 SQL 编辑器是 v0.1 写操作上限。理由：图形化编辑器需要 2-3 周额外工作量，60-75h 预算装不下。
 
 ### 5.2 平台范围之外
 
@@ -356,8 +356,8 @@ v0.1 **不做**的事情，全部有明确理由：
 
 ### 5.3 功能范围之外
 
-- **Schema-aware 智能联想**：v0.1 仅"列出 schema/table/column"（FR-020）。"点 `user_id` 列自动提示 JOIN 候选"推 v0.2（FR-104）。
-- **代码补全 / Monaco Editor**：v0.1 用 `<textarea>` 即可。理由：Monaco 集成需要 5-8h，且与 v0.1 拓扑图叙事无关。
+- **Schema-aware 智能联想**：v0.1 仅做基础 database/table 补全；"点 `user_id` 列自动提示 JOIN 候选"推 v0.2（FR-104）。
+- **Monaco Editor / 高级代码补全**：v0.1 已用 CodeMirror 6 覆盖基础编辑体验，不接 Monaco、不做语义级 SQL 智能补全。
 - **SQL 历史**：推 v0.2（FR-106）。
 - **导出 CSV / Excel**：推 v0.2（FR-107）。
 - **多 tab 同时执行**：v0.1 单 tab，单 SQL。理由：复杂度 +30%，dogfooding 场景里作者本人 80% 时间只开一个查询。
@@ -388,13 +388,13 @@ v0.1 **不做**的事情，全部有明确理由：
 | v0.1 全平台先覆盖 x64 | 先跑通 macOS arm64/x64、Windows x64、Linux x64 打包和 updater；签名、更多包格式与 ARM 平台后续打磨 |
 | v0.1 仅 MySQL | dogfooding 100% MySQL + v0.2 extract trait 代价小 |
 | v0.1 仅 zh-CN | 翻译成本 vs 首发收益不划算 |
-| v0.1 拓扑图用 react-flow（@xyflow/react） | 自绘 SVG +1-1.5 周；bundle 300KB 桌面端可接受 |
+| v0.1 拓扑图用纯 CSS 线性布局 | 当前只需要固定的本机 → N 跳 → MySQL 状态链路；避免 react-flow 画布的缩放、拖拽、attribution 和 bundle 成本 |
 | v0.1 无 Apple Developer 代码签名 | $99/年阻塞首发；README 教用户右键打开 |
 | v0.1 加自动更新但不做 Apple Developer 代码签名 | Tauri updater minisign 签名不需要开发者账号；自动更新解决正式版分发迭代，首次打开摩擦仍靠 README 说明 |
 | v0.1 加 SSH keepalive（FR-014），60s + 3 次阈值 | "可观测路由器"叙事必需；180s 内感知断开仍胜过 DBeaver"亲 query 才发现"；阈值防弱网/bastion 误报 |
 | v0.1 不做断线自动重连 | 重连策略独立设计；避免 v0.1 引入隐式状态机 |
 | v0.1 加密配置但不加密 passphrase | 配置低风险落盘 + passphrase 推 v0.2（用户主密码 derive key） |
-| v0.1 SQL 取消用 tokio::select! + 独立 control conn KILL QUERY | 不依赖 sqlx 的 fragile cancellation；独立 control conn 保证 pool 满时 KILL 仍发得出，不留服务端幽灵查询 |
+| v0.1 SQL 取消用 tokio::select! + 独立 control pool KILL QUERY | 不依赖 sqlx 的 fragile cancellation；独立 control pool 保证主 pool 满时 KILL 仍发得出，不留服务端幽灵查询 |
 | v0.1 LIMIT 防护用子查询包装而非 regex | regex 会被注释/字符串/CTE/UNION 骗；子查询包装是 MySQL 原生语义、零误判 |
 | v0.1 不写 trait Driver，用具体 struct | 单实现 trait 是 premature abstraction；v0.2 加 PG 时 extract trait |
 
@@ -425,7 +425,7 @@ v0.1 **不做**的事情，全部有明确理由：
 | **TunnelLost** | SshTunnelError mid-session 变体，已建立的隧道因 keepalive 连续 3 次失败而断开（FR-014） |
 | **ChannelDropped** | SshTunnelError mid-session 变体，某跳 channel 被对端主动关闭（可能跳板重启），需人工重连 |
 | **AcceptLoopDied** | SshTunnelError mid-session 变体，某跳 accept loop panic（代码 bug），需上报 |
-| **control connection** | SQL 取消用的独立 MySQL 连接（主 pool 之外、同一隧道独立本地端口），专发 KILL QUERY |
+| **control pool** | SQL 取消用的独立 MySQL 连接池（max=1，主 pool 之外、同一隧道独立本地端口），专发 KILL QUERY |
 | **direct-tcpip** | SSH 协议的 channel 类型，用于把 SSH session 内的一个 channel 转发到任意 TCP 地址 |
 | **dogfooding** | 作者自己 + 同事用自己的产品验证可用性 |
 | **caching_sha2_password** | MySQL 8.0 默认认证插件，sqlx 0.8 默认支持 |

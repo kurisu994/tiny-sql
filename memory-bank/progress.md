@@ -10,7 +10,7 @@
 | v0.2 | 规划 | PG driver + passphrase 加密 + TLS + Schema-aware 联想 |
 | v0.3+ | 规划 | 平台安装体验打磨 + crate 独立 publish + 多集群 diff |
 
-CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级写法：只概括连接管理、多跳 SSH、数据浏览、SQL 执行、配置加密、自动更新、体验优化、安全稳定性、发布准备和待验证事项，不再按 crate、workflow、API、字段名或具体产物路径展开内部实现细节。
+CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级写法：只概括连接管理、多跳 SSH、数据浏览、SQL 执行、配置加密、自动更新、体验优化、安全稳定性、发布准备和待验证事项，不再按 crate、workflow、API、字段名或具体产物路径展开内部实现细节。最新 `[Unreleased]` 已覆盖 CodeMirror SQL 编辑器、schema 树图标与数据库展开 / 收起修复。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -48,10 +48,24 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | `b5a137d` | docs: 完善 Week 5 发布准备 |
 | `705ef8e` | feat(ui): 连接列表改用右键菜单与 shadcn 弹窗 |
 | `d91dd43` | refactor(ui): 右键菜单改用 shadcn ContextMenu |
-| `03ee5be` | docs: 同步连接列表右键菜单与 shadcn 接入（HEAD / origin/main） |
+| `03ee5be` | docs: 同步连接列表右键菜单与 shadcn 接入 |
+| `43b3b7b` | feat: 接入正式版自动更新 |
+| `7bcc0cf` | ci(release): 配置 CI 忽略发布提交，完善发布流程 |
+| `b02eac2` / `248a11c` | fix(ci): 修复 release 产物上传路径并升级 Actions Node runtime |
+| `e1e10ae` | feat(ci, docs, build): 为 v0.1 添加全平台桌面打包支持 |
+| `ffece92` | fix(ci): 修复 Linux updater manifest 产物匹配 |
+| `d80d05b` | docs(changelog): 调整 CHANGELOG 为面向使用者的高层级概览 |
+| `bf0d427` | feat(conn): 拆分连接设置标签页 |
+| `36bc02a` | feat(updater): 菜单栏检查更新 |
+| `d73f195` | feat(db): 支持右键新建数据库 |
+| `9679fc7` | release: v0.0.2 |
+| `9452a70` | feat(ui): 为数据库和表树添加图标（origin/main） |
+| `3228efd` | feat(sql): 接入 CodeMirror 编辑器 |
+| `02cf40a` | fix(schema): 支持收起数据库节点 |
+| `15b0613` | style(schema): 移除数据库展开箭头 |
+| `582efe2` | fix(schema): 调整数据库树打开交互（HEAD） |
 
-> 注：`d0973ef`（含）之前已 push 到远端 `git@github.com:kurisu994/tiny-sql.git`；
-> 当前本地 `main` 在 `03ee5be` 之后有未提交的发布/自动更新改动；发 RC 前需先整理提交并刷新远端状态。
+> 注：截至本次文档同步前，`origin/main` 在 `9452a70`，本地 `main` 领先 4 个 schema / SQL 交互提交（`3228efd`、`02cf40a`、`15b0613`、`582efe2`）。后续推送或发 RC 前仍需重新 `git fetch` / `git status -sb` 复核远端状态。
 
 ## 重大决策与架构变更记录
 
@@ -78,6 +92,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 - **2026-06-30 release 与 CI 触发分流**：`ci.yml` 在 `push.main` 下对 `CHANGELOG.md`、`Cargo.lock`、`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 设置 `paths-ignore`，让 `just release` 产生的 release-only 版本提交不重复触发 CI；PR 仍完整跑 CI。`just version` 定向刷新 `Cargo.lock` 中 `tiny-sql` 本地 package 版本，`just release` 暂存范围补入 `Cargo.lock`，tag push 继续触发 `release.yml` 全平台打包。
 - **2026-06-30 CHANGELOG 写法收敛**：按用户要求把 `CHANGELOG.md` 从模块/实现细节清单改为功能大项概览；后续发布说明应继续面向使用者，只写主要功能、体验变化、安全稳定性、发布准备和待验证事项。
 - **2026-07-01 连接表单标签页与 SSL/高级配置契约**：新建 / 编辑连接弹窗拆成常规、SSH、SSL、高级四个标签页，新增本地 radix `Tabs` 组件；`StoredConnection` 增加 `ssl` / `advanced` 并用 `serde(default)` 兼容旧连接文件；`db-driver` 新增 `MySqlConnectSettings`，已接线 SSL mode、CA / client cert / client key path 和连接超时。读取超时、写入超时、保持连接间隔、压缩、自动连接先随连接保存，后续再按 driver/SSH 行为逐项实现。
+- **2026-07-03 SQL 编辑器与 schema 树交互收口**：SQL 输入从裸 textarea 升级到 CodeMirror 6，提供 MySQL 高亮、行号、基础 database/table 补全、本地结构错误 gutter、MySQL 错误行标识和 `Cmd/Ctrl+Enter`；schema 树改成数据库双击打开 / 切换、单击折叠已打开库，并通过独立 `expandedDb` 保留当前表和结果。文档同步时把 README、需求、架构、计划、路线图和 memory-bank 中的旧 textarea、react-flow、左侧工具区更新入口、依赖矩阵等描述改为当前实现。
 
 ## 已解决的阻碍
 
@@ -90,6 +105,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | Turbopack 在沙箱内 build 失败 | Next/Turbopack 处理 CSS 时需创建子进程并绑定本地端口，沙箱返回 `Operation not permitted` | `just check` / `pnpm tauri build` 在沙箱外重跑通过；代码无改动 workaround |
 | 普通浏览器预览报 Tauri IPC 错 | `@tauri-apps/api` 在无 Tauri runtime 时调用 `invoke/listen` | 增加 `isTauriRuntime()` guard：Web 预览为空列表、跳过事件监听；Tauri/Vitest 不受影响 |
 | 正式版 `latest.json` 生成失败 | Linux updater artifact 实际是 `.AppImage` + `.AppImage.sig`，workflow 误按 `.AppImage.tar.gz` 查找 | `release.yml` 改为匹配 `*x86_64*.AppImage` / `*amd64*.AppImage` / `*x64*.AppImage` / `*.AppImage`，本地用失败文件名集合模拟 manifest 生成通过 |
+| 文档与最新实现漂移 | README/docs/memory-bank 仍写 textarea、react-flow、左侧工具区更新入口和旧依赖矩阵 | 已按 CodeMirror、纯 CSS 拓扑、macOS 应用菜单更新入口、当前 package 依赖与 v0.0.2 版本号同步 |
 
 ## 待验证 / 风险跟踪
 

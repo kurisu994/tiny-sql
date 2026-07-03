@@ -65,7 +65,7 @@ v0.3+ (半年+) ── 平台安装体验打磨 + ssh-multihop crate 独立 publ
 ### 工程
 
 - **extract trait Driver**：v0.1 是具体 `struct MySqlDriver`，v0.2 加 PG 时先用 rust-analyzer extract trait（两个实现在手才设计接口），再写 `PostgresDriver`（NFR-042）
-- `MySqlDriverViaSshTunnel` 抽象为 `DriverViaSshTunnel<D: Driver>` 泛型
+- `AppState` 的活跃连接注册表从具体 `MySqlDriver` 扩展到可容纳多 driver；隧道生命周期仍留在 `src-tauri::OpenConnection` 组合层
 - keepalive 间隔 + 失败阈值可配置，FR-014 的 60s / 连续 3 次（180s）改为默认值
 - 评估 Apple Developer 代码签名 / notarization（$99/年），降低首次打开摩擦
 
@@ -131,7 +131,7 @@ eng review 中 codex 提出但 v0.1 未重开，留 v0.2 视实施情况决定�
 
 ### UI 功能
 
-- **写操作的图形化编辑器**（点 cell 改值后写回）：SQL textarea 是 v0.1 之后的写操作上限。理由：图形化编辑器需要列权限模型 + 类型转换 UI + 行级 dirty tracking，复杂度过高
+- **写操作的图形化编辑器**（点 cell 改值后写回）：SQL 编辑器是 v0.1 之后的写操作上限。理由：图形化编辑器需要列权限模型 + 类型转换 UI + 行级 dirty tracking，复杂度过高
 - **可视化建表**（拖拽列 → DDL 生成）：DataGrip 的卖点，不是 tiny-sql 的
 - **可视化 ER 图**：同上
 

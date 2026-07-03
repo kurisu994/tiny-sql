@@ -26,8 +26,8 @@
 **分工铁律**：
 
 - `ssh-multihop` **只知道**「本地监听一个端口，把流量转发到远端 host:port」，不知道上层是 MySQL → 这是它未来能独立 publish 的前提。
-- `db-driver` **只知道**「给我一个 URL，返回 Connection」，不知道 SSH（除组合层 `MySqlDriverViaSshTunnel`）。
-- `src-tauri` 把两者拼起来 + Tauri IPC + 持久化。
+- `db-driver` **只知道**「给我 host/port/user/pass/database/settings，返回 MySqlDriver」，不知道 SSH。
+- `src-tauri` 把两者拼起来 + Tauri IPC + 持久化；走 SSH 时先打开隧道拿本地端口，再创建 `MySqlDriver` 连 `127.0.0.1:port`。
 
 ## 多跳 SSH 机制（核心）
 
@@ -35,7 +35,7 @@ OpenSSH ProxyJump 等效：hops[0] 用 `TcpStream` 直连；hops[i] 在 hops[i-1
 
 **sqlx 桥接**：sqlx 不支持注入自定义 `TcpStream`，所以走「本地 listener 端口 P → `mysql://user:pass@127.0.0.1:P/db` URL」。1 个连接 = 1 个本地端口 = 1 个 `MySqlPool`（max=5）；5 条 TCP 走同一端口，首跳 session 上是 5 个 direct-tcpip channel（不是 5 个 session）。
 
-**生命周期绑定**：`MySqlDriverViaSshTunnel` 同时持有 `tunnel` 和 `pool`，drop 时**先 pool 后 tunnel**（反过来 listener 先关会让 pool 刷 EOF 错误）。
+**生命周期绑定**：`src-tauri::OpenConnection` 同时持有 `driver: MySqlDriver` 和 `tunnel: Option<SshTunnel>`，关闭时**先 pool 后 tunnel**（反过来 listener 先关会让 pool 刷 EOF 错误）。
 
 ## 目录约定
 
@@ -61,7 +61,7 @@ tiny-sql/
 
 ### 与 ARCHITECTURE 的偏差（实施期决定）
 
-- **db-driver 未拆 `mysql.rs`/`tunneled.rs`**：单文件 `MySqlDriver`，隧道在 src-tauri 的 `OpenConnection` 里与 pool 绑定生命周期（不引入 `MySqlDriverViaSshTunnel` 组合类型）。
+- **db-driver 保持单文件 `MySqlDriver`**：隧道在 src-tauri 的 `OpenConnection` 里与 pool 绑定生命周期，不在 db-driver 内新增 SSH 组合类型。
 - **ssh-multihop 不引 `tauri::AppHandle`**：原 `SshTunnelContext{app_handle}` 改为 `TunnelContext` 注入回调闭包，保「可独立 publish」不变量。**写代码前确认是「实际」还是「规划」。**
 
 ## 设计模式
@@ -75,14 +75,14 @@ tiny-sql/
 
 **前端**
 
-- `"use client"` 组件 + `invoke<T>()` 调 command；i18n key → 中文映射（v0.1 用 `ERROR_ZH` map，Week 2 接 i18next）。
+- `"use client"` 组件 + `invoke<T>()` 调 command；i18n key → 中文映射（v0.1 用静态 `ERROR_ZH` map，完整 i18next runtime 留英文 UI 时接入）。
 - 状态用 zustand；拓扑图用纯 CSS 静态布局；结果表格用 `react-virtuoso` 虚拟滚动。
 - UI 组件库用 **shadcn/ui**（radix base，组件源码落 `src/components/ui/`，用 `cn()` 合并 className）：新建/编辑表单用 `Dialog`、右键菜单用 `ContextMenu`、二次确认用 `AlertDialog`；确认统一走全局命令式 `confirm-store`（`await confirm({...})`）替代 `window.confirm`。
 
 **数据库（被连接的 MySQL）**
 
 - LIMIT 防护用**子查询包装**，不用 regex 检测关键字。
-- 取消用**独立 control connection** 发 `KILL QUERY`，不从主 pool 借连接（pool 满时借不到）。
+- 取消用**独立 control pool**（max=1）发 `KILL QUERY`，不从主 pool 借连接（pool 满时借不到）。
 
 ## 负向约束（❌ 不要做）
 

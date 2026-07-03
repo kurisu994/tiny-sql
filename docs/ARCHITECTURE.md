@@ -35,10 +35,7 @@ tiny-sql/
 │   │   └── src/lib.rs
 │   └── db-driver/                 # 数据库 driver 抽象 crate
 │       ├── Cargo.toml
-│       └── src/
-│           ├── lib.rs             # pub struct MySqlDriver（v0.2 extract trait）
-│           ├── mysql.rs           # MySqlDriver 实现
-│           └── tunneled.rs        # MySqlDriverViaSshTunnel 包装层
+│       └── src/lib.rs             # pub struct MySqlDriver（v0.2 extract trait）
 ├── src-tauri/                     # Tauri 壳（Cargo.toml 是 workspace 成员）
 │   ├── Cargo.toml                 # 依赖 ssh-multihop + db-driver
 │   ├── tauri.conf.json
@@ -49,7 +46,7 @@ tiny-sql/
 │       ├── lib.rs
 │       ├── commands/              # tauri command 层
 │       │   ├── connection.rs      # connection_create / list / update / delete / test
-│       │   ├── query.rs           # query_execute / query_cancel
+│       │   ├── query.rs           # db_list_* / db_query / db_query_cancel
 │       │   └── ssh_tofu.rs        # ssh_tofu_decision
 │       ├── config/
 │       │   ├── encryption.rs      # AES-GCM 加密 store
@@ -82,26 +79,28 @@ tiny-sql/
 │   crates/db-driver       │  │   crates/ssh-multihop         │
 │                          │  │                                │
 │  pub struct MySqlDriver  │  │  pub async fn open(           │
-│   - connect              │  │    ssh: &SshConfig,           │
-│   - list_databases       │  │    target_host: &str,         │
-│   - list_tables          │  │    target_port: u16,          │
-│   - list_columns         │  │    ctx: &SshTunnelContext,    │
-│   - query (取 cancel_token)│  │  ) -> Result<SshTunnel, ...>  │
-│   - cancel (control conn)│  │                                │
+│   - connect_with_settings│  │    hops: &[SshHop],           │
+│   - ping                 │  │    target_host: &str,         │
+│   - list_databases       │  │    target_port: u16,          │
+│   - list_tables          │  │    ctx: &TunnelContext,       │
+│   - list_columns         │  │  ) -> Result<SshTunnel, ...>  │
+│   - query_with_options   │  │                                │
+│     (取 CancellationToken)│  │                                │
+│   - cancel (control pool)│  │                                │
 │   (v0.1 具体 struct       │  │  - 逐跳 SSH session 建立        │
 │    v0.2 extract trait)   │  │  - 每跳 keepalive 60s/3 次      │
 │   (用 sqlx::MySqlPool)   │  │  - TOFU 流程                   │
-│                          │  │  - 本地 127.0.0.1:0 listener   │
-│  MySqlDriverViaSshTunnel │  │  - copy_bidirectional 桥接     │
-│   (组合 ssh-multihop)    │  │  - SshTunnelError 含 hop_index │
+│   (不知道 SSH 存在)      │  │  - 本地 127.0.0.1:0 listener   │
+│                          │  │  - copy_bidirectional 桥接     │
+│                          │  │  - SshTunnelError 含 hop_index │
 └──────────────────────────┘  └──────────────────────────────┘
 ```
 
 **分工原则**：
 
 - `ssh-multihop` **完全不知道 MySQL 存在**。它只知道"在本地监听一个端口，把流量转发到远端 host:port"。这是它未来能独立 publish 的前提。
-- `db-driver` **完全不知道 SSH 存在**（除了 `MySqlDriverViaSshTunnel` 这个组合层）。v0.1 是具体 `struct MySqlDriver`，只关心"给我一个 URL，我返回 Connection"；v0.2 加 PG 时再 extract `trait Driver`。
-- `src-tauri` 是组装层：把上面两块拼起来，加 Tauri 的 IPC + 持久化。
+- `db-driver` **完全不知道 SSH 存在**。v0.1 是具体 `struct MySqlDriver`，只关心"给我 host/port/user/pass/database/settings，我返回 MySqlPool 包装"；v0.2 加 PG 时再 extract `trait Driver`。
+- `src-tauri` 是组装层：走 SSH 时先打开隧道拿本地端口，再创建 `MySqlDriver` 连 `127.0.0.1:port`，并在 `OpenConnection` 里绑定 driver 与 tunnel 生命周期。
 
 ### 1.3 Tauri + workspace 摩擦兜底
 
@@ -126,16 +125,17 @@ src-tauri/src/
 
 ### 2.1 一条 SQL 的完整链路
 
-用户在前端 SQL textarea 点"执行"开始，到结果回到 UI 表格，全链路如下。**实线**是数据/调用方向，**虚线**是错误回流方向。
+用户在前端 SQL 编辑器点"执行"或按 `Cmd/Ctrl+Enter` 开始，到结果回到 UI 表格，全链路如下。**实线**是数据/调用方向，**虚线**是错误回流方向。
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Next.js 16 前端 (WebView)                                            │
 │  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ <textarea> SQL ───click执行──> queryStore.execute(sql)          │  │
+│  │ CodeMirror SQL ───执行/快捷键──> sessionStore.executeSql(sql)    │  │
 │  │                                          │                     │  │
 │  │                                          ▼                     │  │
-│  │   invoke('query_execute', { connection_id, sql, query_id })    │  │
+│  │   invoke('db_query', { id, sql, query_id,                    │  │
+│  │                        row_limit, allow_write })              │  │
 │  │                                          │                     │  │
 │  └──────────────────────────────────────────┼─────────────────────┘  │
 └─────────────────────────────────────────────┼─────────────────────────┘
@@ -145,24 +145,26 @@ src-tauri/src/
 │  src-tauri (commands 层)                                              │
 │  ┌────────────────────────────────────────────────────────────────┐  │
 │  │ #[tauri::command]                                              │  │
-│  │ async fn query_execute(state, conn_id, sql, query_id) {        │  │
-│  │   let driver = state.drivers.get(&conn_id)?;                   │  │
-│  │   let cancel_token = state.queries.register(query_id);         │  │
-│  │   tokio::select! {                                             │  │
-│  │     res = driver.query(sql, cancel_token) => res,              │  │
-│  │     _ = cancel_token.cancelled() => Err(QueryCancelled),       │  │
-│  │   }                                                            │  │
+│  │ async fn db_query(state, id, sql, query_id,                  │  │
+│  │                   row_limit, allow_write) {                  │  │
+│  │   let driver = driver_of(&state, &id).await?;                  │  │
+│  │   let token = CancellationToken::new();                        │  │
+│  │   state.queries.lock().await.insert(query_id, token.clone());  │  │
+│  │   driver.query_with_options(sql, QueryOptions {                │  │
+│  │     row_limit, allow_write                                     │  │
+│  │   }, token).await                                              │  │
 │  │ }                                                              │  │
 │  └────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────┬─────────────────────────┘
-                                              │ trait call
+                                              │ concrete driver call
                                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  crates/db-driver                                                     │
 │  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ MySqlDriverViaSshTunnel::query(sql, cancel_token)              │  │
+│  │ MySqlDriver::query_with_options(sql, options, cancel_token)    │  │
 │  │   ├─ self.pool: MySqlPool（max=5）                              │  │
-│  │   ├─ sqlx::query(sql).fetch(&self.pool)                        │  │
+│  │   ├─ prepare_query_sql：拒多语句 / 写确认 / SELECT 子查询包装       │  │
+│  │   ├─ sqlx::query(prepared.sql).fetch(&self.pool)               │  │
 │  │   └─ 客户端 10w 行截断 / RowSet 组装                              │  │
 │  └─────────────────────────────────┬──────────────────────────────┘  │
 └────────────────────────────────────┼─────────────────────────────────┘
@@ -232,7 +234,7 @@ src-tauri/src/
 │  本地 127.0.0.1:54321 收到行集                                         │
 │         │                                                             │
 │         ▼ sqlx 解析 MySQL protocol → Rust 类型                          │
-│  MySqlDriverViaSshTunnel::query 返回 RowSet                          │
+│  MySqlDriver::query_with_options 返回 RowSet                          │
 │         │                                                             │
 │         ▼ tauri command 返回                                          │
 │  前端 zustand store 收到 RowSet → react-virtuoso 渲染                   │
@@ -241,7 +243,7 @@ src-tauri/src/
 
 **错误回流路径**（虚线）：
 
-- MySQL 服务端错误 → sqlx → `Driver::query` 返回 `Err(QueryError::MySql(...))` → command 层 → 前端 toast
+- MySQL 服务端错误 → sqlx → `MySqlDriver::query_with_options` 返回 `Err(DriverError::QueryFailed)` → command 层 → 前端提示
 - 隧道断开（hop[i] keepalive 失败）→ `ssh-multihop` 内部 task emit `ssh:hop-status` event（**不经 query 返回路径**，直接走事件总线）→ 前端 zustand 更新 hop 状态 → 拓扑节点变红
 - 同时：正在进行的 query 会因为 TCP RST 而失败，回到前端 toast"连接已断开"
 
@@ -258,14 +260,14 @@ src-tauri/src/
 | `next` 16.1.6 | App Router |
 | `react` 19.2.x | UI |
 | `@tauri-apps/api` 2.10.x | IPC + event |
-| `@tauri-apps/plugin-{store,dialog,fs,log,opener,process}` 2.x | Tauri 插件 |
-| `@xyflow/react` ^12 | 拓扑图（react-flow 改名后） |
+| `@tauri-apps/plugin-{process,updater}` 2.x | 重启应用 + 自动更新 |
+| `codemirror` + `@codemirror/lang-sql` / `lint` / `state` / `view` | SQL 编辑器、MySQL 高亮、基础 schema/table 补全和错误 gutter |
 | `react-virtuoso` ^4.18 | 1000 行/10w 行虚拟滚动 |
-| `i18next` + `react-i18next` | i18n（v0.1 仅 zh-CN） |
 | `zustand` ^5 | 全局状态 |
 | `shadcn` + `radix-ui` + `tailwindcss` 4 | UI 组件 |
 | `lucide-react` | 图标 |
-| `sonner` | toast |
+
+> 拓扑图当前用纯 CSS 线性布局，不引入 `@xyflow/react`；错误翻译 v0.1 用前端静态 `ERROR_ZH` map，完整 i18next runtime 留后续英文 UI 时接入。
 
 ---
 
@@ -278,29 +280,24 @@ src-tauri/src/
 **导出 API**（Rust 伪签名，公共类型用中文 doc comment）：
 
 ```rust
-/// SSH 多跳配置 — 一条隧道对应一个 SshConfig，含 1..N 个跳板节点
-pub struct SshConfig {
-    pub enabled: bool,
-    pub hops: Vec<SshHop>,
-}
-
 /// 单跳信息 — 顺序敏感：hops[0] 是本地直连的第一跳，hops[N-1] 是出口
 pub struct SshHop {
     pub host: String,
     pub port: u16,
     pub username: String,
-    pub auth_type: String,           // "password" | "privateKey"
-    pub password: Option<String>,
-    pub private_key_path: Option<String>,
-    pub passphrase: Option<String>,  // 仅会话内存，不持久化
+    pub auth: SshAuth,
 }
 
-/// 建立隧道所需的运行时上下文 — 由 src-tauri 注入
-pub struct SshTunnelContext {
-    pub known_hosts: Arc<SshKnownHostsStore>,
-    pub tofu_manager: Arc<SshTofuManager>,
-    pub app_handle: tauri::AppHandle,
-    pub connection_id: String,
+/// 单跳认证方式
+pub enum SshAuth {
+    Password(String),
+    PrivateKey { path: String, passphrase: Option<String> },
+}
+
+/// 建立 / 运行隧道所需的回调上下文 — 保持 ssh-multihop 不依赖 Tauri
+pub struct TunnelContext {
+    pub status_cb: Option<HopStatusCallback>,
+    pub verifier: Option<HostKeyVerifier>,
 }
 
 /// SSH 隧道错误 — 每个变体对应一个稳定的前端 i18n key
@@ -344,10 +341,10 @@ impl SshTunnel {
 
 /// 主入口：建立 N 跳隧道
 pub async fn open(
-    ssh: &SshConfig,
+    hops: &[SshHop],
     target_host: &str,
     target_port: u16,
-    context: &SshTunnelContext,
+    ctx: &TunnelContext,
 ) -> Result<SshTunnel, SshTunnelError>;
 ```
 
@@ -388,77 +385,94 @@ impl MySqlDriver {
     async fn list_columns(&self, database: &str, table: &str)
         -> Result<Vec<ColumnMeta>, DriverError>;
 
-    /// 执行任意 SQL，返回结果集
+    /// 创建 database，并负责标识符转义与 charset/collation 参数校验
+    async fn create_database(
+        &self,
+        name: &str,
+        charset: Option<&str>,
+        collation: Option<&str>,
+    ) -> Result<(), DriverError>;
+
+    /// 执行任意 SQL，返回结果集；默认用于 SQL 编辑器
+    async fn query(&self, sql: &str) -> Result<RowSet, DriverError>;
+
+    /// 执行任意 SQL，支持 row_limit、写操作确认和取消
     ///
-    /// - `cancel_token`：取消机制，用 tokio_util::sync::CancellationToken
-    /// - 拒多语句（用 sqlparser-rs 解析或分号拆解后拒绝），v0.1 只允许单条 SELECT
-    /// - LIMIT 防护用**子查询包装**：SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT 1000
-    ///   （MySQL 原生语义、零误判；不改写原 SQL，不用 regex 检测 LIMIT 关键字）
-    /// - 后端 fetch_many 流式取 + 客户端 take(100000) 硬上限，防 OOM
-    async fn query(
+    /// - `cancel_token`：由 command 注册表保存，取消时触发
+    /// - 拒空 SQL / 多语句；非 SELECT/CTE 需 allow_write=true
+    /// - SELECT/WITH 用子查询包装：SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT <row_limit + 1>
+    ///   （多取 1 行用于判断 truncated；返回前丢弃第 limit+1 行）
+    /// - row_limit 后端 clamp 到 1..=100000，防 OOM
+    async fn query_with_options(
         &self,
         sql: &str,
+        options: QueryOptions,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> Result<RowSet, DriverError>;
 
-    /// 主动 KILL 远端正在执行的 query（与 cancel_token 配合）
-    ///
-    /// 从**独立 control connection**（主 MySqlPool 之外、同一隧道独立本地端口）
-    /// 发 KILL QUERY <connection_id>，保证 pool 满时 KILL 仍能发出，不留服务端幽灵查询。
-    async fn cancel(&self, query_id: &str) -> Result<(), DriverError>;
+    /// 关闭主 pool 和 control pool
+    async fn close(&self);
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum DriverError {
-    #[error("error.driver.connect_failed")]
+    #[error("error.driver.connect_failed: {0}")]
     ConnectFailed(String),
-    #[error("error.driver.auth_failed")]
-    AuthFailed,
-    #[error("error.driver.sql_error")]
-    SqlError(String),  // MySQL 服务端原文错误（含行号）
-    #[error("error.driver.cancelled")]
-    Cancelled,
-    #[error("error.driver.truncated")]
-    Truncated { limit: usize },  // 提示用，不是真错误
-    #[error("error.driver.tunnel_lost")]
-    TunnelLost,  // 隧道挂了导致 connection refused
+    #[error("error.driver.query_failed: {0}")]
+    QueryFailed(String),
+    #[error("error.driver.invalid_sql")]
+    InvalidSql,
+    #[error("error.driver.multiple_statements")]
+    MultipleStatements,
+    #[error("error.driver.write_requires_confirmation")]
+    WriteRequiresConfirmation,
+    #[error("error.driver.query_cancelled")]
+    QueryCancelled,
+    #[error("error.driver.invalid_identifier")]
+    InvalidIdentifier,
 }
 ```
 
 **MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5），构造时传入 `mysql://user:pass@127.0.0.1:port/db?...` URL。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
 
-**取消的独立 control connection**：除主 pool 外，MySqlDriver 额外持有一条 control connection（同一隧道、独立本地端口）。`cancel(query_id)` 从这条 conn 发 `KILL QUERY <connection_id>`。理由：若从主 pool 借连接发 KILL，pool 满时会卡在 acquire——恰恰是最需要取消（库被打满）的时候发不出 KILL。control conn 与主 pool 状态解耦。
+**取消的独立 control pool**：除主 pool 外，MySqlDriver 额外持有一个 max=1 的 control pool（同一隧道、独立本地端口）。`db_query` 创建 `CancellationToken` 并登记到 `AppState.queries`，`db_query_cancel` 只触发 token；执行中的 `query_with_options` 先取 MySQL `CONNECTION_ID()`，在 `tokio::select!` 的取消分支中用 control pool 发 `KILL QUERY <connection_id>`。理由：若从主 pool 借连接发 KILL，pool 满时会卡在 acquire——恰恰是最需要取消（库被打满）的时候发不出 KILL。control pool 与主 pool 状态解耦。
 
-**结果集防 OOM 三道闸**（FR-021/022）：(1) 拒多语句、对单条 SELECT 用子查询包装 `SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT 1000`；(2) 后端 `fetch_many` 流式逐行取，不用 `fetch_all` 缓冲；(3) 客户端 `take(100000)` 硬上限，超出 toast 提示。三层叠加后，同事在大表上随手 `SELECT *` 也不会把 Rust 进程内存打爆。
+**结果集防 OOM 三道闸**（FR-021/022）：(1) 拒多语句、对单条 SELECT/WITH 用子查询包装 `SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT <row_limit + 1>`（表预览 `row_limit=1000`，SQL 编辑器 `row_limit=100000`，多取 1 行判断 truncated）；(2) 后端用 sqlx stream 逐行取，不用 `fetch_all` 缓冲；(3) row_limit 后端 clamp 到 1..=100000，超出后返回 truncated。三层叠加后，同事在大表上随手 `SELECT *` 也不会把 Rust 进程内存打爆。
 
-**MySqlDriverViaSshTunnel**（组合层）：
+**src-tauri OpenConnection 生命周期绑定（组合层）**：
 
 ```rust
-/// MySQL driver + SSH 多跳隧道的组合层
+/// 一条已打开的活跃连接 —— driver（pool）与隧道生命周期绑定。
 ///
-/// 生命周期：tunnel 在 driver 之前 drop 会导致 pool 失效，所以两者绑定。
-pub struct MySqlDriverViaSshTunnel {
-    /// 隧道 handle — drop 时关闭 listener
-    tunnel: SshTunnel,
-    /// MySQL 连接池 — 走本地 listener 端口
-    pool: sqlx::MySqlPool,
+/// 字段声明顺序即 drop 顺序：driver 在前先 drop，tunnel 在后。
+pub struct OpenConnection {
+    pub driver: MySqlDriver,
+    pub tunnel: Option<SshTunnel>,
+}
+
+impl OpenConnection {
+    pub async fn close(self) {
+        self.driver.close().await;
+        drop(self.tunnel);
+    }
 }
 ```
 
 构造函数大致：
 
 ```
-1. ssh_multihop::open(&ssh_config, mysql_host, mysql_port, ctx)
-   → 拿到 tunnel，local_addr = 127.0.0.1:54321
-2. let url = format!("mysql://{}:{}@127.0.0.1:{}/{}?...",
-                     user, pass, tunnel.local_addr().port(), db)
-3. let pool = MySqlPool::connect(&url).await?
-4. 返回 MySqlDriverViaSshTunnel { tunnel, pool }
+1. 若 connection.ssh.enabled：
+   ssh_multihop::open(&hops, mysql_host, mysql_port, ctx)
+   → 拿到 tunnel.local_addr()，MySQL host/port 改为 127.0.0.1:local_port
+2. 若直连：直接使用连接配置里的 host/port
+3. MySqlDriver::connect_with_settings(host, port, user, password, database, settings).await?
+4. driver.ping().await? 确认隧道桥接 + MySQL 认证成功
+5. AppState.connections.insert(id, OpenConnection { driver, tunnel })
 ```
 
 ### 3.3 src-tauri/commands
 
-每个 tauri command 都是 `async fn`，签名 `(state: tauri::State<AppState>, ...) -> Result<Output, String>`。错误统一返回 `i18n_key` 字符串，前端用 i18next 翻译。
+每个 tauri command 都是 `async fn`，签名 `(state: tauri::State<AppState>, ...) -> Result<Output, String>`。错误统一返回 `i18n_key` 字符串，前端 v0.1 用静态 `ERROR_ZH` map 翻译。
 
 | Command | 输入 | 输出 | 描述 |
 |---|---|---|---|
@@ -469,8 +483,12 @@ pub struct MySqlDriverViaSshTunnel {
 | `connection_test` | `config` | `()` | 完整建立 → SELECT 1 → 销毁 |
 | `connection_open` | `id` | `()` | 建立持久连接，注册到 AppState |
 | `connection_close` | `id` | `()` | 关闭并清理 |
-| `query_execute` | `(id, sql, query_id)` | `RowSet` | 执行 SQL |
-| `query_cancel` | `query_id` | `()` | 取消正在跑的 query |
+| `db_create_database` | `(id, name, charset?, collation?)` | `()` | 创建 database |
+| `db_list_databases` | `id` | `Vec<DatabaseMeta>` | 列出 database |
+| `db_list_tables` | `(id, database)` | `Vec<TableMeta>` | 列出 table |
+| `db_list_columns` | `(id, database, table)` | `Vec<ColumnMeta>` | 列出 column |
+| `db_query` | `(id, sql, query_id?, row_limit?, allow_write?)` | `RowSet` | 执行 SQL |
+| `db_query_cancel` | `query_id` | `()` | 取消正在跑的 query |
 | `ssh_tofu_decision` | `(connection_id, hop_index, accept)` | `()` | TOFU 弹窗回调 |
 
 ### 3.4 AppState
@@ -479,16 +497,18 @@ pub struct MySqlDriverViaSshTunnel {
 
 ```rust
 pub struct AppState {
-    /// 已打开连接的 driver 注册表（connection_id → driver）
-    pub drivers: dashmap::DashMap<String, Arc<dyn Driver>>,
+    /// 连接配置加密存储，串行化 load→改→save
+    pub store: Mutex<ConnectionStore>,
+    /// 已打开连接注册表（connection_id → driver + optional tunnel）
+    pub connections: AsyncMutex<HashMap<String, OpenConnection>>,
     /// 正在执行的 query 注册表（query_id → cancel_token）
-    pub queries: dashmap::DashMap<String, CancellationToken>,
-    /// 加密 store（连接配置）
-    pub config_store: Arc<ConfigStore>,
+    pub queries: AsyncMutex<HashMap<String, CancellationToken>>,
     /// SSH known_hosts store
     pub known_hosts: Arc<SshKnownHostsStore>,
     /// TOFU 决策 manager（前端弹窗响应回调通道）
-    pub tofu_manager: Arc<SshTofuManager>,
+    pub tofu: Arc<SshTofuManager>,
+    /// 会话内 passphrase 缓存（connection_id → passphrase）
+    pub passphrases: Mutex<HashMap<String, String>>,
 }
 ```
 
@@ -633,10 +653,9 @@ SshTunnel 建立后:
 │          Err(e) => {                                           │
 │            fails += 1;                                          │
 │            if fails < 3 { continue; }  // 连续 3 次才判定断开    │
-│            app_handle.emit("ssh:hop-status", payload {        │
-│              connection_id, hop_index: i,                      │
-│              status: "lost", reason: e.to_string()             │
-│            });                                                  │
+│            status_cb(HopStatusEvent {                          │
+│              hop_index: i, status: Lost, reason: Some(...)      │
+│            }); // src-tauri 回调里再 emit ssh:hop-status          │
 │            break;  // 退出循环，task 自然结束                    │
 │          }                                                      │
 │        }                                                        │
@@ -700,8 +719,9 @@ sqlx::MySqlPool (max_connections = 5)
 
 **生命周期绑定**：
 
-- `MySqlDriverViaSshTunnel` 结构里同时持有 `tunnel: SshTunnel` 和 `pool: sqlx::MySqlPool`
-- struct drop 时：先 drop pool（让正在用的连接被回收），再 drop tunnel（关 listener）
+- `src-tauri::state::OpenConnection` 同时持有 `driver: MySqlDriver` 和 `tunnel: Option<SshTunnel>`
+- `connection_close` 从注册表移除后调用 `OpenConnection::close()`：先 `driver.close().await`（关 pool），再 `drop(tunnel)`（关 listener / session）
+- 异常 drop 时字段顺序兜底：`driver` 声明在前先 drop，`tunnel` 在后
 - 反过来不行：tunnel 先 drop 会导致 listener 关，pool 里的连接报 EOF，sqlx 会刷一堆错误日志
 
 ---
@@ -799,9 +819,8 @@ ssh-multihop::open 调用时从 ctx 里读 passphrase 用于这次握手
  │                            │                            │ known_hosts.find(host)   │
  │                            │                            │  → None (未知主机)        │
  │                            │                            │                          │
- │                            │                            │ tofu_manager.register    │
- │                            │                            │  (conn_id, hop_index)    │
- │                            │                            │  → oneshot::Receiver     │
+ │                            │                            │ tofu.request(...)         │
+ │                            │                            │  emit + oneshot::Receiver │
  │                            │                            │                          │
  │ ssh:tofu-request event     │                            │                          │
  │<───────────────────────────────────────────────────────│                          │
@@ -819,7 +838,7 @@ ssh-multihop::open 调用时从 ctx 里读 passphrase 用于这次握手
  │ invoke('ssh_tofu_decision',│                            │                          │
  │   {conn_id, hop_idx, true})│                            │                          │
  │───────────────────────────>│                            │                          │
- │                            │ tofu_manager.respond(true) │                          │
+ │                            │ tofu.resolve(true)         │                          │
  │                            │   通过 oneshot sender 唤醒  │                          │
  │                            │───────────────────────────>│                          │
  │                            │                            │ 写 known_hosts.trust(    │
@@ -839,7 +858,7 @@ ssh-multihop::open 调用时从 ctx 里读 passphrase 用于这次握手
  │                            │                            │ tokio::time::timeout(    │
  │                            │                            │   120s, rx) → Err(Elapsed│
  │                            │                            │                          │
- │                            │                            │ tofu_manager.cleanup     │
+ │                            │                            │ tofu request cleanup      │
  │                            │                            │ check_server_key → false │
  │                            │                            │ 整个 open() 返回         │
  │                            │                            │   HostKeyRejected         │
@@ -1002,7 +1021,7 @@ FR-024 描述。正则 `/^\s*(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CRE
 | crate | 重点 |
 |---|---|
 | `ssh-multihop` | SshTunnelError i18n key 稳定性 / expand_home_path / keepalive task 在 SshTunnel drop 时被 abort |
-| `db-driver` | MySqlDriver 各方法 / 子查询包装 LIMIT（含 ORDER BY/UNION/CTE 不破坏语义）/ 10w 行截断阈值 / cancel_token + control conn KILL QUERY |
+| `db-driver` | MySqlDriver 各方法 / 子查询包装 LIMIT（含 ORDER BY/UNION/CTE 不破坏语义）/ 10w 行截断阈值 / cancel_token + control pool KILL QUERY |
 | `src-tauri` | 加密 store round-trip / known_hosts.json 读写 / TOFU manager 超时清理 |
 
 ### 10.2 集成测试（不用 Docker，连用户本地 MySQL）
@@ -1040,7 +1059,7 @@ FR-024 描述。正则 `/^\s*(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CRE
 
 - tiny-sql 是 workspace；redis-desktop-client 是单 crate
 - tiny-sql v0.1 用具体 `struct MySqlDriver`（v0.2 加 PG 时 extract trait）；redis-desktop-client 直接用 `redis` crate
-- tiny-sql 引入 `@xyflow/react` 拓扑图；redis-desktop-client 无此组件
+- tiny-sql 用纯 CSS 线性拓扑图展示本机、SSH hop 与 MySQL 状态；redis-desktop-client 无此组件
 - tiny-sql 加 SSH keepalive 60s + 3 次阈值（FR-014）；redis-desktop-client 仅靠 russh 3600s inactivity timeout
 
 ---

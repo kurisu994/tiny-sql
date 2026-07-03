@@ -15,7 +15,7 @@
 |---|---|
 | 日期 | YYYY-MM-DD |
 | tester | 作者 / 同事 A / 同事 B |
-| 应用版本 | 0.1.0 / commit short sha |
+| 应用版本 | 版本号 / commit short sha |
 | 安装方式 | 本地安装包 / GitHub Release 安装包 / `just dev` |
 | 操作系统 | macOS 版本 + Apple Silicon / Intel；Windows x64；Linux x64 |
 | MySQL | 5.7 / 8.0 / 8.4 |

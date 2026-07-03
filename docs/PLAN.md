@@ -228,20 +228,20 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 ### 5.1 任务
 
 **T4.1 [2.5h] SQL 执行 — 子查询包装防 OOM（FR-021/022）**
-- v0.1 **拒多语句**（用 sqlparser-rs 解析或分号拆解后拒绝），只允许单条 SELECT
-- LIMIT 防护**用子查询包装，不用 regex 检测**：`SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT 1000`（MySQL 原生语义，零误判；用户手写 LIMIT 5 装在内部，取小意图一致）
-- 后端 `fetch_many` 流式取 + 客户端 `take(100000)` 硬上限，超出 toast 提示
+- v0.1 **拒多语句**（当前用自有 SQL 分析 / 分号状态机，未引入 sqlparser-rs），只允许单条 SELECT
+- LIMIT 防护**用子查询包装，不用 regex 检测**：`SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT <rowLimit + 1>`（MySQL 原生语义，零误判；用户手写 LIMIT 5 装在内部，取小意图一致）
+- 后端 sqlx stream 流式取 + `rowLimit` clamp 到 100000；表浏览用 1000，SQL 编辑器用 100000，超出返回 truncated 提示
 
-**T4.2 [2h] SQL 取消 — 独立 control connection + KILL QUERY（FR-023）**
-- MySqlDriver 在主 MySqlPool 外额外起一个 **control connection**（同一隧道、独立本地端口）
-- cancel 时从 control conn 发 `KILL QUERY <connection_id>`，pool 满时 KILL 仍能发出
-- 前端取消按钮 → tokio abort 客户端等待 + control conn KILL 服务端 query
+**T4.2 [2h] SQL 取消 — 独立 control pool + KILL QUERY（FR-023）**
+- MySqlDriver 在主 MySqlPool 外额外起一个 max=1 的 **control pool**（同一隧道、独立本地端口）
+- cancel 时从 control pool 发 `KILL QUERY <connection_id>`，主 pool 满时 KILL 仍能发出
+- 前端取消按钮 → cancel token 触发 + control pool KILL 服务端 query
 - 只读保护正则（`DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CREATE|REPLACE`）保留作为低成本一道闸，弹确认对话框（FR-024，注意 best-effort 语义见 REQUIREMENTS）
 
-**T4.3 [3h] react-flow 拓扑图组件（FR-015）**
-- `@xyflow/react v12` 画 N+2 节点（本地 / hop[0..N-1] / MySQL）
-- 自定义 node：标题 + 状态徽章（pending/connected/failed/lost）+ host:port 副文本
-- 边默认 bezier，连接成功变绿；**不实现** v0.2 的实时延迟动画
+**T4.3 [3h] 纯 CSS 拓扑图组件（FR-015）**
+- 固定线性布局画 N+2 节点（本地 / hop[0..N-1] / MySQL）
+- 节点包含标题、状态徽章（pending/connected/failed/lost）和 host:port 副文本
+- 边用 CSS 直线表达连接状态；**不实现** v0.2 的实时延迟动画
 
 **T4.4 [2.5h] ssh:hop-status event 接线 + 错误高亮**
 - 后端每跳不同阶段 emit `ssh:hop-status` `{connection_id, hop_index, status, latency_ms?}`
@@ -257,7 +257,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 ### 5.2 验收点
 
 - [ ] SQL 执行：子查询包装生效，手写 LIMIT 与外层取小，10w 截断提示
-- [ ] 长查询取消：control conn KILL QUERY 发出，`SHOW PROCESSLIST` 中 query 消失
+- [ ] 长查询取消：control pool KILL QUERY 发出，`SHOW PROCESSLIST` 中 query 消失
 - [ ] 只读保护：DROP/DELETE/UPDATE 命中弹确认
 - [ ] 拓扑图按"本地 → hop[..] → MySQL"画对，节点状态实时变化
 - [ ] tag `v0.1.0-rc1` 后 GitHub Releases 出现 macOS / Windows / Linux 桌面安装包
@@ -277,9 +277,9 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 
 | 风险 | 概率 | 影响 | 应对 |
 |---|---|---|---|
-| control conn 也走隧道，隧道卡死时 cancel 同样卡 | 20% | 中 | cancel 加超时；超时后前端仍 abort 客户端等待 |
+| control pool 也走隧道，隧道卡死时 cancel 同样卡 | 20% | 中 | cancel 加超时；超时后前端仍结束等待 |
 | 子查询包装在某些 SQL（含 ORDER BY/UNION）上语义微变 | 10% | 低 | 单测覆盖 ORDER BY/UNION/CTE；外层 LIMIT 不改内部排序 |
-| react-flow bundle 过大影响启动 | 10% | 低 | bundle ~300KB 桌面端可接受 |
+| 拓扑节点过多时横向溢出 | 10% | 低 | 当前线性布局支持横向滚动；v0.1 测试到 3 跳 |
 | macOS Intel build crash（cross arch） | 15% | 高 | 矩阵原生 build，不 cross-compile |
 
 ---
@@ -347,8 +347,8 @@ V2EX + 掘金发帖（中文开发者）；HN 留 v0.2 多平台 + 英文 README
 | 风险 ID | 描述 | 应对 |
 |---|---|---|
 | R-010 | 同事环境暴露 v0.1 未覆盖的 SSH 配置 | 拒绝并记 v0.2 |
-| R-011 | react-flow bundle 拖慢启动 | ~300KB 可接受；超 5MB 才换实现 |
-| R-012 | 大表浏览卡顿 | 子查询包装 LIMIT 1000 已护栏 |
+| R-011 | 拓扑节点过多导致布局拥挤 | v0.1 测试到 3 跳；超长链路先横向滚动，v0.2 再评估折叠视图 |
+| R-012 | 大表浏览卡顿 | 表浏览 `rowLimit=1000` + 子查询包装已护栏 |
 | R-013 | 同事不会"右键打开" | README GIF + 群消息教学 |
 | R-014 | read-only 正则只是 best-effort，`SELECT func_that_writes()` 等绕过 | 文案明示建议用只读账号（见 REQUIREMENTS FR-024）；v0.2 不强化 |
 
@@ -412,7 +412,7 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 | # | 决策 | 落地位置 |
 |---|---|---|
 | 1 | keepalive 30s→60s + 3 次失败阈值（180s） | T3.2 / FR-014 / 验收"180s 内" |
-| 2 | SQL 取消独立 control conn + KILL QUERY | T4.2 / FR-023 |
+| 2 | SQL 取消独立 control pool + KILL QUERY | T4.2 / FR-023 |
 | 3 | SshTunnelError 加 ChannelDropped + AcceptLoopDied | T3.3 / FR-013 |
 | 4 | trait Driver 推 v0.2，v0.1 具体 struct | T2.2 / ROADMAP v0.2 |
 | 5 | 测试基础设施一次架齐（无 Docker，本地 MySQL） | T2.1 |
@@ -451,8 +451,8 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 
 ### Week 4（SQL + 拓扑 + dmg）
 - [ ] 子查询包装防 OOM + 拒多语句
-- [ ] control conn + KILL QUERY
-- [ ] react-flow 拓扑图
+- [ ] control pool + KILL QUERY
+- [ ] 纯 CSS 拓扑图
 - [ ] ssh:hop-status + 错误高亮
 - [ ] macOS .dmg
 - [ ] **CP-4** dogfooding 准入
