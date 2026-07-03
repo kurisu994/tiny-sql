@@ -2,6 +2,7 @@
 
 import { Virtuoso } from "react-virtuoso";
 
+import { SqlCodeEditor } from "@/components/sql-code-editor";
 import { TopologyGraph } from "@/components/topology-graph";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
 import type { RowSet, StoredConnection } from "@/lib/tauri-api";
@@ -154,12 +155,15 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         {/* 右：SQL + 结果表格 */}
         <section className="flex min-w-0 flex-1 flex-col">
           <div className="border-b border-neutral-200 p-3 dark:border-neutral-800">
-            <textarea
+            <SqlCodeEditor
               value={sqlText}
-              onChange={(e) => setSqlText(e.target.value)}
+              onChange={setSqlText}
+              onRun={runSql}
               disabled={!connected || queryRunning}
-              spellCheck={false}
-              className="h-24 w-full resize-none rounded-md border border-neutral-300 bg-white px-3 py-2 font-mono text-xs outline-none focus:border-blue-500 disabled:bg-neutral-100 disabled:text-neutral-400 dark:border-neutral-700 dark:bg-neutral-950 dark:disabled:bg-neutral-900"
+              queryErrorMsg={queryErrorMsg}
+              databases={databases}
+              selectedDb={selectedDb}
+              tables={tables}
             />
             <div className="mt-2 flex items-center gap-2">
               <button

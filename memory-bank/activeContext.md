@@ -2,7 +2,7 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-07-02
+**最后更新**：2026-07-03
 
 ## 当前状态
 
@@ -13,6 +13,7 @@
 - ✅ 检查更新入口迁移：连接列表头部不再显示更新按钮；macOS 应用菜单新增 `Check for Updates...`，点击后通过 `app:check-update` 事件复用现有手动检查、无更新提示和更新弹窗逻辑。
 - ✅ 新建数据库：已连接的连接右键菜单新增「新建数据库」；弹窗包含常规 / SQL 预览、数据库名称、字符集、排序规则；后端通过 `db_create_database` 调用 `db-driver::create_database`，由 driver 负责库名反引号转义和字符集 / 排序规则标识符校验，成功后刷新并选中新库。
 - ✅ Schema 树图标：已连接后的左侧 database / table 树新增固定尺寸图标；database 选中时用绿色圆柱强调，table 用蓝色表格图标，长名称仍走截断不撑开侧栏。
+- ✅ SQL 编辑区接入 CodeMirror 6：已替换裸 `textarea`，支持 MySQL 语法高亮、行号、schema/table 补全、本地结构错误 gutter、MySQL `line N` 执行错误行标识和 `Cmd/Ctrl+Enter` 快捷执行；当前仍复用既有执行、取消、写操作确认和结果表格链路。
 - ✅ 接入 shadcn/ui（radix-nova、radix 基库）：`components.json` + `src/lib/utils.ts` + `src/components/ui/*`；暗色保持 `prefers-color-scheme` 跟随系统（不切 `.dark` class），还原 system 中文字体栈（移除 init 引入的 Geist Google 字体）。
 - ✅ 自动更新：后端注册 `tauri-plugin-updater` / `tauri-plugin-process`；前端新增 `updateApi`、`useUpdateChecker` 和 `UpdateDialog`；release workflow 用 `TAURI_SIGNING_PRIVATE_KEY` 签名各平台 updater artifact，正式版生成 `latest.json`，RC / beta / alpha 跳过。
 - ✅ 发布触发分流：`ci.yml` 对 `just release` 产生的版本号 / CHANGELOG 提交启用 `paths-ignore`，`just version` 会刷新 `Cargo.lock` 中 `tiny-sql` 本地 package 版本，`just release` 同步暂存 `Cargo.lock`；tag push 仍由 `release.yml` 执行全平台打包和 GitHub Release。
@@ -61,6 +62,7 @@
 - `src/app/{page.tsx,globals.css,layout.tsx}` — 连接列表右键菜单 + 表单弹窗、新建数据库弹窗入口、shadcn 主题变量（暗色跟随系统）、字体还原。
 - `src/components/{schema-browser,connection-form}.tsx` — 写操作 / 删除确认改用全局 confirm；连接表单按常规 / SSH / SSL / 高级标签页分组。
 - `src/components/create-database-dialog.tsx` — 新建数据库弹窗，常规 / SQL 预览标签页、字符集 / 排序规则静态选项、提交失败提示。
+- `src/components/sql-code-editor.tsx` + `src/lib/sql-editor.ts` + `src/lib/sql-editor.test.ts` — CodeMirror 6 SQL 编辑器封装、本地 SQL 诊断 / MySQL 错误行解析及单测。
 
 ## 近期已做决策
 
@@ -94,7 +96,7 @@
 
 ## 下一步（Week 5）
 
-1. 用真实 Tauri GUI 点新建 / 编辑连接弹窗、已连接右键菜单「新建数据库」、schema 树数据库 / 表图标和 macOS 应用菜单 `Check for Updates...`，确认常规 / SSH / SSL / 高级标签页焦点、滚动、保存、测试连接、新建库、菜单检查更新和无更新/有更新反馈手感正常。
+1. 用真实 Tauri GUI 点 SQL 编辑区（高亮、行号、schema/table 补全、错误 gutter、`Cmd/Ctrl+Enter` 执行）、新建 / 编辑连接弹窗、已连接右键菜单「新建数据库」、schema 树数据库 / 表图标和 macOS 应用菜单 `Check for Updates...`，确认常规 / SSH / SSL / 高级标签页焦点、滚动、保存、测试连接、新建库、菜单检查更新和无更新/有更新反馈手感正常。
 2. 提交并重新触发正式版 tag workflow，确认 GitHub Release 里 macOS `.dmg` / `.app.tar.gz` / `.sig`、Windows `.exe` / `.sig`、Linux `.AppImage` / `.sig` 都存在，正式版附带 `latest.json`。
 3. RC 前：把 `.env` 中的 updater 私钥内容配置到 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。刷新远端状态，确认工作区只含发布相关改动；跑 `just check`、`just test-integration`、`just build`，并至少用本机平台产物做 GUI smoke。
 4. 后续 RC：若需要新 RC tag，先发 `v0.1.0-rcN`，验证版本提交没有重复触发 `ci.yml`，并确认全平台产物齐全。

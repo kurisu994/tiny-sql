@@ -43,6 +43,28 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+.tiny-sql-editor {
+  --tiny-sql-editor-bg: #ffffff;
+  --tiny-sql-editor-fg: #171717;
+  --tiny-sql-editor-border: #d4d4d4;
+  --tiny-sql-editor-focus: #3b82f6;
+  --tiny-sql-editor-caret: #2563eb;
+  --tiny-sql-editor-gutter-bg: #fafafa;
+  --tiny-sql-editor-gutter-border: #e5e5e5;
+  --tiny-sql-editor-gutter-fg: #a3a3a3;
+  --tiny-sql-editor-active-line: #f5f7fb;
+  --tiny-sql-editor-tooltip-bg: #ffffff;
+  --tiny-sql-editor-selection: #dbeafe;
+}
+
+.tiny-sql-editor .cm-editor {
+  width: 100%;
+}
+
+.tiny-sql-editor-disabled .cm-editor {
+  opacity: 0.72;
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
@@ -120,6 +142,20 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+  }
+
+  .tiny-sql-editor {
+    --tiny-sql-editor-bg: #0a0a0a;
+    --tiny-sql-editor-fg: #e5e5e5;
+    --tiny-sql-editor-border: #404040;
+    --tiny-sql-editor-focus: #60a5fa;
+    --tiny-sql-editor-caret: #93c5fd;
+    --tiny-sql-editor-gutter-bg: #111111;
+    --tiny-sql-editor-gutter-border: #262626;
+    --tiny-sql-editor-gutter-fg: #737373;
+    --tiny-sql-editor-active-line: #111827;
+    --tiny-sql-editor-tooltip-bg: #171717;
+    --tiny-sql-editor-selection: #172554;
   }
 }
 
