@@ -120,9 +120,6 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                   selectedDb === db.name ? "font-medium" : ""
                 }`}
               >
-                <span className="w-3 shrink-0 text-neutral-400">
-                  {selectedDb === db.name ? "▾" : "▸"}
-                </span>
                 <DatabaseTreeIcon active={selectedDb === db.name} />
                 <span className="min-w-0 truncate">{db.name}</span>
               </button>

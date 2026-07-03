@@ -12,7 +12,7 @@
 - ✅ 连接表单标签页：新增本地 shadcn/radix 风格 `Tabs` 组件；新建 / 编辑连接弹窗拆为常规 / SSH / SSL / 高级；SSL mode 与证书路径持久化并传给 `db-driver`；高级设置保存保持连接、连接 / 读取 / 写入超时、压缩、自动连接，其中连接超时已接入 MySQL 连接建立路径。
 - ✅ 检查更新入口迁移：连接列表头部不再显示更新按钮；macOS 应用菜单新增 `Check for Updates...`，点击后通过 `app:check-update` 事件复用现有手动检查、无更新提示和更新弹窗逻辑。
 - ✅ 新建数据库：已连接的连接右键菜单新增「新建数据库」；弹窗包含常规 / SQL 预览、数据库名称、字符集、排序规则；后端通过 `db_create_database` 调用 `db-driver::create_database`，由 driver 负责库名反引号转义和字符集 / 排序规则标识符校验，成功后刷新并选中新库。
-- ✅ Schema 树图标：已连接后的左侧 database / table 树新增固定尺寸图标；database 选中时用绿色圆柱强调，table 用蓝色表格图标，长名称仍走截断不撑开侧栏。
+- ✅ Schema 树图标：已连接后的左侧 database / table 树新增固定尺寸图标，并去掉 database 名前的三角展开箭头；database 选中时用绿色圆柱强调，table 用蓝色表格图标，长名称仍走截断不撑开侧栏。
 - ✅ Schema 树折叠修复：数据库展开后再次点击同一库会收起并清空当前表选择 / 结果；`selectDb` 也会忽略过期的异步表列表返回，避免切换或折叠后旧请求覆盖当前状态。
 - ✅ SQL 编辑区接入 CodeMirror 6：已替换裸 `textarea`，支持 MySQL 语法高亮、行号、schema/table 补全、本地结构错误 gutter、MySQL `line N` 执行错误行标识和 `Cmd/Ctrl+Enter` 快捷执行；当前仍复用既有执行、取消、写操作确认和结果表格链路。
 - ✅ 接入 shadcn/ui（radix-nova、radix 基库）：`components.json` + `src/lib/utils.ts` + `src/components/ui/*`；暗色保持 `prefers-color-scheme` 跟随系统（不切 `.dark` class），还原 system 中文字体栈（移除 init 引入的 Geist Google 字体）。
