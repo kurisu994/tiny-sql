@@ -32,6 +32,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     lostHops,
     errorMsg,
     selectDb,
+    collapseDb,
     selectTable,
     setSqlText,
     executeSql,
@@ -111,7 +112,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           {connected && databases.map((db) => (
             <div key={db.name}>
               <button
-                onClick={() => selectDb(db.name)}
+                onClick={() =>
+                  selectedDb === db.name ? collapseDb() : selectDb(db.name)
+                }
                 title={db.name}
                 className={`flex w-full min-w-0 items-center gap-1.5 px-3 py-1.5 text-left text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900 ${
                   selectedDb === db.name ? "font-medium" : ""

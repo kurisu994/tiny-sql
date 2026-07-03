@@ -90,6 +90,48 @@ describe("session-store", () => {
     expect(useSessionStore.getState().rowSet?.rows).toHaveLength(1);
   });
 
+  it("collapseDb 收起当前 database 并清空表选择", () => {
+    useSessionStore.setState({
+      selectedDb: "app",
+      tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
+      selectedTable: "users",
+      rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+      loadingData: true,
+    });
+
+    useSessionStore.getState().collapseDb();
+
+    const s = useSessionStore.getState();
+    expect(s.selectedDb).toBeNull();
+    expect(s.tables).toEqual([]);
+    expect(s.selectedTable).toBeNull();
+    expect(s.rowSet).toBeNull();
+    expect(s.loadingData).toBe(false);
+  });
+
+  it("selectDb 过期返回不会覆盖当前 database 的表列表", async () => {
+    let resolveTables: (value: unknown) => void = () => {};
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_list_tables") {
+        return new Promise((resolve) => {
+          resolveTables = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    useSessionStore.setState({ openId: "c1" });
+
+    const pending = useSessionStore.getState().selectDb("app");
+    useSessionStore.getState().collapseDb();
+    resolveTables([{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }]);
+    await pending;
+
+    const s = useSessionStore.getState();
+    expect(s.selectedDb).toBeNull();
+    expect(s.tables).toEqual([]);
+    expect(s.loadingData).toBe(false);
+  });
+
   it("createDatabase 成功后刷新列表并选中新库", async () => {
     useSessionStore.setState({
       openId: "c1",

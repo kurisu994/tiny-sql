@@ -90,6 +90,7 @@ interface SessionState {
   submitPassphrase: (passphrase: string) => Promise<void>;
   cancelPassphrase: () => void;
   selectDb: (db: string) => Promise<void>;
+  collapseDb: () => void;
   createDatabase: (id: string, input: CreateDatabaseInput) => Promise<void>;
   selectTable: (table: string) => Promise<void>;
   setSqlText: (sql: string) => void;
@@ -207,11 +208,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     });
     try {
       const tables = await dbApi.listTables(openId, db);
+      if (get().selectedDb !== db) return;
       set({ tables, loadingData: false });
     } catch (e) {
+      if (get().selectedDb !== db) return;
       set({ errorMsg: translateError(e), loadingData: false });
     }
   },
+
+  collapseDb: () =>
+    set({
+      selectedDb: null,
+      tables: [],
+      selectedTable: null,
+      rowSet: null,
+      loadingData: false,
+    }),
 
   createDatabase: async (id, input) => {
     const { openId } = get();
