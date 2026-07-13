@@ -89,7 +89,11 @@ pub async fn connection_delete(state: State<'_, AppState>, id: String) -> Result
 /// 测试连接：建立完整链路（可选 SSH 隧道 + MySQL 握手 + SELECT 1）后立即销毁。
 /// 成功返回 ()，失败返回 i18n key 由前端翻译（FR-002）。
 #[tauri::command]
-pub async fn connection_test(input: ConnectionInput) -> Result<(), String> {
+pub async fn connection_test(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: ConnectionInput,
+) -> Result<(), String> {
     let hops: Vec<SshHop> = if input.ssh.enabled {
         // 测试连接不带会话 passphrase 缓存，私钥 passphrase 测试留连接打开路径
         build_runtime_hops(&input.ssh, None)?
@@ -98,11 +102,17 @@ pub async fn connection_test(input: ConnectionInput) -> Result<(), String> {
     };
 
     // 直连用真实 host:port；走隧道时换成隧道的本地端口。
-    // 测试连接是瞬时建链立即销毁，无需 keepalive 上报，故传 default ctx。
+    // 测试连接同样必须走 known_hosts + TOFU 校验：verifier 缺省会接受任意
+    // host key，SSH 凭据会发给未经校验的主机。瞬时链路无需 keepalive 上报。
     let (host, port, _tunnel) = if hops.is_empty() {
         (input.host.clone(), input.port, None)
     } else {
-        let tunnel = ssh_multihop::open(&hops, &input.host, input.port, &TunnelContext::default())
+        let test_id = format!("test-{}", uuid::Uuid::new_v4());
+        let ctx = TunnelContext {
+            status_cb: None,
+            verifier: Some(build_verifier(&app, &state, test_id)),
+        };
+        let tunnel = ssh_multihop::open(&hops, &input.host, input.port, &ctx)
             .await
             .map_err(|e| e.i18n_key().to_string())?;
         let addr = tunnel.local_addr();

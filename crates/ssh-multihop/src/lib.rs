@@ -10,8 +10,8 @@
 //!   注入闭包，绝不引用 `tauri::*`。
 //! - keepalive 走 russh 内置机制（[`KEEPALIVE_INTERVAL`] + [`KEEPALIVE_MAX_MISSED`]），
 //!   每跳再起一个监控 task 探测 session 是否已断，断开经 [`HopStatusCallback`] 上报。
-//! - host key 校验 v0.1 暂用 accept-all（见 [`AcceptAll`]）；known_hosts + TOFU
-//!   通过 [`TunnelContext`] 注入留 T3.4。
+//! - host key 校验（known_hosts + TOFU）由上层经 [`TunnelContext::verifier`] 注入；
+//!   不注入时接受任意 key，仅限自动化测试等受信环境使用。
 //!
 //! russh 0.54 的多跳实现移植自 redis-desktop-client 的 `ssh_tunnel.rs`，
 //! 剥离了 Tauri/known_hosts 耦合。
@@ -205,7 +205,8 @@ pub type HostKeyVerifier = Arc<
 pub struct TunnelContext {
     /// 跳状态回调（keepalive 断开等）；None = 不上报。
     pub status_cb: Option<HopStatusCallback>,
-    /// host key 校验器；None = 接受任意 key（仅用于瞬时连接测试）。
+    /// host key 校验器；None = 接受任意 key，仅限自动化测试等受信环境，
+    /// 应用内的连接路径（含测试连接）一律注入。
     pub verifier: Option<HostKeyVerifier>,
 }
 
@@ -214,8 +215,8 @@ type SharedSession = Arc<TokioMutex<Handle<TunnelHandler>>>;
 
 /// russh 客户端 handler：每跳一个，承载该跳的 host key 校验。
 ///
-/// 无 verifier 时（连接测试）接受任意 key；有 verifier 时把指纹交给上层判定，
-/// 拒绝则把精确错误写进 `reject_slot` 供 [`open`] 在握手失败后读取。
+/// 无 verifier 时接受任意 key（仅限受信测试环境）；有 verifier 时把指纹交给
+/// 上层判定，拒绝则把精确错误写进 `reject_slot` 供 [`open`] 在握手失败后读取。
 struct TunnelHandler {
     hop_index: usize,
     host: String,
@@ -232,7 +233,7 @@ impl Handler for TunnelHandler {
         server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
         let Some(verifier) = &self.verifier else {
-            // 无校验器（连接测试）：接受任意 key
+            // 无校验器（仅限受信测试环境）：接受任意 key
             return Ok(true);
         };
         let fingerprint = server_public_key
