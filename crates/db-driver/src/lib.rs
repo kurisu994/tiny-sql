@@ -8,7 +8,8 @@
 //! + 该端口连接即可。直连（无 SSH）时传真实 host:port。
 //!
 //! Week 2 范围：connect / ping / list_databases / list_tables / list_columns / query。
-//! query 的子查询包装防 OOM、10w 行截断、独立 control connection KILL QUERY 取消留 Week 4。
+//! query 的防 OOM 由「顶层安全时追加 LIMIT + 客户端 10w 行截断」组成；
+//! 取消走独立 control connection 发 KILL QUERY。
 
 use std::str::FromStr;
 use std::time::Duration;
@@ -396,10 +397,14 @@ impl MySqlDriver {
             .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
 
         match prepared.kind {
-            PreparedSqlKind::Read { limit } => {
+            PreparedSqlKind::Read {
+                limit,
+                server_capped,
+            } => {
                 self.fetch_read_rows(
                     &prepared.sql,
                     limit,
+                    server_capped,
                     &mut conn,
                     mysql_thread_id,
                     cancel_token,
@@ -417,12 +422,14 @@ impl MySqlDriver {
         &self,
         sql: &str,
         limit: usize,
+        server_capped: bool,
         conn: &mut sqlx::pool::PoolConnection<sqlx::MySql>,
         mysql_thread_id: u64,
         cancel_token: CancellationToken,
     ) -> Result<RowSet, DriverError> {
-        let columns: Vec<String> = self
-            .pool
+        // 用已持有的连接 describe，不从同一个 pool 再借第二个连接
+        //（并发查询占满 pool 时会互相等 describe 的 acquire 造成整体卡死）
+        let mut columns: Vec<String> = (&mut **conn)
             .describe(sql)
             .await
             .map_err(|e| DriverError::QueryFailed(e.to_string()))?
@@ -441,6 +448,11 @@ impl MySqlDriver {
                     let Some(row) = row.map_err(|e| DriverError::QueryFailed(e.to_string()))? else {
                         break;
                     };
+                    // SHOW PROCESSLIST / EXPLAIN 等语句 prepare 阶段拿不到列元信息
+                    //（describe 返回空列），从首行数据补齐列名
+                    if columns.is_empty() {
+                        columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+                    }
                     if data.len() >= limit {
                         truncated = true;
                         break;
@@ -453,6 +465,13 @@ impl MySqlDriver {
                     return Err(DriverError::QueryCancelled);
                 }
             }
+        }
+
+        // 服务端没有 LIMIT 兜底时客户端截断会留下未读完的大结果集，
+        // 归还连接前 KILL 止损，避免 sqlx 在下次使用时 drain 全量行（多跳隧道上代价高）
+        if truncated && !server_capped {
+            drop(rows);
+            self.kill_query(mysql_thread_id).await;
         }
 
         Ok(RowSet {
@@ -598,7 +617,12 @@ fn url_has_ssl_mode(url: &str) -> bool {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreparedSqlKind {
-    Read { limit: usize },
+    /// 返回结果集的语句（SELECT / WITH / SHOW / EXPLAIN / DESC）：fetch 行流。
+    /// `server_capped` 表示已在语句末尾追加服务端 LIMIT；false 时靠客户端截断兜底。
+    Read {
+        limit: usize,
+        server_capped: bool,
+    },
     Write,
 }
 
@@ -610,8 +634,10 @@ struct PreparedSql {
 
 /// 分析并改写 SQL：
 /// - 拒绝空 SQL / 多语句；
-/// - SELECT / WITH 用子查询外包 LIMIT；
-/// - 非 SELECT 仅在 `allow_write=true` 时执行，作为 best-effort 写操作二次确认。
+/// - SELECT / WITH 在顶层安全时追加 LIMIT（不做 derived table 包装——
+///   `SELECT *` JOIN 的重名列在包装后会报 1060 Duplicate column name）；
+/// - SHOW / EXPLAIN / DESC 等元数据语句按读处理，返回结果集且无需写确认；
+/// - 其余语句仅在 `allow_write=true` 时执行，作为 best-effort 写操作二次确认。
 fn prepare_query_sql(sql: &str, options: QueryOptions) -> Result<PreparedSql, DriverError> {
     let sanitized = strip_literals_and_comments(sql);
     let sanitized_stmt = trim_trailing_terminators(&sanitized);
@@ -625,25 +651,102 @@ fn prepare_query_sql(sql: &str, options: QueryOptions) -> Result<PreparedSql, Dr
     let stmt = trim_trailing_terminators(sql);
     let tokens = sql_tokens(&sanitized_stmt);
     let first = tokens.first().map(String::as_str).unwrap_or_default();
-    let is_read = matches!(first, "SELECT" | "WITH");
-
-    if !is_read {
-        if !options.allow_write {
-            return Err(DriverError::WriteRequiresConfirmation);
-        }
-        return Ok(PreparedSql {
-            sql: stmt,
-            kind: PreparedSqlKind::Write,
-        });
-    }
-
     let limit = options.effective_limit();
-    // 多取 1 行仅用于精确判断是否截断；返回给前端时会丢掉第 limit+1 行。
-    let fetch_limit = limit.saturating_add(1);
-    Ok(PreparedSql {
-        sql: format!("SELECT * FROM ({stmt}) AS tiny_sql_limited LIMIT {fetch_limit}"),
-        kind: PreparedSqlKind::Read { limit },
-    })
+
+    match first {
+        "SELECT" | "WITH" => {
+            if can_append_limit(&sanitized_stmt) {
+                // 多取 1 行仅用于精确判断是否截断；返回给前端时会丢掉第 limit+1 行。
+                let fetch_limit = limit.saturating_add(1);
+                Ok(PreparedSql {
+                    // 换行追加，避免语句以行注释结尾时 LIMIT 被吞掉
+                    sql: format!("{stmt}\nLIMIT {fetch_limit}"),
+                    kind: PreparedSqlKind::Read {
+                        limit,
+                        server_capped: true,
+                    },
+                })
+            } else {
+                Ok(PreparedSql {
+                    sql: stmt,
+                    kind: PreparedSqlKind::Read {
+                        limit,
+                        server_capped: false,
+                    },
+                })
+            }
+        }
+        "SHOW" | "DESC" | "DESCRIBE" | "EXPLAIN" => {
+            // EXPLAIN ANALYZE 会真正执行被分析的语句：分析写语句时仍需二次确认
+            if first == "EXPLAIN" && explain_analyze_writes(&tokens) && !options.allow_write {
+                return Err(DriverError::WriteRequiresConfirmation);
+            }
+            // 元数据语句不支持追加 LIMIT，结果集本身很小，靠客户端截断兜底
+            Ok(PreparedSql {
+                sql: stmt,
+                kind: PreparedSqlKind::Read {
+                    limit,
+                    server_capped: false,
+                },
+            })
+        }
+        _ => {
+            if !options.allow_write {
+                return Err(DriverError::WriteRequiresConfirmation);
+            }
+            Ok(PreparedSql {
+                sql: stmt,
+                kind: PreparedSqlKind::Write,
+            })
+        }
+    }
+}
+
+/// EXPLAIN ANALYZE 是否在分析写语句（ANALYZE 变体会真正执行被分析的语句）。
+fn explain_analyze_writes(tokens: &[String]) -> bool {
+    if tokens.get(1).map(String::as_str) != Some("ANALYZE") {
+        return false;
+    }
+    let analyzed = tokens
+        .iter()
+        .skip(2)
+        .map(String::as_str)
+        // 跳过 FORMAT=TREE / FORMAT=JSON 修饰，找到被分析语句的首 token
+        .find(|t| !matches!(*t, "FORMAT" | "TREE" | "JSON" | "TRADITIONAL"))
+        .unwrap_or_default();
+    !matches!(analyzed, "SELECT" | "WITH" | "TABLE")
+}
+
+/// 判断能否在语句末尾安全追加 `LIMIT n`：顶层（括号深度 0）已出现
+/// LIMIT / FOR / LOCK / INTO / PROCEDURE 时不追加，改由客户端截断兜底。
+/// 入参须是已抹掉字符串与注释的 sanitized SQL，避免字面量误判。
+fn can_append_limit(sanitized_stmt: &str) -> bool {
+    let mut depth = 0usize;
+    let mut word = String::new();
+    // 末尾补一个空格，确保最后一个 token 也会被检查
+    for ch in sanitized_stmt.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            word.push(ch);
+            continue;
+        }
+        if !word.is_empty() {
+            if depth == 0
+                && matches!(
+                    word.to_ascii_uppercase().as_str(),
+                    "LIMIT" | "FOR" | "LOCK" | "INTO" | "PROCEDURE"
+                )
+            {
+                return false;
+            }
+            word.clear();
+        }
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    true
 }
 
 fn trim_trailing_terminators(sql: &str) -> String {
@@ -817,18 +920,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn select_is_wrapped_with_outer_limit() {
+    fn select_gets_appended_limit() {
         let prepared = prepare_query_sql(
             "SELECT * FROM orders ORDER BY id DESC;",
             QueryOptions::table_preview(),
         )
         .expect("SELECT 应通过");
 
-        assert_eq!(prepared.kind, PreparedSqlKind::Read { limit: 1_000 });
+        assert_eq!(
+            prepared.kind,
+            PreparedSqlKind::Read {
+                limit: 1_000,
+                server_capped: true
+            }
+        );
         assert_eq!(
             prepared.sql,
-            "SELECT * FROM (SELECT * FROM orders ORDER BY id DESC) AS tiny_sql_limited LIMIT 1001"
+            "SELECT * FROM orders ORDER BY id DESC\nLIMIT 1001"
         );
+    }
+
+    #[test]
+    fn join_select_star_is_not_wrapped() {
+        // 回归：derived table 包装会让 JOIN 的重名列报 1060 Duplicate column name
+        let prepared = prepare_query_sql(
+            "SELECT * FROM orders o JOIN users u ON o.user_id = u.id",
+            QueryOptions::default(),
+        )
+        .expect("JOIN SELECT * 应通过");
+
+        assert!(!prepared.sql.contains("tiny_sql_limited"));
+        assert!(prepared
+            .sql
+            .starts_with("SELECT * FROM orders o JOIN users u"));
+        assert!(prepared.sql.ends_with("\nLIMIT 100001"));
     }
 
     #[test]
@@ -842,8 +967,108 @@ mod tests {
         )
         .expect("CTE SELECT 应通过");
 
-        assert_eq!(prepared.kind, PreparedSqlKind::Read { limit: 20 });
+        assert_eq!(
+            prepared.kind,
+            PreparedSqlKind::Read {
+                limit: 20,
+                server_capped: true
+            }
+        );
         assert!(prepared.sql.ends_with("LIMIT 21"));
+    }
+
+    #[test]
+    fn existing_top_level_limit_is_kept_as_is() {
+        let prepared = prepare_query_sql("SELECT * FROM t LIMIT 5", QueryOptions::default())
+            .expect("带 LIMIT 的 SELECT 应通过");
+
+        assert_eq!(
+            prepared.kind,
+            PreparedSqlKind::Read {
+                limit: QUERY_RESULT_LIMIT,
+                server_capped: false
+            }
+        );
+        assert_eq!(prepared.sql, "SELECT * FROM t LIMIT 5");
+    }
+
+    #[test]
+    fn subquery_limit_still_gets_server_cap() {
+        // 子查询里的 LIMIT 在括号内（深度 > 0），不影响顶层追加
+        let prepared = prepare_query_sql(
+            "SELECT * FROM (SELECT * FROM t LIMIT 10) x",
+            QueryOptions::default(),
+        )
+        .expect("子查询 LIMIT 应通过");
+
+        assert_eq!(
+            prepared.kind,
+            PreparedSqlKind::Read {
+                limit: QUERY_RESULT_LIMIT,
+                server_capped: true
+            }
+        );
+        assert!(prepared.sql.ends_with("\nLIMIT 100001"));
+    }
+
+    #[test]
+    fn locking_reads_skip_limit_append() {
+        // LIMIT 必须出现在 FOR UPDATE 之前，追加会产生语法错误，改由客户端截断兜底
+        let prepared = prepare_query_sql(
+            "SELECT * FROM t WHERE id = 1 FOR UPDATE",
+            QueryOptions::default(),
+        )
+        .expect("FOR UPDATE 读查询应通过");
+
+        assert_eq!(
+            prepared.kind,
+            PreparedSqlKind::Read {
+                limit: QUERY_RESULT_LIMIT,
+                server_capped: false
+            }
+        );
+        assert_eq!(prepared.sql, "SELECT * FROM t WHERE id = 1 FOR UPDATE");
+    }
+
+    #[test]
+    fn meta_statements_run_without_confirmation() {
+        for sql in [
+            "SHOW TABLES",
+            "SHOW CREATE TABLE users",
+            "EXPLAIN SELECT * FROM users",
+            "DESC users",
+            "DESCRIBE users",
+        ] {
+            let prepared = prepare_query_sql(sql, QueryOptions::default())
+                .unwrap_or_else(|e| panic!("{sql} 应无需确认直接执行: {e}"));
+            assert_eq!(
+                prepared.kind,
+                PreparedSqlKind::Read {
+                    limit: QUERY_RESULT_LIMIT,
+                    server_capped: false
+                },
+                "{sql} 应按读查询 fetch 结果集"
+            );
+            assert_eq!(prepared.sql, sql, "元数据语句不应被改写");
+        }
+    }
+
+    #[test]
+    fn explain_analyze_of_write_requires_confirmation() {
+        // EXPLAIN ANALYZE 会真正执行被分析的语句
+        let err = prepare_query_sql(
+            "EXPLAIN ANALYZE UPDATE t SET x = 1",
+            QueryOptions::default(),
+        )
+        .expect_err("EXPLAIN ANALYZE 写语句必须确认");
+        assert!(matches!(err, DriverError::WriteRequiresConfirmation));
+
+        let prepared = prepare_query_sql(
+            "EXPLAIN ANALYZE FORMAT=TREE SELECT * FROM t",
+            QueryOptions::default(),
+        )
+        .expect("EXPLAIN ANALYZE SELECT 无需确认");
+        assert!(matches!(prepared.kind, PreparedSqlKind::Read { .. }));
     }
 
     #[test]
