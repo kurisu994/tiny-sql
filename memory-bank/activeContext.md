@@ -2,12 +2,17 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-07-03
+**最后更新**：2026-07-13
 
 ## 当前状态
 
 **Week 5 进行中（正式版发布准备 + 自动更新已接入，dogfooding 待完成）**。Week 1-4 的 SQL 执行、拓扑图、虚拟滚动和 macOS 打包已落地；连接管理交互已改成 Navicat 风格并接入 shadcn/ui。本轮在确认“自动更新只跟随正式版、RC 不作为更新源”后，把 `tauri-plugin-updater` 接入 v0.1：应用启动后每日检查一次 GitHub latest 正式版，macOS 应用菜单可手动检查，release workflow 生成 signed updater artifact 和正式版 `latest.json`。随后收敛发布触发链路：`just release` 推送版本提交时不再重复触发 `ci.yml`，后续由 tag push 触发 `release.yml` 全平台打包发布。最新一次正式版 workflow 卡在 `latest.json` 生成：脚本误找 Linux `.AppImage.tar.gz`，但 Tauri 实际产出 `.AppImage` + `.AppImage.sig`；本轮已修正 manifest 匹配和发布文档。当前 `CHANGELOG.md` 已按用户可见功能大项重写，不再按 crate、workflow、API 和产物路径展开技术细节。最新一轮把新建 / 编辑连接弹窗改成标签页布局，常规、SSH、SSL 和高级设置分开，并把 SSL / 高级配置纳入连接配置契约；随后把检查更新入口从连接列表头部移到 macOS 应用菜单；本轮又给已连接的连接右键菜单补了「新建数据库」弹窗和专用后端 command；当前补充了 schema 浏览左侧数据库 / 表图标，使树视图更接近桌面数据库客户端。本轮文档同步已把 README、需求、架构、计划、路线图和 memory-bank 中的旧 textarea、react-flow、左侧工具区更新入口、依赖矩阵和版本号描述改为当前实现。
 
+- ✅ 全面审查后修复 3 个 P0（2026-07-13，均在真实 MySQL 上复现并验证）：
+  - **SQL 三态分类**：`prepare_query_sql` 首 token 分类加入元数据语句，`SHOW` / `EXPLAIN` / `DESC` / `DESCRIBE` 走 fetch 路径返回结果集、无需写确认（此前被判为写操作且前端不弹确认框，完全无法执行）；`EXPLAIN ANALYZE` 分析写语句时仍需确认（它会真正执行被分析语句）。前端 `sql-guard.ts` 改为与后端相同的首 token 分类，废弃关键词扫描。
+  - **去掉读查询 derived table 包装**：`SELECT * FROM (...) AS tiny_sql_limited` 在 JOIN 重名列时报 1060；改为顶层（括号深度 0）无 `LIMIT` / `FOR` / `LOCK` / `INTO` / `PROCEDURE` 时在末尾换行追加 `LIMIT n+1`（`server_capped=true`），否则原样执行靠客户端截断，截断且无服务端 LIMIT 时主动 `KILL QUERY` 止损（多跳隧道上避免 sqlx 归还连接前 drain 大结果集）。`describe` 改用已持有连接，消除同池二次借用死锁（并发查询占满 pool 时 describe 互等 10s 超时）。describe 对 `SHOW PROCESSLIST` / `EXPLAIN` 返回空列，已加「从首行数据补列名」fallback。
+  - **测试连接接入 host key 校验**：`connection_test` 不再传 `TunnelContext::default()`（等于接受任意主机密钥、凭据可被 MITM 截获），改用 `build_verifier`（known_hosts + TOFU 弹窗 + 指纹变更硬拒绝），connection_id 用 `test-<uuid>`；前端 TOFU 弹窗是全局监听按 payload 回传，无需改动。
+  - 验证：`just check` 全绿；`just test-integration` 4 个通过；真实 MySQL 实测 SHOW TABLES/VARIABLES/PROCESSLIST、EXPLAIN、DESC、SHOW CREATE TABLE、JOIN SELECT *、顶层 LIMIT 保留、截断标记均正确。
 - ✅ 连接列表交互重做：去掉行内「连接」按钮，改右键菜单（连接 / 断开 / 进入命令列界面 / 编辑 / 复制 / 删除）+ 单击选中 + 双击连接；新建/编辑改 shadcn `Dialog` 弹窗；删除与写操作确认从 `window.confirm` 换成 shadcn `AlertDialog`（全局 `confirm-store`）。
 - ✅ 连接表单标签页：新增本地 shadcn/radix 风格 `Tabs` 组件；新建 / 编辑连接弹窗拆为常规 / SSH / SSL / 高级；SSL mode 与证书路径持久化并传给 `db-driver`；高级设置保存保持连接、连接 / 读取 / 写入超时、压缩、自动连接，其中连接超时已接入 MySQL 连接建立路径。
 - ✅ 检查更新入口迁移：连接列表头部不再显示更新按钮；macOS 应用菜单新增 `Check for Updates...`，点击后通过 `app:check-update` 事件复用现有手动检查、无更新提示和更新弹窗逻辑。
@@ -91,6 +96,9 @@
 - **release-only push 不跑 CI**：`just release` 会先 push 版本提交再 push tag；`ci.yml` 只在该分支 push 全部改动都属于版本号 / CHANGELOG / lockfile 时跳过，避免发布流程同时跑 CI 和 Release。普通 PR 仍不启用 `paths-ignore`，继续跑完整 CI。
 - **只刷新本地 package 版本，不重解依赖**：`just version` 用定向替换同步 `Cargo.lock` 的 `tiny-sql` package version；不用 `cargo generate-lockfile`，避免发版时把兼容依赖顺手漂移。
 - **本地 Tauri build 也需要 signing env**：`bundle.createUpdaterArtifacts=true` 后，本地构建必须提供 `TAURI_SIGNING_PRIVATE_KEY`；按 Redis 项目方式把真实私钥放入 ignored `.env`，通过 `just build` 由 justfile 自动加载。直接跑 `pnpm tauri build` 不会经 just 注入 `.env`，需先手动 export；无密码私钥也要保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`。
+- **SQL 护栏按首 token 三类划分，前后端同一套规则**（2026-07-13）：SELECT/WITH 读、SHOW/EXPLAIN/DESC/DESCRIBE 元数据（返回结果集、免确认）、其余一律写需 `allow_write`；前端 `needsWriteConfirmation` 与后端 `prepare_query_sql` 保持同构，避免"后端要确认、前端不弹框"的死角。
+- **读查询防 OOM 改为「安全追加 LIMIT + 客户端截断 + KILL 止损」**（2026-07-13）：不再做 derived table 包装；`can_append_limit` 只看 sanitized SQL 顶层 token，保守跳过 LIMIT/FOR/LOCK/INTO/PROCEDURE；正确性始终由客户端截断保证，服务端 LIMIT 只是省流量的优化。
+- **测试连接与正式连接共用同一 host key 信任链**（2026-07-13）：TOFU 信任一次即写入 known_hosts，两条路径一致；`TunnelContext.verifier=None` 仅保留给 ssh-multihop 自身的受信测试场景。
 - **接入 shadcn/ui（radix-nova）而非自研弹窗**：确认框用 `AlertDialog`、表单用 `Dialog`、右键菜单用 `ContextMenu`，统一交互与无障碍；保留命令式 `confirm-store` 包一层，让多处 `await confirm()` 调用最省事。
 - **暗色保持 `prefers-color-scheme` 跟随系统**：shadcn init 默认把暗色切到 `.dark` class，会让现有满屏 `dark:` 失效；改回 media 策略并把 shadcn 变量塞进 `@media`，现有 `dark:` 零迁移、无需 JS、无闪烁。
 - **还原 system 中文字体栈**：移除 init 引入的 Geist（`next/font/google`），避免 Tauri 构建期联网拉字体且更适配中文。
@@ -99,6 +107,7 @@
 
 ## 下一步（Week 5）
 
+0. GUI 验证本轮 P0 修复：SQL 编辑器跑 `SHOW TABLES` / `EXPLAIN` / `DESC`（应直接出结果集、不弹写确认）、`SELECT *` 多表 JOIN（不再报 1060）；带 SSH 的连接点「测试连接」应弹 TOFU 指纹确认。
 1. 用真实 Tauri GUI 点 SQL 编辑区（高亮、行号、schema/table 补全、错误 gutter、`Cmd/Ctrl+Enter` 执行）、schema 树数据库展开 / 收起、新建 / 编辑连接弹窗、已连接右键菜单「新建数据库」、schema 树数据库 / 表图标和 macOS 应用菜单 `Check for Updates...`，确认常规 / SSH / SSL / 高级标签页焦点、滚动、保存、测试连接、新建库、菜单检查更新和无更新/有更新反馈手感正常。
 2. 推送当前本地领先提交后重新触发正式版 tag workflow，确认 GitHub Release 里 macOS `.dmg` / `.app.tar.gz` / `.sig`、Windows `.exe` / `.sig`、Linux `.AppImage` / `.sig` 都存在，正式版附带 `latest.json`。
 3. RC 前：把 `.env` 中的 updater 私钥内容配置到 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。刷新远端状态，确认工作区只含发布相关改动；跑 `just check`、`just test-integration`、`just build`，并至少用本机平台产物做 GUI smoke。
