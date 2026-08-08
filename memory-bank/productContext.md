@@ -43,7 +43,7 @@ hop[0] 仍绿 → 立刻判定是堡垒机问题
 粘贴 UPDATE t_order SET ... WHERE id IN (...) → 点执行
    │
    ▼
-正则命中写操作 → 弹 "检测到写操作，确认执行？"
+首 token 白名单分类（SELECT/WITH 读、SHOW/EXPLAIN/DESC/DESCRIBE 元数据免确认、其余一律弹确认）→ 二次确认
    │ 二次确认
    ▼
 执行成功，显示影响行数
@@ -76,7 +76,7 @@ hop[0] 仍绿 → 立刻判定是堡垒机问题
 
 ## 交互逻辑（具体规则）
 
-- **结果集防 OOM 三道闸**：拒多语句 + 子查询包装 `SELECT * FROM (<sql>) AS tiny_sql_limited LIMIT <rowLimit + 1>` + `rowLimit` 后端 clamp 到 100000（表浏览 1000，SQL 编辑器 100000）。
+- **结果集防 OOM 三道闸**：拒多语句 + 顶层安全追加 LIMIT（顶层无 LIMIT/FOR/LOCK/INTO/PROCEDURE 时末尾追加 `LIMIT n+1`，不做 derived table 包装避免 JOIN 重名列 1060） + `rowLimit` 后端 clamp 到 100000（表浏览 1000，SQL 编辑器 100000）。
 - **SQL 取消**：`tokio::select!` + cancel token 中止客户端等待，**同时**从独立 control pool 发 `KILL QUERY` 中止远端，不留服务端幽灵查询。
 - **隧道断开感知**：每跳 keepalive 60s 一次，**连续 3 次失败（≈180s）才判定断开**（防弱网/bastion ratelimit 误报）。
 - **错误归因**：每个 `SshTunnelError` 变体带 `hop_index`，从后端原样透传到前端拓扑节点。

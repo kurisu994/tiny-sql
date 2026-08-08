@@ -69,7 +69,7 @@ RC 下载后至少验证：
 
 ### 作者自测
 
-- 真实 3 跳 SSH + MySQL 连接成功，database/table/columns 能列出。
+- 真实 3 跳 SSH + MySQL 连接成功，database / table 树能列出（列清单 UI 留 v0.2）。
 - TOFU 首次弹窗、已信任静默、指纹变更硬拒绝。
 - passphrase 同一会话内缓存，退出应用后重新要求输入。
 - 应用稳定运行 >= 30 分钟。

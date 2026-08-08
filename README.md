@@ -22,8 +22,8 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 ## v0.1 当前能力
 
 - N 跳 SSH 配置与连接：密码 / 私钥认证、passphrase 会话缓存、TOFU host key 校验、指纹变更硬拒绝。
-- MySQL 数据浏览：列出 database / table / columns，点表浏览前 1000 行。
-- SQL 执行：CodeMirror SQL 编辑器支持语法高亮、行号、基础 schema/table 补全和快捷执行；后端拒绝空 SQL / 多语句，`SELECT` / `WITH` 子查询包装，结果上限 10 万行。
+- MySQL 数据浏览：列出 database / table，点表浏览前 1000 行。（`db_list_columns` 后端已实现，前端列清单 UI 留 v0.2）
+- SQL 执行：CodeMirror SQL 编辑器支持语法高亮、行号、基础 schema/table 补全和快捷执行；后端拒绝空 SQL / 多语句，`SELECT` / `WITH` 顶层安全时自动追加 `LIMIT`，结果上限 10 万行。
 - SQL 取消：执行时记录 MySQL `CONNECTION_ID()`，取消时通过独立 control pool 发 `KILL QUERY`。
 - 拓扑状态：本机 → N 跳 → MySQL 的只读拓扑图，支持 `pending` / `connected` / `failed` / `lost`。
 - 跨平台打包：GitHub Release workflow 监听 `v0.1.*` tag，产出 macOS Apple Silicon + Intel `.dmg`、Windows x64 `.exe`、Linux x64 `.AppImage`，正式版同时发布 Tauri 自动更新清单。
@@ -102,7 +102,11 @@ src-tauri/                  # Tauri 壳
 └── tauri.conf.json
 
 src/                        # 前端源码（Next.js App Router）
-└── app/                    # layout / page / globals.css
+├── app/                    # layout / page / globals.css
+├── components/             # 业务组件（连接表单 / schema 树 / SQL 编辑器 / 拓扑图等）
+├── lib/                    # 工具（tauri-api / sql-guard / sql-editor）
+├── stores/                 # zustand store（connection / session / confirm）
+└── hooks/                  # React hooks（use-update-checker）
 
 docs/                       # 项目文档
 ├── REQUIREMENTS.md         # 需求文档

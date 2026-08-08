@@ -31,7 +31,7 @@
 | 真实 3 跳 SSH + MySQL 连接成功 | 待测 |  |
 | TOFU 首次弹窗 / 已信任静默 / 指纹变更硬拒绝 | 待测 |  |
 | passphrase 同会话缓存，重启后重新输入 | 待测 |  |
-| database / table / columns 浏览 | 待测 |  |
+| database / table 树浏览（列清单 UI 留 v0.2） | 待测 |  |
 | 表浏览前 1000 行 | 待测 |  |
 | SQL SELECT / JOIN / 聚合 | 待测 |  |
 | 大表无 LIMIT 截断到 10 万行 | 待测 |  |

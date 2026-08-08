@@ -31,7 +31,7 @@
 
 - **Approach B（Clean Workspace）**：独立 crate（`ssh-multihop` / `db-driver`），未来可独立 publish，仓库诞生即干净。
 - **v0.1 具体 struct，v0.2 才抽 trait**：避免单实现 trait 的过早抽象。
-- **best-effort 只读保护**：正则二次确认，真正只读建议用 MySQL 只读账号。
+- **best-effort 只读保护**：首 token 白名单二次确认，真正只读建议用 MySQL 只读账号。
 - **仅本地数据**：无遥测、无错误上报；自动更新只访问 GitHub Release 的正式版更新清单。
 
 ## 配套文档

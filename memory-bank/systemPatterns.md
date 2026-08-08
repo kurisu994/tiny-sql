@@ -81,8 +81,9 @@ tiny-sql/
 
 **数据库（被连接的 MySQL）**
 
-- LIMIT 防护用**子查询包装**，不用 regex 检测关键字。
-- 取消用**独立 control pool**（max=1）发 `KILL QUERY`，不从主 pool 借连接（pool 满时借不到）。
+- LIMIT 防护用**顶层安全追加 LIMIT**（顶层无 LIMIT/FOR/LOCK/INTO/PROCEDURE 时末尾追加 `LIMIT n+1`），**不做 derived table 包装**（JOIN 重名列触发 1060）；顶层已含这些子句时客户端截断兜底，截断且无服务端 LIMIT 时主动 KILL QUERY 止损。
+- 写操作二次确认为**首 token 白名单分类**（SELECT/WITH 读、SHOW/EXPLAIN/DESC/DESCRIBE 元数据免确认、其余一律需 allow_write），前后端同一套规则，不用黑名单正则。
+- 取消用**独立 control pool**（max=1，同一连接参数独立连接池，非独立本地端口）发 `KILL QUERY`，不从主 pool 借连接（pool 满时借不到）。
 
 ## 负向约束（❌ 不要做）
 
@@ -91,7 +92,7 @@ tiny-sql/
 - ❌ **不读不写 `~/.ssh/known_hosts`** —— 用自有 store，不污染用户 OpenSSH 信任域。
 - ❌ **host key 变更不给「忽略」按钮** —— 硬拒绝。
 - ❌ **passphrase 不落盘**（v0.1）—— 仅会话内存。
-- ❌ **不用 regex 检测 SQL 的 LIMIT** —— 会被注释/字符串/CTE/UNION 骗，用子查询包装。
+- ❌ **不用 regex 检测 SQL 的 LIMIT** —— 会被注释/字符串/CTE/UNION 骗，用顶层安全追加 LIMIT（也不做 derived table 包装）。
 - ❌ **不向前端泄露原始 Rust 错误** —— 必须走 i18n key。
 - ❌ **不上传业务数据** —— 无遥测/错误上报；业务通信只访问用户配置的 SSH/MySQL 目标，自动更新只访问 GitHub Release 正式版清单。
 - ❌ **数据库设计不定义 FOREIGN KEY**（全局规则）—— 关联由代码与索引控制。

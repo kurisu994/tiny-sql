@@ -151,7 +151,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **验收标准**：
   - 隧道连接稳定时 → 不 emit lost 事件。
   - 手动 kill 第 2 跳 sshd → **180s 内** UI hop[1] 变红，弹 toast 提示"第 2 跳断开"。
-  - 隧道断开后用户点"重连" → 拓扑回到 pending → connected 流程。
+  - 隧道断开后用户能重新连上：**v0.1 UI 无独立"重连"按钮**，需先点"断开"再重新打开连接回到 pending → connected 流程（已知缺口，推 v0.2）。
 - **设计意图**：这是"把跳板机从雾中一根管子变成可观测路由器"叙事的核心，不是可选项。
 
 **FR-015 [P0] 拓扑图视图**
@@ -179,8 +179,8 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-021 [P0] 浏览表前 1000 行**
 
 - 点击 table 节点 → 右侧打开"数据"标签页，显示前 1000 行。
-- **子查询包装按 rowLimit 注入 LIMIT**（不是 regex 检测）：表浏览 `rowLimit=1000`，内部外层 `LIMIT 1001` 多取 1 行判断 truncated，返回前只保留 1000 行。用户手写 LIMIT 装在内部，取小意图一致。避免大表 OOM。
-- 用 `react-virtuoso` 虚拟滚动渲染，列宽可拖拽调整。
+- **顶层安全追加 LIMIT 注入**（不是 regex 检测）：表浏览 `rowLimit=1000`，内部在语句末尾追加 `LIMIT 1001` 多取 1 行判断 truncated，返回前只保留 1000 行。用户手写 LIMIT 装在内部，取小意图一致。避免大表 OOM。实现说明：不做 derived table 包装（`SELECT * FROM (...) AS tiny_sql_limited` 会在多表 JOIN 重名列触发 1060 错误），改为**顶层（括号深度 0）无 `LIMIT / FOR / LOCK / INTO / PROCEDURE` 时直接换行追加** `LIMIT n+1`；顶层已含这些子句时保持原样，由客户端截断兜底。
+- 用 `react-virtuoso` 虚拟滚动渲染；**列宽拖拽调整 v0.1 未实现**（列宽固定 `minmax(140px, 260px)`，推 v0.2）。
 - **验收标准**：
   - 表 100 万行 → 服务端只回 1000 行，UI 流畅滚动。
   - 表 50 行 → 显示 50 行，不报"已截断"。
@@ -198,25 +198,27 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-023 [P0] SQL 取消**
 
 - 执行按钮旁有"取消"按钮，执行中点取消能立刻中止 query（不等结果回来）。
-- 后端用 `tokio::select!` + cancel token 中止客户端等待；执行前记录 MySQL `CONNECTION_ID()`，取消分支从独立 control pool（主 MySqlPool 之外、同一隧道独立本地端口）发 `KILL QUERY <connection_id>` 中止远端执行。独立 control pool 保证主 pool 满时 KILL 仍能发出，不留服务端"幽灵查询"。
+- 后端用 `tokio::select!` + cancel token 中止客户端等待；执行前记录 MySQL `CONNECTION_ID()`，取消分支从独立 control pool（主 MySqlPool 之外、同一连接参数独立连接池）发 `KILL QUERY <connection_id>` 中止远端执行。独立 control pool 保证主 pool 满时 KILL 仍能发出，不留服务端"幽灵查询"。**注意：control pool 与主 pool 走同一隧道同一本地端口，只是独立连接池；v0.1 未用独立本地端口**（留后续按 dogfooding 反馈强化）。
 - **验收标准**：
   - 跑 `SELECT SLEEP(60)` → 5s 后点取消 → 1s 内停止，UI 显示"已取消"。
   - 取消后 MySQL `SHOW PROCESSLIST` 中该 query 消失（服务端确实被 KILL）。
 
 **FR-024 [P0] 只读保护（best-effort）**
 
-- 用户输入的 SQL 在执行前**正则检测**，命中 `DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CREATE|REPLACE` 关键字（忽略大小写、忽略字符串/注释内的伪命中）时，弹出"检测到写操作，确认执行？"对话框，二次确认后才执行。
-- **明确语义：这是 best-effort 防护，不承诺数据库级只读。** `SELECT func_that_writes()` / `SELECT ... INTO OUTFILE` / 用户变量赋值 / 存储过程边界等绕过正则的写副作用无法拦截。真正只读请使用 MySQL 只读账号——README 与连接编辑页都提示这一点。正则只是"低成本一道闸"，不是安全边界。
+- 用户输入的 SQL 在执行前按**首 token 白名单分类**（前后端同一套规则）：首 token ∈ `SELECT / WITH` 视为读，免确认；首 token ∈ `SHOW / DESC / DESCRIBE / EXPLAIN` 视为元数据语句，返回结果集、免确认（`EXPLAIN ANALYZE` 分析写语句时仍需确认，因为 ANALYZE 变体会真正执行被分析语句）；**其余语句一律视为写操作**，需 `allow_write=true` 才执行。
+- 预处理：剥离 SQL 注释（`-- ...` / `# ...` / `/* ... */`）和字符串字面量（`'...'` / `"..."`）后再做首 token 判定，忽略字符串/注释内的伪命中。
+- **明确语义：这是 best-effort 防护，不承诺数据库级只读。** `SELECT func_that_writes()` / `SELECT ... INTO OUTFILE` / 用户变量赋值 / 存储过程边界等绕过判定的写副作用无法拦截。真正只读请使用 MySQL 只读账号——README 与连接编辑页都提示这一点。首 token 白名单只是"低成本一道闸"，不是安全边界（比早期黑名单正则更保守：`SET` / `USE` / `CALL` 等也会弹确认）。
 - **验收标准**：
   - `SELECT * FROM t` → 直接执行。
   - `UPDATE t SET x = 1 WHERE id = 1` → 弹对话框。
   - `SELECT 'UPDATE not really' FROM t` → 直接执行（识别字符串内的伪命中）。
   - `-- UPDATE 这是注释` → 直接执行。
+  - `SHOW TABLES` / `DESC t` / `EXPLAIN SELECT...` → 直接执行并返回结果集。
 
 **FR-025 [P0] MySQL 5.7 + 8.0 兼容**
 
 - 必须同时支持 MySQL 5.7（默认 `mysql_native_password`）和 8.0（默认 `caching_sha2_password`）。
-- 用 `sqlx 0.8` features=["mysql", "runtime-tokio", "rustls"] 实现。**v0.1 编译进 rustls 但不启用也不测试 MySQL TLS**，v0.2 启用时再补 webpki-roots/native-tls CA 链选型。
+- 用 `sqlx 0.8` features=["mysql", "runtime-tokio-rustls", "chrono", "bigdecimal"] 实现（chrono / bigdecimal 用于结果集日期与 Decimal 解码）。**v0.1 编译进 rustls 但不启用也不测试 MySQL TLS**，v0.2 启用时再补 webpki-roots/native-tls CA 链选型。
 - **验收标准**（不用 Docker，连用户本地 MySQL）：
   - 用户本地 MySQL 8.0 经 `TINY_SQL_TEST_MYSQL_URL` integration test → 能连、能查（caching_sha2_password 握手通过）。
   - **MySQL 5.7 兼容验证推到 Week 5 dogfooding** 找用 5.7 的同事验证（CP-3），不进 CI 矩阵。
@@ -225,10 +227,10 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 - 1 个 tiny-sql 连接 = 1 个本地 listener 端口 = 1 个 `MySqlPool`（max_connections = 5）。
 - 隧道断开（FR-014）触发 pool drop，UI 显示连接已断开。
-- v0.1 **不做断线自动重连**——用户手动点"重连"。
+- v0.1 **不做断线自动重连**——用户手动重连。**v0.1 UI 无"重连"按钮**：lost 后需先点"断开"再重新打开连接（已知缺口，推 v0.2）。
 - **验收标准**：
   - 同时打开 5 个 tab 跑不同 SQL → 复用同一 pool，不报"too many connections"。
-  - 隧道挂了 → SQL 报错 + UI 显示连接已断开 + "重连"按钮可用。
+  - 隧道挂了 → SQL 报错 + UI 显示连接已断开。**"重连"按钮暂未实现**，v0.2 补。
 
 #### 3.1.4 国际化与本地化
 
@@ -238,7 +240,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - 后端错误对外返回稳定 i18n key，前端 v0.1 用静态 `ERROR_ZH` map 翻译。
 - 英文 UI 与 i18next / react-i18next runtime 留到 v0.2+。
 - **验收标准**：
-  - 切换语言下拉框只能选"中文"（en 选项灰色 + tooltip "v0.2"）。
+  - 切换语言下拉框只能选"中文"（en 选项灰色 + tooltip "v0.2"）。**v0.1 实际未实现语言下拉框**（UI 固定全中文，无 locale 状态；此验收项推 v0.2）。
 
 #### 3.1.5 分发
 
@@ -395,7 +397,7 @@ v0.1 **不做**的事情，全部有明确理由：
 | v0.1 不做断线自动重连 | 重连策略独立设计；避免 v0.1 引入隐式状态机 |
 | v0.1 加密配置但不加密 passphrase | 配置低风险落盘 + passphrase 推 v0.2（用户主密码 derive key） |
 | v0.1 SQL 取消用 tokio::select! + 独立 control pool KILL QUERY | 不依赖 sqlx 的 fragile cancellation；独立 control pool 保证主 pool 满时 KILL 仍发得出，不留服务端幽灵查询 |
-| v0.1 LIMIT 防护用子查询包装而非 regex | regex 会被注释/字符串/CTE/UNION 骗；子查询包装是 MySQL 原生语义、零误判 |
+| v0.1 LIMIT 防护用顶层安全追加 LIMIT 而非 derived table 包装 | 早期考虑子查询包装（`SELECT * FROM (...) AS t LIMIT n`），实测在多表 JOIN 重名列触发 MySQL 1060；改为顶层无 LIMIT/FOR/LOCK/INTO/PROCEDURE 时末尾追加 `LIMIT n+1`，否则客户端截断兜底（截断且无服务端 LIMIT 时主动 KILL QUERY 止损） |
 | v0.1 不写 trait Driver，用具体 struct | 单实现 trait 是 premature abstraction；v0.2 加 PG 时 extract trait |
 
 ---
@@ -425,7 +427,7 @@ v0.1 **不做**的事情，全部有明确理由：
 | **TunnelLost** | SshTunnelError mid-session 变体，已建立的隧道因 keepalive 连续 3 次失败而断开（FR-014） |
 | **ChannelDropped** | SshTunnelError mid-session 变体，某跳 channel 被对端主动关闭（可能跳板重启），需人工重连 |
 | **AcceptLoopDied** | SshTunnelError mid-session 变体，某跳 accept loop panic（代码 bug），需上报 |
-| **control pool** | SQL 取消用的独立 MySQL 连接池（max=1，主 pool 之外、同一隧道独立本地端口），专发 KILL QUERY |
+| **control pool** | SQL 取消用的独立 MySQL 连接池（max=1，主 pool 之外、同一连接参数），专发 KILL QUERY |
 | **direct-tcpip** | SSH 协议的 channel 类型，用于把 SSH session 内的一个 channel 转发到任意 TCP 地址 |
 | **dogfooding** | 作者自己 + 同事用自己的产品验证可用性 |
 | **caching_sha2_password** | MySQL 8.0 默认认证插件，sqlx 0.8 默认支持 |

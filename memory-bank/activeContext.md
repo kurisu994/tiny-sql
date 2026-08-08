@@ -2,7 +2,7 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-07-13
+**最后更新**：2026-08-08
 
 ## 当前状态
 
@@ -34,7 +34,7 @@
 
 此前 Week 5 dogfooding 准备同样完成（保留）：
 
-- ✅ SQL 执行护栏：拒空 SQL / 多语句；`SELECT` / `WITH` 后端子查询包装；表浏览 `rowLimit=1000`，SQL 编辑器 `rowLimit=100000`。
+- ✅ SQL 执行护栏：拒空 SQL / 多语句；`SELECT` / `WITH` 后端顶层安全追加 LIMIT（表浏览 `rowLimit=1000`，SQL 编辑器 `rowLimit=100000`）。
 - ✅ SQL 取消：每次执行取 MySQL `CONNECTION_ID()`；`MySqlDriver` 主 pool 外新增 max=1 control pool，取消时发 `KILL QUERY <id>`。
 - ✅ 写操作 best-effort 二次确认：前端 `needsWriteConfirmation` 忽略字符串/注释/反引号标识符，后端仍强制 `allowWrite=true` 才执行非 SELECT。
 - ✅ 拓扑图：纯 CSS 线性布局画本机 → N 跳 → MySQL；Tauri 连接阶段补 `pending/connected/failed`，运行期 keepalive 继续上报 `lost`。
@@ -103,6 +103,7 @@
 - **暗色保持 `prefers-color-scheme` 跟随系统**：shadcn init 默认把暗色切到 `.dark` class，会让现有满屏 `dark:` 失效；改回 media 策略并把 shadcn 变量塞进 `@media`，现有 `dark:` 零迁移、无需 JS、无闪烁。
 - **还原 system 中文字体栈**：移除 init 引入的 Geist（`next/font/google`），避免 Tauri 构建期联网拉字体且更适配中文。
 - **CHANGELOG 面向使用者写功能大项**：发布说明只写用户可见能力、体验变化、安全稳定性和发布准备，不再记录 crate、workflow、API、字段名或具体产物路径等内部实现细节。
+- **✅ 文档与代码全面对齐**（2026-08-08，本轮）：全量核对 README / REQUIREMENTS / ARCHITECTURE / PLAN / ROADMAP / memory-bank 与代码的偏差并同步。核心修正：SQL 执行「子查询包装 → 顶层安全追加 LIMIT + 客户端截断兜底」、写确认「黑名单正则 → 首 token 白名单（前后端同构）」、状态机收敛为 4 态（移除 connecting/reconnecting/latency_ms）、passphrase 随 `connection_open` 参数直传、master key 随机生成落盘（0600）、keepalive 为 russh 内置 + 监控 task、control pool 同一连接参数、加密文件为扁平 Vec<StoredConnection>（含 ssl/advanced）。已明确标注 v0.1 已知 UI 缺口（列清单 / 列宽拖拽 / 重连按钮 / 语言下拉框未实现），并登记到 ROADMAP v0.2（FR-110~112）与 ARCHITECTURE §10.3；playwright 推迟与 integration 命令（`--include-ignored`）同步补齐。
 - 沿用：整体文件加密、playwright 推迟、移除 test_select_1。
 
 ## 下一步（Week 5）

@@ -1,8 +1,8 @@
 ---
 title: tiny-sql 架构设计
-version: 0.1.0-draft-2
+version: 0.1.0-draft-3
 status: draft
-last_updated: 2026-06-26
+last_updated: 2026-08-08
 ---
 
 # tiny-sql 架构设计
@@ -35,7 +35,8 @@ tiny-sql/
 │   │   └── src/lib.rs
 │   └── db-driver/                 # 数据库 driver 抽象 crate
 │       ├── Cargo.toml
-│       └── src/lib.rs             # pub struct MySqlDriver（v0.2 extract trait）
+│       ├── src/lib.rs             # pub struct MySqlDriver（v0.2 extract trait）
+│       └── tests/integration.rs   # 连本地 MySQL 的集成测试（#[ignore]，见 §10.2）
 ├── src-tauri/                     # Tauri 壳（Cargo.toml 是 workspace 成员）
 │   ├── Cargo.toml                 # 依赖 ssh-multihop + db-driver
 │   ├── tauri.conf.json
@@ -43,16 +44,17 @@ tiny-sql/
 │   ├── icons/
 │   └── src/
 │       ├── main.rs
-│       ├── lib.rs
-│       ├── commands/              # tauri command 层
-│       │   ├── connection.rs      # connection_create / list / update / delete / test
-│       │   ├── query.rs           # db_list_* / db_query / db_query_cancel
-│       │   └── ssh_tofu.rs        # ssh_tofu_decision
+│       ├── lib.rs                # Tauri 入口 + 全部 #[tauri::command] 注册
+│       ├── commands/             # tauri command 层
+│       │   ├── connection.rs     # connection_create / list / update / delete / test / open / close
+│       │   ├── query.rs          # db_list_* / db_query / db_query_cancel
+│       │   └── ssh_tofu.rs       # ssh_tofu_decision
 │       ├── config/
-│       │   ├── encryption.rs      # AES-GCM 加密 store
-│       │   ├── store.rs           # 连接配置序列化
+│       │   ├── encryption.rs     # AES-GCM 加密 + master key 管理
+│       │   ├── store.rs          # 连接配置序列化（扁平 Vec<StoredConnection>）
 │       │   └── ssh_known_hosts.rs # 自有 known_hosts.json
-│       └── state.rs               # AppState（连接池注册表 / TOFU manager）
+│       ├── tofu.rs               # SshTofuManager（TOFU 决策通道）
+│       └── state.rs              # AppState（连接池注册表 / passphrase 缓存）
 ├── src/                           # Next.js 16 前端
 │   ├── app/                       # App Router pages
 │   ├── components/
@@ -163,7 +165,7 @@ src-tauri/src/
 │  ┌────────────────────────────────────────────────────────────────┐  │
 │  │ MySqlDriver::query_with_options(sql, options, cancel_token)    │  │
 │  │   ├─ self.pool: MySqlPool（max=5）                              │  │
-│  │   ├─ prepare_query_sql：拒多语句 / 写确认 / SELECT 子查询包装       │  │
+│  │   ├─ prepare_query_sql：拒多语句 / 写确认 / 顶层安全追加 LIMIT       │  │
 │  │   ├─ sqlx::query(prepared.sql).fetch(&self.pool)               │  │
 │  │   └─ 客户端 10w 行截断 / RowSet 组装                              │  │
 │  └─────────────────────────────────┬──────────────────────────────┘  │
@@ -360,8 +362,8 @@ pub async fn open(
 
 **单测覆盖**：
 - `SshTunnelError::i18n_key()` 稳定性（公开 API 契约）
+- `error_reports_hop_index`：各变体带/不带 `hop_index` 的归因
 - `expand_home_path` 各种 ~ 前缀
-- keepalive task 在 SshTunnel drop 后被 abort（验证 task count 回零）
 
 ### 3.2 crates/db-driver
 
@@ -399,9 +401,10 @@ impl MySqlDriver {
     /// 执行任意 SQL，支持 row_limit、写操作确认和取消
     ///
     /// - `cancel_token`：由 command 注册表保存，取消时触发
-    /// - 拒空 SQL / 多语句；非 SELECT/CTE 需 allow_write=true
-    /// - SELECT/WITH 用子查询包装：SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT <row_limit + 1>
-    ///   （多取 1 行用于判断 truncated；返回前丢弃第 limit+1 行）
+    /// - 拒空 SQL / 多语句；非 SELECT/WITH/元数据 需 allow_write=true
+    /// - SELECT/WITH 顶层安全时在末尾追加 `LIMIT <row_limit + 1>`
+    ///   （多取 1 行用于判断 truncated；返回前丢弃第 limit+1 行）。
+    ///   顶层已含 LIMIT/FOR/LOCK/INTO/PROCEDURE 时不追加，靠客户端截断兜底
     /// - row_limit 后端 clamp 到 1..=100000，防 OOM
     async fn query_with_options(
         &self,
@@ -433,11 +436,11 @@ pub enum DriverError {
 }
 ```
 
-**MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5），构造时传入 `mysql://user:pass@127.0.0.1:port/db?...` URL。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
+**MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5）。`connect_with_settings` 用 `MySqlConnectOptions` 分字段传参（host/port/user/password/database + SSL + 超时），避免 URL 拼接带来的密码特殊字符编码问题；`connect_url` 接受 `mysql://` URL，仅用于 integration 测试等场景。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
 
-**取消的独立 control pool**：除主 pool 外，MySqlDriver 额外持有一个 max=1 的 control pool（同一隧道、独立本地端口）。`db_query` 创建 `CancellationToken` 并登记到 `AppState.queries`，`db_query_cancel` 只触发 token；执行中的 `query_with_options` 先取 MySQL `CONNECTION_ID()`，在 `tokio::select!` 的取消分支中用 control pool 发 `KILL QUERY <connection_id>`。理由：若从主 pool 借连接发 KILL，pool 满时会卡在 acquire——恰恰是最需要取消（库被打满）的时候发不出 KILL。control pool 与主 pool 状态解耦。
+**取消的独立 control pool**：除主 pool 外，MySqlDriver 额外持有一个 max=1 的 control pool（**与主 pool 用同一份连接参数**，走同一隧道同一本地端口，只是独立连接池）。`db_query` 创建 `CancellationToken` 并登记到 `AppState.queries`，`db_query_cancel` 只触发 token；执行中的 `query_with_options` 先取 MySQL `CONNECTION_ID()`，在 `tokio::select!` 的取消分支中用 control pool 发 `KILL QUERY <connection_id>`。理由：若从主 pool 借连接发 KILL，pool 满时会卡在 acquire——恰恰是最需要取消（库被打满）的时候发不出 KILL。control pool 与主 pool 状态解耦。
 
-**结果集防 OOM 三道闸**（FR-021/022）：(1) 拒多语句、对单条 SELECT/WITH 用子查询包装 `SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT <row_limit + 1>`（表预览 `row_limit=1000`，SQL 编辑器 `row_limit=100000`，多取 1 行判断 truncated）；(2) 后端用 sqlx stream 逐行取，不用 `fetch_all` 缓冲；(3) row_limit 后端 clamp 到 1..=100000，超出后返回 truncated。三层叠加后，同事在大表上随手 `SELECT *` 也不会把 Rust 进程内存打爆。
+**结果集防 OOM 三道闸**（FR-021/022）：(1) 拒多语句；单条 SELECT/WITH 在顶层（括号深度 0）无 `LIMIT / FOR / LOCK / INTO / PROCEDURE` 时在语句末尾**换行追加** `LIMIT <row_limit + 1>`（表预览 `row_limit=1000`，SQL 编辑器 `row_limit=100000`，多取 1 行判断 truncated）。**不做 derived table 包装**——`SELECT * FROM (...) AS tiny_sql_limited` 会在多表 JOIN 重名列时触发 MySQL 1060 错误，故改为直接追加 LIMIT；顶层已含这些子句时保持原样，由客户端截断兜底（截断且服务端无 LIMIT 时归还连接前主动 `KILL QUERY` 止损，避免下次 drain 大结果集）。(2) 后端用 sqlx stream 逐行取，不用 `fetch_all` 缓冲；(3) row_limit 后端 clamp 到 1..=100000，超出后返回 truncated。三层叠加后，同事在大表上随手 `SELECT *` 也不会把 Rust 进程内存打爆。
 
 **src-tauri OpenConnection 生命周期绑定（组合层）**：
 
@@ -476,12 +479,12 @@ impl OpenConnection {
 
 | Command | 输入 | 输出 | 描述 |
 |---|---|---|---|
-| `connection_create` | `(name, config)` | `connection_id` | 加密落盘 |
-| `connection_update` | `(id, config)` | `()` | 同上 |
-| `connection_list` | - | `Vec<ConnectionMeta>` | 列表（不含敏感字段） |
+| `connection_create` | `(name, config)` | `StoredConnection` | 后端生成 uuid，返回完整记录 |
+| `connection_update` | `(connection)` | `()` | 同上 |
+| `connection_list` | - | `Vec<StoredConnection>` | 按最近使用倒序；Week 2 简化返回完整配置（含明文 password）供前端编辑回显，落盘已整体加密 |
 | `connection_delete` | `id` | `()` | 加密落盘后删 |
-| `connection_test` | `config` | `()` | 完整建立 → SELECT 1 → 销毁 |
-| `connection_open` | `id` | `()` | 建立持久连接，注册到 AppState |
+| `connection_test` | `config` | `()` | 完整建立（同样走 TOFU 校验）→ SELECT 1 → 销毁 |
+| `connection_open` | `(id, passphrase?)` | `()` | 建立持久连接，注册到 AppState；幂等，成功刷新最近使用 |
 | `connection_close` | `id` | `()` | 关闭并清理 |
 | `db_create_database` | `(id, name, charset?, collation?)` | `()` | 创建 database |
 | `db_list_databases` | `id` | `Vec<DatabaseMeta>` | 列出 database |
@@ -560,54 +563,30 @@ OpenSSH ProxyJump 的等效实现：
 
 ### 4.2 状态机
 
-每跳的生命周期状态机：
+v0.1 每跳的生命周期简化为 **4 态**（FR-015），与 `ssh:hop-status` 实际 payload 对齐：
 
 ```
-                        ┌─────────────────────┐
-                        │      pending        │（初始状态，UI 灰色）
-                        └──────────┬──────────┘
-                                   │ ssh-multihop 开始建立这一跳
-                                   ▼
-                        ┌─────────────────────┐
-                        │     connecting      │（UI 灰色 + spinner）
-                        └──┬───────────────┬──┘
-                           │               │
-                connect 成功 / auth 通过      │ connect 失败 / auth 失败 /
-                           │               │ channel 开启失败 / TOFU 拒绝
-                           ▼               ▼
-                ┌─────────────────────┐  ┌─────────────────────┐
-                │     connected       │  │      failed         │（红，终态）
-                │  (UI 绿色)           │  └─────────────────────┘
-                └──────────┬──────────┘
-                           │ keepalive 循环启动
-                           ▼
-                ┌─────────────────────┐
-                │   keepalive_ok      │（与 connected 视觉等价）
-                └──┬───────────────┬──┘
-                   │               │
-   keepalive 成功（60s 一次）       │ 连续 3 次失败（≈180s）
-                   │               │
-                   └─►─►─►─┘       ▼
-                                ┌─────────────────────┐
-                                │  keepalive_lost     │（红色闪烁，区别 failed）
-                                │  TunnelLost { hop } │
-                                └──────────┬──────────┘
-                                           │ 用户点重连
-                                           ▼
-                                ┌─────────────────────┐
-                                │     reconnecting    │（与 connecting 等价）
-                                └─────────────────────┘
-                                   │            │
-                                   ▼            ▼
-                              connected      failed
+                         ┌─────────────────────┐
+                         │      pending        │（初始状态，UI 灰色）
+                         └──────────┬──────────┘
+                                    │ 建立成功 / 失败
+                     ┌──────────────┼──────────────┐
+                     ▼              ▼              ▼
+              ┌────────────┐  ┌────────────┐  ┌────────────┐
+              │ connected  │  │   failed   │  │   lost     │
+              │(UI 绿色)    │  │(红，终态)   │  │(红闪烁，终态)│
+              └────────────┘  └────────────┘  └────────────┘
+                    │                                ▲
+                    │  keepalive 连续失败（≈180s）     │
+                    └───────────►──────►────────────┘
 ```
 
 **说明**：
 
-- `pending → connecting → connected` 是首次建立的正常路径
-- `connected → keepalive_lost` 是 FR-014 keepalive 检测出来的断开
-- v0.1 **不做自动重连**：lost 状态等用户手动点"重连"，进入 reconnecting
-- `failed` 与 `keepalive_lost` 都是红色，但视觉区分：failed = 静态红边、lost = 闪烁红边 + toast
+- `pending → connected` 是首次建立的正常路径；任一跳建立失败（TCP 连不上 / 认证失败 / TOFU 拒绝）→ 该跳 `failed`，后续跳保持 `pending`。
+- `connected → lost` 是 FR-014 keepalive 检测出来的运行中断开。
+- `failed` 与 `lost` 都是红色，但视觉区分：failed = 静态红边、lost = 闪烁红边 + toast。
+- v0.1 **不做自动重连**：lost 后用户需手动「断开」再重新打开连接进入重连流程（UI 上的"重连"按钮暂未实现，见 §10.3 已知缺口）。
 
 ### 4.3 错误模型
 
@@ -636,33 +615,23 @@ OpenSSH ProxyJump 的等效实现：
 ### 4.4 keepalive 机制（FR-014 详解）
 
 ```
-SshTunnel 建立后:
+SshTunnel 建立时:
 
 ┌──────────────────────────────────────────────────────────────┐
-│ ssh-multihop::open() 返回 SshTunnel 之前，为每跳起 keepalive   │
-│                                                                │
-│  for (i, session) in sessions.iter().enumerate() {            │
-│    let task = tokio::spawn(async move {                       │
-│      let mut interval = tokio::time::interval(60s);           │
-│      let mut fails = 0u8;                                       │
-│      loop {                                                    │
-│        interval.tick().await;                                  │
-│        let guard = session.lock().await;                       │
-│        match guard.send_keepalive().await {                    │
-│          Ok(_) => { fails = 0; continue; }                     │
-│          Err(e) => {                                           │
-│            fails += 1;                                          │
-│            if fails < 3 { continue; }  // 连续 3 次才判定断开    │
-│            status_cb(HopStatusEvent {                          │
-│              hop_index: i, status: Lost, reason: Some(...)      │
-│            }); // src-tauri 回调里再 emit ssh:hop-status          │
-│            break;  // 退出循环，task 自然结束                    │
-│          }                                                      │
-│        }                                                        │
-│      }                                                          │
-│    });                                                          │
-│    tunnel.keepalive_tasks.push(task);                         │
-│  }                                                              │
+│ 1. 每跳 session 都用同一份 russh Config：                      │
+│    keepalive_interval: Some(60s)                              │
+│    keepalive_max: 2   // 连续 2 次未收到数据即断                │
+│    inactivity_timeout: Some(3600s)  // 空闲兜底                 │
+│    → russh 内置 keepalive 完成「60s×3≈180s」死链判定            │
+│      （russh 判据是 alive_timeouts > keepalive_max，            │
+│        故配置值取 3-1=2）                                      │
+│                                                              │
+│ 2. 每跳再 spawn 一个 keepalive 监控 task（spawn_keepalive_    │
+│    monitor，每 20s 轮询一次）：                                │
+│      guard.send_keepalive(false).await 是否 Err               │
+│      → session 任务已退出（russh 判定断开）→ status_cb 上报     │
+│        HopStatus::Lost → src-tauri emit ssh:hop-status         │
+│      持锁极短，不阻塞末跳 accept loop 开 channel                │
 └──────────────────────────────────────────────────────────────┘
 
 SshTunnel::drop():
@@ -672,8 +641,8 @@ SshTunnel::drop():
 │   fn drop(&mut self) {                                        │
 │     self.accept_task.abort();                                 │
 │     for t in &self.keepalive_tasks { t.abort(); }            │
-│   }                                                            │
-│ }                                                              │
+│   }                                                          │
+│ }                                                             │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -683,6 +652,7 @@ SshTunnel::drop():
 - 1 次失败即报会误报：弱网偶尔丢包、bastion 短暂 ratelimit 都会触发假 lost
 - 60s 间隔 + 连续 3 次失败（≈180s）才判定断开，平衡了"误报"和"感知速度"
 - 180s 感知边界仍远胜 DBeaver/TablePlus 的"下次 query 才发现"（NFR-003）
+- 死链判定交给 russh 内置 keepalive，自建 task 只做「发现 session 已死 → 上报」；文档第 4 版起与实现对齐
 - keepalive 间隔与失败阈值 v0.1 是常量，v0.2 做成可配置（见 [ROADMAP v0.2 工程](./ROADMAP.md#工程)）
 - v0.2 可加"连续 2 次失败"作为更稳重的策略
 
@@ -736,7 +706,7 @@ sqlx::MySqlPool (max_connections = 5)
 
 **算法**：AES-GCM-256。
 
-**密钥派生**：v0.1 用应用内置的固定 key（**注意：这不是强安全，只是防止"打开文件就看到明文"的低门槛保护**）。理由：
+**密钥管理**：v0.1 首次运行随机生成 32 字节 master key，以 base64 落盘到 `~/Library/Application Support/tiny-sql/master.key`（0600 权限）。**注意：这不是强安全，只是防止"打开文件就看到明文"的低门槛保护**。理由：
 
 - v0.1 用户多是技术人员，攻击场景是"别人短暂能看到我的硬盘"而不是"专业逆向工程"
 - 用户主密码（更强方案）推 v0.2 一起跟 passphrase 加密做（FR-102）
@@ -750,26 +720,19 @@ sqlx::MySqlPool (max_connections = 5)
 文件内容（base64 编码）：
 [12 字节 nonce] + [N 字节 AES-GCM ciphertext] + [16 字节 tag]
 
-明文 JSON 结构：
-{
-  "version": 1,
-  "connections": [
-    {
-      "id": "uuid",
-      "name": "生产读库 RO",
-      "mysql": { "host": "...", "port": 3306, "user": "...", "password": "..." },
-      "ssh": {
-        "enabled": true,
-        "hops": [
-          { "host": "...", "port": 22, "username": "...", "auth_type": "privateKey", "private_key_path": "~/..." },
-          ...
-        ]
-      },
-      "last_used_at": "2026-06-20T10:00:00Z"
-    },
-    ...
-  ]
-}
+明文 JSON 结构：扁平 Vec<StoredConnection>（camelCase 字段，无 version 包装、无 mysql 嵌套）
+[
+  {
+    "id": "uuid",
+    "name": "生产读库 RO",
+    "host": "...", "port": 3306, "user": "...", "password": "...", "database": "...",
+    "ssh": { "enabled": true, "hops": [ { "host": "...", "port": 22, "username": "...", "authType": "privateKey", "privateKeyPath": "~/.ssh/id_rsa", "password": "..." }, ... ] },
+    "ssl": { "mode": "disabled", "caPath": "", "clientCertPath": "", "clientKeyPath": "" },
+    "advanced": { "keepAliveEnabled": false, "connectTimeoutSeconds": 30, "readTimeoutSeconds": 30, "writeTimeoutSeconds": 30, "compressionEnabled": false, "autoConnect": false, ... },
+    "lastUsedAt": "2026-06-20T10:00:00Z"
+  },
+  ...
+]
 ```
 
 ### 5.2 passphrase 不持久化
@@ -779,17 +742,20 @@ v0.1 SSH 私钥 passphrase **不写入 connections.enc**，也不写任何其他
 **生命周期**：
 
 ```
-首次连接 → 前端弹 PassphraseDialog → invoke('ssh_set_passphrase', {connection_id, hop_index, passphrase})
+首次连接 → 前端弹 PassphraseDialog → invoke('connection_open', {id, passphrase})
                                           │
                                           ▼
-src-tauri 把 passphrase 写到 AppState 的内存 HashMap<(conn_id, hop_index), String>
+src-tauri 把 passphrase 写到 AppState 的内存 HashMap<connection_id, String>
+（v0.1 简化：单值应用到全部私钥跳）
                                           │
                                           ▼
-ssh-multihop::open 调用时从 ctx 里读 passphrase 用于这次握手
+ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握手
                                           │
                                           ▼
 进程退出 → AppState drop → HashMap 释放 → passphrase 消失
 ```
+
+> 注意：v0.1 **没有**独立的 `ssh_set_passphrase` command，passphrase 直接作为 `connection_open` 的 `passphrase?` 参数传入；缓存按 connection_id 而非 (conn_id, hop_index)。
 
 **已知风险**：
 
@@ -871,7 +837,7 @@ ssh-multihop::open 调用时从 ctx 里读 passphrase 用于这次握手
 
 - 弹窗 120s 超时由后端控制，前端不需要自己起 timer（避免前端 unmount 后超时机制丢失）
 - 用户拒绝、超时、网络错误三种情况都走 `HostKeyRejected`（不再细分，前端不需要区分用户拒绝 vs 超时）
-- known_hosts 写入失败也按拒绝处理（避免"已用户同意但没存盘"的不一致状态）
+- known_hosts 写入失败**按忽略处理**（`let _ = known_hosts.insert(...)`），会话内仍继续握手返回 Trust；下次连接会重新走 TOFU（理想实现应「写入失败按拒绝处理」避免"已同意但没存盘"的不一致，v0.1 留作已知限制）
 
 ---
 
@@ -887,26 +853,24 @@ ssh-multihop::open 调用时从 ctx 里读 passphrase 用于这次握手
 
 | Event 名 | Payload | 触发时机 | 前端处理 |
 |---|---|---|---|
-| `ssh:tofu-request` | `{connection_id, hop_index, host, port, fingerprint}` | 后端遇到未知 host key | 弹 `SshTofuDialog` |
-| `ssh:hop-status` | `{connection_id, hop_index, status, latency_ms?, reason?}` | 隧道每跳状态变化 | zustand store 更新 hop 状态 → 拓扑节点重渲染 |
+| `ssh:tofu-request` | `{connectionId, hopIndex, host, port, fingerprint}` | 后端遇到未知 host key | 弹 `SshTofuDialog` |
+| `ssh:hop-status` | `{connectionId, hopIndex, status, reason?}`（status ∈ pending/connected/failed/lost） | 隧道每跳状态变化 | zustand store 更新 hop 状态 → 拓扑节点重渲染 |
 | `query:result-chunk` | `{query_id, rows_partial, done: false}` | （v0.2 才用）流式结果 | v0.1 不用此 event，query 全量返回 |
 | `app:log` | `{level, message, target}` | 后端日志同步（tauri-plugin-log） | DevTools console |
+| `app:check-update` | `{}` | macOS 应用菜单「Check for Updates...」 | 触发手动检查更新 |
 
 ### 7.3 ssh:hop-status 详细 schema
 
 ```typescript
-type SshHopStatus = "pending" | "connecting" | "connected" | "failed" | "lost";
+type SshHopStatus = "pending" | "connected" | "failed" | "lost";
 
 interface SshHopStatusPayload {
   /** 哪个连接的哪一跳 */
-  connection_id: string;
-  hop_index: number;        // 0-based
+  connectionId: string;
+  hopIndex: number;        // 0-based
 
-  /** 状态枚举 */
+  /** 状态枚举（v0.1 简化 4 态，FR-015） */
   status: SshHopStatus;
-
-  /** 仅 connected 状态下有意义；v0.1 暂不实现（推 v0.2 实时延迟动画） */
-  latency_ms?: number;
 
   /** 仅 failed/lost 状态下有值；带 i18n key 或具体描述 */
   reason?: string;
@@ -918,39 +882,62 @@ interface SshHopStatusPayload {
 | status | 节点颜色 | 边动效 | 旁注 |
 |---|---|---|---|
 | `pending` | 灰色 | 无 | - |
-| `connecting` | 灰色 | 流动 | spinner |
 | `connected` | 绿色 | 静态绿 | - |
 | `failed` | 红色 | 静态红 | tooltip 显示 reason |
 | `lost` | 红色 | **闪烁红**（区别 failed） | toast + tooltip 显示 reason |
 
 ### 7.4 连接配置 schema（落盘前）
 
+与 `StoredConnection` 序列化一致（扁平 camelCase，整体文件加密后明文落盘）：
+
 ```typescript
-interface ConnectionConfig {
+interface StoredConnection {
   id: string;            // uuid
   name: string;
-  mysql: {
-    host: string;
-    port: number;
-    user: string;
-    password: string;
-    database?: string;   // 默认 database
-  };
-  ssh: {
-    enabled: boolean;
-    hops: SshHop[];
-  };
-  last_used_at?: string; // ISO 8601
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database?: string;     // 默认 database，可空串
+  ssh: SshConfig;
+  ssl: SslConfig;
+  advanced: AdvancedConfig;
+  lastUsedAt?: string;   // ISO 8601
+}
+
+interface SshConfig {
+  enabled: boolean;
+  hops: SshHop[];
 }
 
 interface SshHop {
   host: string;
   port: number;
   username: string;
-  auth_type: "password" | "privateKey";
+  authType: "password" | "privateKey";
   password?: string;            // 落盘
-  private_key_path?: string;    // 落盘
-  // passphrase 字段不落盘；前端表单字段在保存时被剥离
+  privateKeyPath?: string;      // 落盘
+  // passphrase 字段不落盘（NFR-011）
+}
+
+interface SslConfig {
+  mode: "disabled" | "preferred" | "required" | "verifyCa" | "verifyIdentity";
+  caPath: string;
+  clientCertPath: string;
+  clientKeyPath: string;
+}
+
+interface AdvancedConfig {
+  keepAliveEnabled: boolean;
+  keepAliveIntervalSeconds: number;
+  connectTimeoutEnabled: boolean;
+  connectTimeoutSeconds: number;
+  readTimeoutEnabled: boolean;
+  readTimeoutSeconds: number;
+  writeTimeoutEnabled: boolean;
+  writeTimeoutSeconds: number;
+  compressionEnabled: boolean;
+  autoConnect: boolean;
 }
 ```
 
@@ -980,9 +967,15 @@ interface SshHop {
 
 ### 8.4 SQL 写操作二次确认
 
-FR-024 描述。正则 `/^\s*(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CREATE|REPLACE)\b/i`。
+FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规则，`db-driver::prepare_query_sql` 与 `src/lib/sql-guard.ts` 同构）：
 
-预处理：去掉 SQL 注释（`-- ...` 和 `/* ... */`）和字符串字面量（`'...'` / `"..."`）后再匹配，避免伪命中。
+- 首 token ∈ `SELECT / WITH` → 读，免确认
+- 首 token ∈ `SHOW / DESC / DESCRIBE / EXPLAIN` → 元数据，返回结果集、免确认；`EXPLAIN ANALYZE` 分析写语句时仍需确认（ANALYZE 变体会真正执行被分析语句）
+- 其余一律视为写，需 `allow_write=true` 才执行（`USE`、`SET`、`CALL` 等保守地也会弹确认）
+
+预处理：用 `strip_literals_and_comments` 剥离 SQL 注释（`-- ...` / `# ...` / `/* ... */`）和字符串字面量（`'...'` / `"..."`）后再做首 token 判定，避免字符串/注释内关键字误判。
+
+> 注意：黑名单正则（`/^\s*(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CREATE|REPLACE)\b/i`）是早期设计，已被首 token 白名单替代——白名单对未知语句更保守（宁可多弹一次确认）。
 
 ### 8.5 进程隔离
 
@@ -992,9 +985,9 @@ FR-024 描述。正则 `/^\s*(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CRE
 
 ### 8.6 加密 store 的不强但够用承诺
 
-§5.1 已说明：v0.1 用内置固定 key，**不是强加密**，定位等同"防止打开文件就看到明文"。用户应该理解这一点：
+§5.1 已说明：v0.1 首次运行随机生成 master key 落盘 `master.key`（0600），**不是强加密**，定位等同"防止打开文件就看到明文"。用户应该理解这一点：
 
-- 物理拿到笔记本 → 用 strings 命令在 connections.enc 上看不到明文，但用 grep 在二进制 tiny-sql 里能拿到 key（然后解密 .enc）
+- 物理拿到笔记本 → 用 strings 命令在 connections.enc 上看不到明文，但拿到 `master.key` 后即可解密 .enc（`master.key` 与数据同机存储，防不了本机攻击者）
 - 这个等级足够防同事偷瞄屏幕、防误拷贝硬盘到云盘
 - 不足以防针对性攻击（v0.2 上用户主密码后增强）
 
@@ -1020,24 +1013,32 @@ FR-024 描述。正则 `/^\s*(DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CRE
 
 | crate | 重点 |
 |---|---|
-| `ssh-multihop` | SshTunnelError i18n key 稳定性 / expand_home_path / keepalive task 在 SshTunnel drop 时被 abort |
-| `db-driver` | MySqlDriver 各方法 / 子查询包装 LIMIT（含 ORDER BY/UNION/CTE 不破坏语义）/ 10w 行截断阈值 / cancel_token + control pool KILL QUERY |
+| `ssh-multihop` | SshTunnelError i18n key 稳定性 / hop_index 归因 / expand_home_path |
+| `db-driver` | MySqlDriver 各方法 / 顶层安全追加 LIMIT（JOIN 重名列不包装、已含 LIMIT/FOR UPDATE 时不追加、ORDER BY/UNION/CTE 语义不破坏）/ SHOW/EXPLAIN/DESC 元数据免确认 / 10w 行截断阈值 / cancel_token + control pool KILL QUERY / CREATE DATABASE 标识符校验 |
 | `src-tauri` | 加密 store round-trip / known_hosts.json 读写 / TOFU manager 超时清理 |
 
 ### 10.2 集成测试（不用 Docker，连用户本地 MySQL）
 
-- integration 通过 `TINY_SQL_TEST_MYSQL_URL` env var 连**用户本地 MySQL 服务器**（不起 Docker），本地跑：
+- integration 通过 `TINY_SQL_TEST_MYSQL_URL` env var 连**用户本地 MySQL 服务器**（不起 Docker），本地跑（`#[ignore]`，需显式 `--include-ignored`）：
   ```bash
-  TINY_SQL_TEST_MYSQL_URL=mysql://user:pass@127.0.0.1:3306/test cargo test -p db-driver
+  TINY_SQL_TEST_MYSQL_URL=mysql://user:pass@127.0.0.1:3306/test cargo test -p db-driver -- --include-ignored
   ```
-- 测试用例：单跳 + MySQL SELECT 1 / 子查询包装 LIMIT / KILL QUERY 后 processlist 消失 / 故意挂 SSH 端口验 hop_index 错误
+  - `just test-integration` 封装了同一命令。
+- 测试用例：单跳 + MySQL SELECT 1 / 顶层安全追加 LIMIT / KILL QUERY 后 processlist 消失 / 故意挂 SSH 端口验 hop_index 错误
 - **CI 不跑 integration**（无 MySQL 服务器）；MySQL 5.7 兼容验证推到 dogfooding 期找用 5.7 的同事验证
 - 3 跳故障测试 + 嵌入式 russh-server 测试推到连接核心稳定后（Week 3），v0.1 Week 2 先 mock 或单跳
 
 ### 10.3 端到端测试
 
-- Week 2 一次架齐 `playwright`（Tauri 2 模式）+ `vitest` 前端单测，CI 跑 playwright headless
-- dogfooding（FR-041）作为补充 E2E 验证
+- **Playwright E2E 已推迟**（决策记录见 memory-bank）：原计划 Week 2 架齐 `playwright`（Tauri 2 模式）+ `vitest`，CI 跑 playwright headless；当前仓库无 playwright 依赖，前端单测（vitest）已覆盖 store / sql-guard / sql-editor / tauri-api，组件层仅 ConnectionForm 有冒烟渲染测试。
+- dogfooding（FR-041）作为补充 E2E 验证。
+
+**已知 UI 缺口**（需求已有但 v0.1 未实现，推 v0.2）：
+
+- `db_list_columns` 前后端已实现，但前端 schema 树未展示列清单 UI（点表只进数据 tab）
+- 结果表格列宽固定（`minmax(140px, 260px)`），**列宽拖拽未实现**（FR-021 验收项）
+- 隧道 lost 后 UI 无「重连」按钮，需先「断开」再重新打开连接（FR-014/FR-026 验收项）
+- 语言下拉框未实现（FR-030 验收项）；UI 固定全中文，静态 `ERROR_ZH` map 翻译
 
 ---
 

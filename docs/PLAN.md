@@ -19,7 +19,7 @@ v0.1 = **5-6 周 × 12-13 小时/周 = 60-75 小时**。Week 6 是缓冲、Week 
 Week 1   12h   vertical slice（workspace + 单跳 ssh + sqlx SELECT 1 + hello 页，端到端打通）
 Week 2   12h   测试基础设施 + MySqlDriver（具体 struct）+ 加密 store + 连接管理 UI（无 SSH）
 Week 3   13h   多跳 SSH + keepalive + 错误模型三变体 + TOFU + 表浏览
-Week 4   13h   SQL 执行（子查询包装 + KILL QUERY）+ 拓扑图 + 错误高亮 + .dmg
+Week 4   13h   SQL 执行（顶层安全追加 LIMIT + KILL QUERY）+ 拓扑图 + 错误高亮 + .dmg
 Week 5   13h   dogfooding + 修 bug + README + tag v0.1.0
 Week 6   10h   缓冲（任何一周溢出的工量；全部按时则用于 v0.2 预研）
 Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
@@ -110,8 +110,8 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
   ```bash
   TINY_SQL_TEST_MYSQL_URL=mysql://user:pass@127.0.0.1:3306/test cargo test -p db-driver
   ```
-- 前端：`vitest` + `@testing-library/react`；`playwright`（Tauri 2 模式）
-- CI：unit + 前端单测 + playwright headless。**CI 不跑 integration**（无 MySQL 服务器），README 写本地运行命令
+- 前端：`vitest` + `@testing-library/react`；`playwright`（Tauri 2 模式）**已推迟**（见 ARCHITECTURE §10.3，仓库当前无 playwright 依赖）
+- CI：unit + 前端单测。**CI 不跑 integration**（无 MySQL 服务器），README 写本地运行命令
 - **MySQL 5.7 兼容验证推到 Week 5 dogfooding**（找一位用 5.7 的同事验证），不进 CI 矩阵
 
 **T2.2 [3.5h] crates/db-driver — 具体 struct MySqlDriver（不抽 trait）**
@@ -137,7 +137,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 
 ### 3.2 验收点
 
-- [ ] `cargo test` + `pnpm test` + `pnpm e2e` 本地全绿，CI unit + 前端 + playwright 跑通
+- [ ] `cargo test` + `pnpm test` 本地全绿，CI unit + 前端单测跑通（playwright 已推迟，见 ARCHITECTURE §10.3）
 - [ ] integration test 连用户本地 MySQL 跑通
 - [ ] UI 能创建 → 列出 → 编辑 → 删除 → 测试连接
 - [ ] `connections.enc` 看不到明文 host/user
@@ -199,7 +199,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 
 **T3.6 [2h] 前端 — schema/table 左侧树 + 1000 行表格**
 - 连接成功 → `list_databases` → 点 schema → `list_tables`（v0.1 无搜索，FR-020 小库假设）
-- 点 table → `SELECT * FROM ${db}.${table}`（走 Week 4 的子查询包装 LIMIT）
+- 点 table → `SELECT * FROM ${db}.${table}`（走 Week 4 的顶层安全追加 LIMIT）
 - react-virtuoso 虚拟滚动表格（抄 redis-desktop-client）
 
 ### 4.2 验收点
@@ -223,20 +223,20 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 
 ## 5. Week 4 — SQL 执行 + 拓扑图 + .dmg（目标 13h）
 
-**目标**：SQL 执行带子查询包装防 OOM + KILL QUERY 取消；拓扑图能画能高亮；macOS .dmg 能 build；本周末进入 dogfooding。
+**目标**：SQL 执行带顶层安全追加 LIMIT 防 OOM + KILL QUERY 取消；拓扑图能画能高亮；macOS .dmg 能 build；本周末进入 dogfooding。
 
 ### 5.1 任务
 
-**T4.1 [2.5h] SQL 执行 — 子查询包装防 OOM（FR-021/022）**
+**T4.1 [2.5h] SQL 执行 — 顶层安全追加 LIMIT 防 OOM（FR-021/022）**
 - v0.1 **拒多语句**（当前用自有 SQL 分析 / 分号状态机，未引入 sqlparser-rs），只允许单条 SELECT
-- LIMIT 防护**用子查询包装，不用 regex 检测**：`SELECT * FROM (<user_sql>) AS tiny_sql_limited LIMIT <rowLimit + 1>`（MySQL 原生语义，零误判；用户手写 LIMIT 5 装在内部，取小意图一致）
+- LIMIT 防护**用顶层安全追加，不用 regex 检测**：顶层（括号深度 0）无 `LIMIT / FOR / LOCK / INTO / PROCEDURE` 时在末尾换行追加 `LIMIT <rowLimit + 1>`（用户手写 LIMIT 5 时取小意图一致）；顶层已含这些子句时保持原样靠客户端截断。**注意：最终实现不做 derived table 包装**（`SELECT * FROM (...) AS tiny_sql_limited` 在多表 JOIN 重名列触发 1060，实际改为直接追加 LIMIT）
 - 后端 sqlx stream 流式取 + `rowLimit` clamp 到 100000；表浏览用 1000，SQL 编辑器用 100000，超出返回 truncated 提示
 
 **T4.2 [2h] SQL 取消 — 独立 control pool + KILL QUERY（FR-023）**
-- MySqlDriver 在主 MySqlPool 外额外起一个 max=1 的 **control pool**（同一隧道、独立本地端口）
+- MySqlDriver 在主 MySqlPool 外额外起一个 max=1 的 **control pool**（同一连接参数独立连接池；早期设计"独立本地端口"未实现）
 - cancel 时从 control pool 发 `KILL QUERY <connection_id>`，主 pool 满时 KILL 仍能发出
 - 前端取消按钮 → cancel token 触发 + control pool KILL 服务端 query
-- 只读保护正则（`DROP|DELETE|UPDATE|INSERT|TRUNCATE|ALTER|GRANT|CREATE|REPLACE`）保留作为低成本一道闸，弹确认对话框（FR-024，注意 best-effort 语义见 REQUIREMENTS）
+- 只读保护按**首 token 白名单分类**（SELECT/WITH 读、SHOW/EXPLAIN/DESC/DESCRIBE 元数据免确认、其余一律需 allow_write），前后端同一套规则，弹确认对话框（FR-024，注意 best-effort 语义见 REQUIREMENTS）
 
 **T4.3 [3h] 纯 CSS 拓扑图组件（FR-015）**
 - 固定线性布局画 N+2 节点（本地 / hop[0..N-1] / MySQL）
@@ -244,7 +244,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 - 边用 CSS 直线表达连接状态；**不实现** v0.2 的实时延迟动画
 
 **T4.4 [2.5h] ssh:hop-status event 接线 + 错误高亮**
-- 后端每跳不同阶段 emit `ssh:hop-status` `{connection_id, hop_index, status, latency_ms?}`
+- 后端每跳不同阶段 emit `ssh:hop-status` `{connection_id, hop_index, status}`（status ∈ pending/connected/failed/lost，**v0.1 无 latency_ms**）
 - 前端 subscribe → zustand 更新 → 拓扑节点 reactive 重渲染
 - status=failed/lost 节点红边 + tooltip 用 `i18n.t(error.i18n_key)`，全部 SshTunnelError 变体（含三件 mid-session）有 zh-CN 翻译
 
@@ -256,9 +256,9 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 
 ### 5.2 验收点
 
-- [ ] SQL 执行：子查询包装生效，手写 LIMIT 与外层取小，10w 截断提示
+- [ ] SQL 执行：顶层安全追加 LIMIT 生效，手写 LIMIT 与外层取小，10w 截断提示
 - [ ] 长查询取消：control pool KILL QUERY 发出，`SHOW PROCESSLIST` 中 query 消失
-- [ ] 只读保护：DROP/DELETE/UPDATE 命中弹确认
+- [ ] 只读保护：UPDATE/DELETE 命中弹确认，SHOW/EXPLAIN/DESC 直接执行
 - [ ] 拓扑图按"本地 → hop[..] → MySQL"画对，节点状态实时变化
 - [ ] tag `v0.1.0-rc1` 后 GitHub Releases 出现 macOS / Windows / Linux 桌面安装包
 - [ ] **CP-4 dogfooding 准入**
@@ -278,7 +278,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 | 风险 | 概率 | 影响 | 应对 |
 |---|---|---|---|
 | control pool 也走隧道，隧道卡死时 cancel 同样卡 | 20% | 中 | cancel 加超时；超时后前端仍结束等待 |
-| 子查询包装在某些 SQL（含 ORDER BY/UNION）上语义微变 | 10% | 低 | 单测覆盖 ORDER BY/UNION/CTE；外层 LIMIT 不改内部排序 |
+| 子查询包装语义微变的担忧已消除（改为顶层直接追加 LIMIT） | 10% | 低 | 顶层已含 LIMIT/FOR/LOCK/INTO/PROCEDURE 时不追加，靠客户端截断；单测覆盖 JOIN 重名列不包装 |
 | 拓扑节点过多时横向溢出 | 10% | 低 | 当前线性布局支持横向滚动；v0.1 测试到 3 跳 |
 | macOS Intel build crash（cross arch） | 15% | 高 | 矩阵原生 build，不 cross-compile |
 
@@ -348,9 +348,9 @@ V2EX + 掘金发帖（中文开发者）；HN 留 v0.2 多平台 + 英文 README
 |---|---|---|
 | R-010 | 同事环境暴露 v0.1 未覆盖的 SSH 配置 | 拒绝并记 v0.2 |
 | R-011 | 拓扑节点过多导致布局拥挤 | v0.1 测试到 3 跳；超长链路先横向滚动，v0.2 再评估折叠视图 |
-| R-012 | 大表浏览卡顿 | 表浏览 `rowLimit=1000` + 子查询包装已护栏 |
+| R-012 | 大表浏览卡顿 | 表浏览 `rowLimit=1000` + 顶层安全追加 LIMIT 已护栏 |
 | R-013 | 同事不会"右键打开" | README GIF + 群消息教学 |
-| R-014 | read-only 正则只是 best-effort，`SELECT func_that_writes()` 等绕过 | 文案明示建议用只读账号（见 REQUIREMENTS FR-024）；v0.2 不强化 |
+| R-014 | read-only 首 token 白名单只是 best-effort，`SELECT func_that_writes()` 等绕过 | 文案明示建议用只读账号（见 REQUIREMENTS FR-024）；v0.2 不强化 |
 
 ### 9.3 v0.2 待定项（codex review surface，实施期决定）
 
@@ -416,7 +416,7 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 | 3 | SshTunnelError 加 ChannelDropped + AcceptLoopDied | T3.3 / FR-013 |
 | 4 | trait Driver 推 v0.2，v0.1 具体 struct | T2.2 / ROADMAP v0.2 |
 | 5 | 测试基础设施一次架齐（无 Docker，本地 MySQL） | T2.1 |
-| 6 | sqlx 大结果集子查询包装替代 regex | T4.1 / FR-021 |
+| 6 | sqlx 大结果集顶层安全追加 LIMIT（不用 regex；不用 derived table 包装） | T4.1 / FR-021 |
 | 7 | **Week 1 改 vertical slice** | §2 整段重排 |
 | 8 | read-only SQL best-effort（建议只读账号） | T4.2 / FR-024 / R-014 |
 | 9 | Codex 4 条 tension surface（KILL 4 状态 / 状态机 / read-only / crate） | §9.3 / R-006 / R-014 |
@@ -450,7 +450,7 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 - [ ] schema/table 树 + 1000 行表格
 
 ### Week 4（SQL + 拓扑 + dmg）
-- [ ] 子查询包装防 OOM + 拒多语句
+- [ ] 顶层安全追加 LIMIT 防 OOM + 拒多语句
 - [ ] control pool + KILL QUERY
 - [ ] 纯 CSS 拓扑图
 - [ ] ssh:hop-status + 错误高亮

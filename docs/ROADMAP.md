@@ -55,6 +55,9 @@ v0.3+ (半年+) ── 平台安装体验打磨 + ssh-multihop crate 独立 publ
 | **FR-103** | MySQL TLS 连接启用（webpki-roots / native-tls 选型） | P1 | 0.5 周 |
 | **FR-104** | Schema-aware 智能联想（点 user_id 列自动 JOIN 候选） | P1 | 1.5 周 |
 | **FR-105** | 实时隧道延迟动画（每跳 RTT 显示在边上） | P1 | 0.5 周 |
+| **FR-110** | 隧道断开后的「重连」按钮（v0.1 需先断开再重新打开） | P1 | 0.3 周 |
+| **FR-111** | 结果表格列宽拖拽调整（v0.1 列宽固定） | P2 | 0.3 周 |
+| **FR-112** | schema 树列清单展示（`db_list_columns` 前端接线） | P1 | 0.5 周 |
 | **FR-106** | SQL 历史（最近 100 条） | P1 | 0.3 周 |
 | **FR-107** | 导出 CSV / Excel | P2 | 0.5 周 |
 | **FR-108** | 大表 LRU schema cache | P2 | 0.3 周 |

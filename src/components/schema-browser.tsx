@@ -13,8 +13,7 @@ import { useSessionStore } from "@/stores/session-store";
 /**
  * 已连接后的 schema 浏览：左侧 database/table 树，右侧选中表的前 1000 行。
  *
- * v0.1 用普通可滚动表格（1000 行上限浏览器无压力）；react-virtuoso 虚拟滚动
- * 留 Week 4 的 10w 行硬上限再引入，避免提前加依赖。
+ * 结果表格用 react-virtuoso 虚拟滚动（表浏览 1000 行与 SQL 编辑器 10w 行共用）。
  */
 export function SchemaBrowser({ connection }: { connection: StoredConnection }) {
   const {
