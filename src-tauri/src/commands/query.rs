@@ -4,7 +4,8 @@
 //! 不长持注册表锁），再调 db-driver。连接未打开返回 `error.connection.not_open`。
 
 use db_driver::{
-    ColumnMeta, DatabaseMeta, MySqlDriver, QueryOptions, RowSet, TableMeta, QUERY_RESULT_LIMIT,
+    ColumnMeta, DatabaseMeta, Driver, MySqlDriver, QueryOptions, RowSet, TableMeta,
+    QUERY_RESULT_LIMIT,
 };
 use tauri::State;
 use tokio_util::sync::CancellationToken;
@@ -27,9 +28,8 @@ pub async fn db_list_databases(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<DatabaseMeta>, String> {
-    driver_of(&state, &id)
-        .await?
-        .list_databases()
+    let driver = driver_of(&state, &id).await?;
+    Driver::list_databases(&driver)
         .await
         .map_err(|e| e.i18n_key().to_string())
 }
@@ -57,9 +57,8 @@ pub async fn db_list_tables(
     id: String,
     database: String,
 ) -> Result<Vec<TableMeta>, String> {
-    driver_of(&state, &id)
-        .await?
-        .list_tables(&database)
+    let driver = driver_of(&state, &id).await?;
+    Driver::list_tables(&driver, &database)
         .await
         .map_err(|e| e.i18n_key().to_string())
 }
@@ -72,9 +71,8 @@ pub async fn db_list_columns(
     database: String,
     table: String,
 ) -> Result<Vec<ColumnMeta>, String> {
-    driver_of(&state, &id)
-        .await?
-        .list_columns(&database, &table)
+    let driver = driver_of(&state, &id).await?;
+    Driver::list_columns(&driver, &database, &table)
         .await
         .map_err(|e| e.i18n_key().to_string())
 }
@@ -101,17 +99,17 @@ pub async fn db_query(
         .await
         .insert(query_id.clone(), token.clone());
 
-    let result = driver
-        .query_with_options(
-            &sql,
-            QueryOptions {
-                row_limit: row_limit.map(|v| v as usize).unwrap_or(QUERY_RESULT_LIMIT),
-                allow_write: allow_write.unwrap_or(false),
-            },
-            token,
-        )
-        .await
-        .map_err(|e| e.i18n_key().to_string());
+    let result = Driver::query(
+        &driver,
+        &sql,
+        QueryOptions {
+            row_limit: row_limit.map(|v| v as usize).unwrap_or(QUERY_RESULT_LIMIT),
+            allow_write: allow_write.unwrap_or(false),
+        },
+        token,
+    )
+    .await
+    .map_err(|e| e.i18n_key().to_string());
 
     state.queries.lock().await.remove(&query_id);
     result

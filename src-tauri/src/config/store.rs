@@ -6,6 +6,7 @@
 //! passphrase 不进持久化模型（NFR-011：仅会话内存）；SSH 配置 Week 3 填充。
 
 use crate::config::encryption;
+use db_driver::DriverKind;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -23,6 +24,9 @@ pub const MASTER_KEY_FILENAME: &str = "master.key";
 pub struct StoredConnection {
     pub id: String,
     pub name: String,
+    /// 数据库类型。v0.1 旧记录缺少该字段时按 MySQL 迁移读取。
+    #[serde(default)]
+    pub driver: DriverKind,
     pub host: String,
     pub port: u16,
     pub user: String,
@@ -243,6 +247,7 @@ mod tests {
         StoredConnection {
             id: id.to_string(),
             name: "prod".to_string(),
+            driver: DriverKind::MySql,
             host: host.to_string(),
             port: 3306,
             user: "root".to_string(),
@@ -270,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_ssl_and_advanced_get_defaults() {
+    fn missing_driver_ssl_and_advanced_get_defaults() {
         let raw = r#"{
             "id": "c1",
             "name": "legacy",
@@ -283,11 +288,91 @@ mod tests {
         }"#;
         let conn: StoredConnection = serde_json::from_str(raw).unwrap();
 
+        assert_eq!(conn.driver, DriverKind::MySql);
         assert_eq!(conn.ssl.mode, "disabled");
         assert!(conn.advanced.connect_timeout_enabled);
         assert_eq!(conn.advanced.connect_timeout_seconds, 30);
         assert_eq!(conn.advanced.keep_alive_interval_seconds, 240);
         assert!(conn.advanced.write_timeout_enabled);
+    }
+
+    #[test]
+    fn legacy_encrypted_store_loads_as_mysql_without_rewriting() {
+        let dir = temp_dir();
+        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let legacy_json = r#"[{
+            "id": "legacy-1",
+            "name": "legacy",
+            "host": "127.0.0.1",
+            "port": 3306,
+            "user": "root",
+            "password": "",
+            "database": "",
+            "ssh": { "enabled": false, "hops": [] }
+        }]"#;
+        let encrypted = encryption::encrypt_str(&store.master_key, legacy_json).unwrap();
+        std::fs::write(&store.store_path, &encrypted).unwrap();
+
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].driver, DriverKind::MySql);
+        assert_eq!(
+            std::fs::read_to_string(&store.store_path).unwrap(),
+            encrypted,
+            "兼容读取不应在启动时重写原密文"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn postgres_driver_roundtrip_uses_stable_serialized_value() {
+        let dir = temp_dir();
+        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let mut connection = sample("pg-1", "postgres.internal");
+        connection.driver = DriverKind::PostgreSql;
+        connection.port = 5432;
+        store.upsert(connection).unwrap();
+
+        let loaded = store.load().unwrap();
+        assert_eq!(loaded[0].driver, DriverKind::PostgreSql);
+
+        let encrypted = std::fs::read_to_string(&store.store_path).unwrap();
+        let json = encryption::decrypt_str(&store.master_key, encrypted.trim()).unwrap();
+        assert!(
+            json.contains(r#""driver":"postgresql""#),
+            "driver 持久化值必须稳定: {json}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn failed_driver_migration_preserves_original_encrypted_file() {
+        let dir = temp_dir();
+        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let unsupported_json = r#"[{
+            "id": "future-1",
+            "name": "future",
+            "driver": "oracle",
+            "host": "127.0.0.1",
+            "port": 1521,
+            "user": "system",
+            "password": "",
+            "database": "",
+            "ssh": { "enabled": false, "hops": [] }
+        }]"#;
+        let encrypted = encryption::encrypt_str(&store.master_key, unsupported_json).unwrap();
+        std::fs::write(&store.store_path, &encrypted).unwrap();
+
+        assert!(store.load().is_err(), "未知 driver 必须拒绝迁移");
+        assert_eq!(
+            std::fs::read_to_string(&store.store_path).unwrap(),
+            encrypted,
+            "迁移失败不得覆盖原密文"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

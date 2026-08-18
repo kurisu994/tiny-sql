@@ -9,7 +9,7 @@ last_updated: 2026-08-18
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-18）**：v0.1.0 已正式发布；真实环境 dogfooding、MySQL 5.7、同事试用、全平台安装包、签名更新包、`latest.json` 与从 v0.0.3 到 v0.1.0 的应用内升级均已验收。README 真实 GIF 和少量已知能力缺口继续以 [PLAN.md](./PLAN.md) 跟踪。
+> **实现快照（2026-08-18）**：v0.1.0 已正式发布；真实环境 dogfooding、MySQL 5.7、同事试用、全平台安装包、签名更新包、`latest.json` 与从 v0.0.3 到 v0.1.0 的应用内升级均已验收。少量已知能力缺口继续以 [PLAN.md](./PLAN.md) 跟踪；v0.2 已完成 V2-T1.1 最小 Driver 契约。
 
 ## 1. 项目愿景
 
@@ -259,7 +259,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 - GitHub Actions 矩阵：macOS arm64 + x64、Windows x64、Linux x64。
 - tag `v0.1.0` 触发自动 build + 上传 `.dmg` / `.exe` / `.AppImage` 到 GitHub Releases。
-- v0.1 无 Apple Developer 代码签名 / notarization：README 顶部写 macOS "右键打开 → 允许"操作说明 + GIF。
+- v0.1 无 Apple Developer 代码签名 / notarization：README 顶部提供 macOS "右键打开 → 允许"文字说明；不要求额外录制 GIF。
 - **验收标准**：
   - 全新 M 系列 Mac 下载 .dmg → 右键打开 → 应用启动 → 能连数据库。
   - Intel Mac 同上。
@@ -289,7 +289,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md)。
 
-- **FR-100** PostgreSQL driver（v0.2 用 rust-analyzer extract trait Driver，v0.1 是具体 struct）
+- **FR-100** PostgreSQL driver（v0.2 已从 v0.1 具体 `MySqlDriver` 调用面提取对象安全的最小 `Driver` 契约）
 - **FR-102** 加密 passphrase 存储（用户主密码 derive key）
 - **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（基础模式/路径已接线）
 - **FR-104** Schema-aware 智能联想（点 user_id 列自动提示 JOIN 候选）
@@ -356,7 +356,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **NFR-041 SshTunnelError 稳定 i18n key**：每个错误变体的 i18n key 是公开 API 的一部分；后续版本只能加新 key、不能改已有 key（前端翻译表向后兼容）。
 
-**NFR-042 v0.1 具体 struct，v0.2 才抽 trait**：v0.1 **不写 `trait Driver`**——直接写具体 `struct MySqlDriver`，commands 返回具体类型。v0.2 加 PG 时用 rust-analyzer extract trait（两个实现在手才设计接口，避免抽象提前）。理由：单实现 trait 是 premature abstraction，trait 签名只能凭猜设计、v0.2 PG 大概率要返工。代价是 v0.2 加 PG 时 commands 调用点要做一次 refactor（rust-analyzer 一键操作）。
+**NFR-042 v0.1 具体 struct，v0.2 提取最小 trait**：v0.1 直接使用具体 `struct MySqlDriver`，避免单实现时期过早抽象；v0.2 V2-T1.1 已从真实 commands 调用面提取对象安全的最小 `Driver` 契约，只覆盖 ping、metadata、query/取消与 close。连接创建和方言专属对象操作不进入 trait，增加 PostgreSQL 实现后再根据双实现反馈收窄签名。
 
 ---
 
@@ -366,7 +366,7 @@ v0.1 **不做**的事情，全部有明确理由：
 
 ### 5.1 数据库范围之外
 
-- **PostgreSQL / SQLite / Oracle / SQL Server / MongoDB / Redis**：v0.1 不实现；v0.2 加 PG 时 extract trait（NFR-042）。理由：dogfooding 场景 100% MySQL，无优先级。
+- **PostgreSQL / SQLite / Oracle / SQL Server / MongoDB / Redis**：v0.1 不实现；v0.2 增加 PostgreSQL，其他数据库仍不进入当前范围（NFR-042）。理由：v0.1 dogfooding 场景 100% MySQL。
 - **MySQL 写操作的图形化编辑器**（点表格 cell 改值后写回）：FR-024 的 SQL 编辑器是 v0.1 写操作上限。理由：图形化编辑器需要 2-3 周额外工作量，60-75h 预算装不下。
 
 ### 5.2 平台范围之外
@@ -406,7 +406,7 @@ v0.1 **不做**的事情，全部有明确理由：
 |---|---|
 | 选 Approach B（Clean Workspace）而非 A（Fork） | 长期维护意图 + 仓库诞生即干净 + ssh-multihop 未来独立 publish |
 | v0.1 全平台先覆盖 x64 | 先跑通 macOS arm64/x64、Windows x64、Linux x64 打包和 updater；签名、更多包格式与 ARM 平台后续打磨 |
-| v0.1 仅 MySQL | dogfooding 100% MySQL + v0.2 extract trait 代价小 |
+| v0.1 仅 MySQL | dogfooding 100% MySQL；v0.2 再提取 Driver 契约并增加 PostgreSQL |
 | v0.1 仅 zh-CN | 翻译成本 vs 首发收益不划算 |
 | v0.1 拓扑图用纯 CSS 线性布局 | 当前只需要固定的本机 → N 跳 → MySQL 状态链路；避免 react-flow 画布的缩放、拖拽、attribution 和 bundle 成本 |
 | v0.1 无 Apple Developer 代码签名 | $99/年阻塞首发；README 教用户右键打开 |
@@ -416,7 +416,7 @@ v0.1 **不做**的事情，全部有明确理由：
 | v0.1 加密配置但不加密 passphrase | 配置低风险落盘 + passphrase 推 v0.2（用户主密码 derive key） |
 | v0.1 SQL 取消用 tokio::select! + 独立 control pool KILL QUERY | 不依赖 sqlx 的 fragile cancellation；独立 control pool 保证主 pool 满时 KILL 仍发得出，不留服务端幽灵查询 |
 | v0.1 LIMIT 防护用顶层安全追加 LIMIT 而非 derived table 包装 | 早期考虑子查询包装（`SELECT * FROM (...) AS t LIMIT n`），实测在多表 JOIN 重名列触发 MySQL 1060；改为顶层无 LIMIT/FOR/LOCK/INTO/PROCEDURE 时末尾追加 `LIMIT n+1`，否则客户端截断兜底（截断且无服务端 LIMIT 时主动 KILL QUERY 止损） |
-| v0.1 不写 trait Driver，用具体 struct | 单实现 trait 是 premature abstraction；v0.2 加 PG 时 extract trait |
+| v0.1 不写 trait Driver，用具体 struct | 单实现 trait 是 premature abstraction；v0.2 已从真实调用面提取最小对象安全契约 |
 
 ---
 
@@ -429,7 +429,7 @@ v0.1 **不做**的事情，全部有明确理由：
 - [x] NFR-010 ~ NFR-015 安全检查通过（含明文扫描）
 - [x] NFR-020 ~ NFR-022 可观测性达标
 - [x] FR-041 dogfooding：作者 + 2 同事 × 1 周 × 0 数据丢失
-- [x] README 含中文“右键打开”说明；真实 GIF 明确延期且未在发布文案承诺
+- [x] README 含中文“右键打开”说明；不要求额外录制 GIF
 - [x] CHANGELOG 0.1.0 已写
 - [x] GitHub Actions 跑通 macOS arm64/x64、Windows x64、Linux x64 build
 - [x] tag v0.1.0 已发布 `.dmg` / `.exe` / `.AppImage`、updater artifact 和 `latest.json`

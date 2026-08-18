@@ -31,6 +31,7 @@ const defaultAdvanced = {
 const sampleConn: StoredConnection = {
   id: "1",
   name: "a",
+  driver: "mysql",
   host: "h",
   port: 3306,
   user: "u",
@@ -65,6 +66,7 @@ describe("connection-store", () => {
     mockInvoke.mockResolvedValueOnce(sampleConn).mockResolvedValueOnce([sampleConn]);
     await useConnectionStore.getState().create({
       name: "a",
+      driver: "mysql",
       host: "h",
       port: 3306,
       user: "u",

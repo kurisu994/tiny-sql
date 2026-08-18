@@ -119,6 +119,8 @@ export function ConnectionForm({
 
   const toInput = (): ConnectionInput => ({
     name: form.name,
+    // 数据库类型选择器在 Week 3 接入；当前新建默认 MySQL，编辑时保留原类型。
+    driver: editing?.driver ?? "mysql",
     host: form.host,
     port: Number(form.port),
     user: form.user,

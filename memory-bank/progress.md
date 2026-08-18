@@ -8,12 +8,12 @@
 |---|---|---|
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
 | v0.1.0 | ✅ 正式版已发布 | 2026-08-18 全平台 Release 成功，含安装包、签名更新产物与四平台 `latest.json` |
-| v0.2 | 规划 | 8 周约 98h：PG driver + passphrase 加密 + TLS + schema intelligence + 查询工作台 + RTT/重连 |
+| v0.2 | 🚧 开发中 | V2-T1.1/T1.2/T1.4 已完成；PG vertical slice 代码就绪、待真实环境验证，后续为 PG 闭环、passphrase/TLS、schema intelligence、查询工作台与 RTT/重连 |
 | v0.3 | 规划 | 保存/打开 SQL、index/constraint 树、对象搜索、服务端筛选分页、多结果与可靠事务 |
 | v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
 | v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
 
-CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 保持为空。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
+CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -117,6 +117,9 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 保持为空。v0.1.0 Rel
 - **2026-08-18 v0.1.0 正式发布**：本地 `just check`、4 个真实 MySQL integration test 和 Tauri 生产构建通过；`624b108` 统一版本并切出 CHANGELOG 0.1.0，`v0.1.0` tag 触发 Release run `32110227419`。macOS arm64/x64、Windows x64、Linux x64 与发布 job 全绿，Release 安装包、签名更新产物和四平台 `latest.json` 均已验证。发布后仍保留应用内升级端到端实测、README 真实 GIF 与三个已知能力缺口。
 - **2026-08-18 PostgreSQL v0.2 版本基线固化**：正式支持 PostgreSQL 15-18，最低支持 15；日常 integration 必测 `15.latest` 与当前最新稳定大版本 `18.latest`，本地实例继续不依赖 Docker。14 及以下仅 best-effort 且不主动阻止连接；若 v0.2 RC 前 PostgreSQL 19 GA，则增加发布回归但不抬高最低版本。
 - **2026-08-18 自动更新端到端验收**：在 `/Applications/tiny-sql.app` 以 v0.0.3 打开原生应用菜单，确认 `Check for Updates...` 位于 About 后；手动发现 v0.1.0 后完成 6.8 MB 签名更新包下载、安装和重启。重启后 bundle 版本为 0.1.0，连接配置保留，更新菜单仍存在；`pnpm test` 34 项与 `just lint` 通过。
+- **2026-08-18 v0.2 正式开工（V2-T1.1）**：从 `MySqlDriver` 现有调用面提取对象安全的最小 `Driver` 契约，使用装箱 Future 避免新增 `async-trait` 依赖；契约只包含 ping、metadata、query/`CancellationToken` cancel 与 close，连接创建和 MySQL 专属 `CREATE DATABASE` 保留在具体实现。Tauri 的实际 metadata/query/连接关闭路径已通过契约调用；`db-driver` 17 个单测与 workspace 编译通过。
+- **2026-08-18 连接 driver 类型与无损迁移（V2-T1.2）**：新增跨 Rust/TypeScript 的 `mysql` / `postgresql` 稳定类型，旧 `connections.enc` 缺字段时在内存中默认 MySQL，启动读取不重写密文；未知 driver 或反序列化失败直接返回错误并保留原文件。新建、编辑与复制连接会携带 driver；PostgreSQL 尚未接入时明确拒绝，避免误走 MySQL 发送凭据。7 个真实加密存储测试、前端针对性测试与 TypeScript 检查通过。
+- **2026-08-18 PostgreSQL vertical slice 代码与 MySQL 回归（V2-T1.3/T1.4）**：启用锁文件已有的 `sqlx-postgres 0.8.6`（MIT OR Apache-2.0），实现显式直连、`SELECT 1::BIGINT`、close 与稳定连接错误 key；显式参数不读取 `~/.pgpass`。新增独立 PostgreSQL integration 门禁，缺少 URL 时明确失败而非假绿。MySQL 18 个单测与 5 个真实 integration 通过，新增长查询取消回归；本机未配置 PostgreSQL URL，因此 T1.3 仍待真实 SELECT 1 后完成。
 
 ## 已解决的阻碍
 

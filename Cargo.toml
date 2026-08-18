@@ -22,6 +22,7 @@ serde = { version = "1", features = ["derive"] }
 russh = "0.54"
 sqlx = { version = "0.8", default-features = false, features = [
     "mysql",
+    "postgres",
     "runtime-tokio-rustls",
     "chrono",
     "bigdecimal",

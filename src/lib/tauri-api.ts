@@ -55,10 +55,14 @@ export interface AdvancedConfig {
   autoConnect: boolean;
 }
 
+/** 数据库 Driver 类型；序列化值与 Rust DriverKind 保持一致。 */
+export type DriverKind = "mysql" | "postgresql";
+
 /** 持久化的连接配置（与后端 StoredConnection 对齐，camelCase） */
 export interface StoredConnection {
   id: string;
   name: string;
+  driver: DriverKind;
   host: string;
   port: number;
   user: string;
@@ -73,6 +77,7 @@ export interface StoredConnection {
 /** 新建 / 测试连接的入参（不含 id） */
 export interface ConnectionInput {
   name: string;
+  driver: DriverKind;
   host: string;
   port: number;
   user: string;
@@ -105,6 +110,7 @@ export const ERROR_ZH: Record<string, string> = {
   "error.driver.write_requires_confirmation": "检测到写操作，需要二次确认",
   "error.driver.query_cancelled": "SQL 已取消",
   "error.driver.invalid_identifier": "数据库名称或字符集配置不合法",
+  "error.driver.not_implemented": "该数据库类型尚未接入",
   "error.connection.not_found": "连接配置不存在",
   "error.connection.not_open": "连接尚未打开",
 };

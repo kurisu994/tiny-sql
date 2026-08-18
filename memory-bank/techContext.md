@@ -30,7 +30,7 @@
 |---|---|---|
 | tokio | 1（features = full） | 异步运行时 |
 | russh | 0.54 | 纯 Rust 异步 SSH，多跳隧道 |
-| sqlx | 0.8（default-features=false, `mysql` + `runtime-tokio-rustls`） | MySQL driver |
+| sqlx | 0.8.6（default-features=false, `mysql` + `postgres` + `runtime-tokio-rustls`） | MySQL/PostgreSQL driver；`sqlx-postgres` 为 MIT OR Apache-2.0 |
 | tokio-util | 0.7 | `CancellationToken` 查询取消 |
 | thiserror | 2 | 错误派生 |
 | serde | 1（derive） | 序列化 |
@@ -71,7 +71,8 @@
 | `just lint` / `lint-rust` / `lint-web` | tsc + clippy / 仅 clippy / 仅 tsc |
 | `just fmt` / `fmt-check` | 格式化 / 仅检查 |
 | `just test` / `test-rust` | Rust workspace + 前端 Vitest / 仅 Rust workspace |
-| `just test-integration` | `cargo test -p db-driver -- --include-ignored`（连本地 MySQL） |
+| `just test-mysql-integration` / `test-postgres-integration` | 分别连接本地 MySQL / PostgreSQL；PostgreSQL 缺 URL 时明确失败 |
+| `just test-integration` | 顺序执行两个 driver 的真实 integration |
 | `just version <ver>` | 同步 package.json / Cargo.toml / tauri.conf.json 版本号 |
 | `just release <tag>` | 更新版本 + CHANGELOG + commit + tag + push 触发云端构建 |
 
@@ -79,7 +80,7 @@
 
 - 单 job，**macOS arm64**，Node 24 + pnpm + Rust stable（含 clippy）。
 - 步骤：`pnpm install --frozen-lockfile` → `pnpm build` → `pnpm test` → `cargo fmt --all --check` → `cargo clippy --workspace -- -D warnings` → `cargo test --workspace`。
-- **CI 不跑 integration**（无 MySQL 服务器）；MySQL 5.7 已在 dogfooding 期完成验证，后续正式版前保留人工回归。
+- **CI 不跑 integration**（无外部数据库服务器）；MySQL 5.7 已在 dogfooding 期完成验证，后续正式版前保留人工双 driver 回归。
 - `v0.1.0` Release workflow run `32110227419` 于 2026-08-18 成功并上传全平台安装包、签名产物与四平台 `latest.json`；tag 指向 `624b108`。
 
 ## 关键配置事实
@@ -90,8 +91,9 @@
 | frontendDist | `../out`（Next 静态导出） |
 | beforeDevCommand | `pnpm dev` |
 | pnpm build script 批准 | `pnpm-workspace.yaml` 的 `allowBuilds: sharp: true`（否则 pnpm 11 的 verify-deps-before-run 会 exit 1） |
-| 集成测试 env | `TINY_SQL_TEST_MYSQL_URL`（见 `.env.example`，`.env` 已忽略） |
+| 集成测试 env | `TINY_SQL_TEST_MYSQL_URL` / `TINY_SQL_TEST_POSTGRES_URL`（见 `.env.example`，`.env` 已忽略） |
 | 加密 store 路径 | `~/Library/Application Support/tiny-sql/{connections.enc, master.key}`（AES-GCM，整体加密） |
+| 连接 driver 持久化值 | `mysql` / `postgresql`；旧记录缺字段默认 `mysql`，兼容读取不主动重写密文 |
 | known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
 
 ## 当前 command（src-tauri 实际）

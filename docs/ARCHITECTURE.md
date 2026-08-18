@@ -1,6 +1,6 @@
 ---
 title: tiny-sql 架构设计
-version: 0.1.0-draft-3
+version: 0.2.0-draft-1
 status: draft
 last_updated: 2026-08-18
 ---
@@ -35,7 +35,7 @@ tiny-sql/
 │   │   └── src/lib.rs
 │   └── db-driver/                 # 数据库 driver 抽象 crate
 │       ├── Cargo.toml
-│       ├── src/lib.rs             # pub struct MySqlDriver（v0.2 extract trait）
+│       ├── src/lib.rs             # pub trait Driver + pub struct MySqlDriver
 │       └── tests/integration.rs   # 连本地 MySQL 的集成测试（#[ignore]，见 §10.2）
 ├── src-tauri/                     # Tauri 壳（Cargo.toml 是 workspace 成员）
 │   ├── Cargo.toml                 # 依赖 ssh-multihop + db-driver
@@ -80,19 +80,20 @@ tiny-sql/
 ┌──────────────────────────┐  ┌──────────────────────────────┐
 │   crates/db-driver       │  │   crates/ssh-multihop         │
 │                          │  │                                │
-│  pub struct MySqlDriver  │  │  pub async fn open(           │
-│   - connect_with_settings│  │    hops: &[SshHop],           │
-│   - ping                 │  │    target_host: &str,         │
-│   - list_databases       │  │    target_port: u16,          │
-│   - list_tables          │  │    ctx: &TunnelContext,       │
-│   - list_columns         │  │  ) -> Result<SshTunnel, ...>  │
+│  pub trait Driver        │  │  pub async fn open(           │
+│  pub struct MySqlDriver  │  │    hops: &[SshHop],           │
+│   - connect_with_settings│  │    target_host: &str,         │
+│   - ping                 │  │    target_port: u16,          │
+│   - list_databases       │  │    ctx: &TunnelContext,       │
+│   - list_tables          │  │  ) -> Result<SshTunnel, ...>  │
+│   - list_columns         │  │                                │
 │   - query_with_options   │  │                                │
 │     (取 CancellationToken)│  │                                │
 │   - cancel (control pool)│  │                                │
-│   (v0.1 具体 struct       │  │  - 逐跳 SSH session 建立        │
-│    v0.2 extract trait)   │  │  - 每跳 keepalive 60s/3 次      │
-│   (用 sqlx::MySqlPool)   │  │  - TOFU 流程                   │
-│   (不知道 SSH 存在)      │  │  - 本地 127.0.0.1:0 listener   │
+│   (对象安全装箱 Future)   │  │  - 逐跳 SSH session 建立        │
+│   (用 sqlx::MySqlPool)   │  │  - 每跳 keepalive 60s/3 次      │
+│   (不知道 SSH 存在)      │  │  - TOFU 流程                   │
+│                          │  │  - 本地 127.0.0.1:0 listener   │
 │                          │  │  - copy_bidirectional 桥接     │
 │                          │  │  - SshTunnelError 含 hop_index │
 └──────────────────────────┘  └──────────────────────────────┘
@@ -101,7 +102,7 @@ tiny-sql/
 **分工原则**：
 
 - `ssh-multihop` **完全不知道 MySQL 存在**。它只知道"在本地监听一个端口，把流量转发到远端 host:port"。这是它未来能独立 publish 的前提。
-- `db-driver` **完全不知道 SSH 存在**。v0.1 是具体 `struct MySqlDriver`，只关心"给我 host/port/user/pass/database/settings，我返回 MySqlPool 包装"；v0.2 加 PG 时再 extract `trait Driver`。
+- `db-driver` **完全不知道 SSH 存在**。v0.2 已从 MySQL 真实调用面提取对象安全的最小 `Driver` 契约；连接创建和方言专属配置仍由具体 driver/factory 负责。
 - `src-tauri` 是组装层：走 SSH 时先打开隧道拿本地端口，再创建 `MySqlDriver` 连 `127.0.0.1:port`，并在 `OpenConnection` 里绑定 driver 与 tunnel 生命周期。
 
 ### 1.3 Tauri + workspace 摩擦兜底
@@ -152,18 +153,19 @@ src-tauri/src/
 │  │   let driver = driver_of(&state, &id).await?;                  │  │
 │  │   let token = CancellationToken::new();                        │  │
 │  │   state.queries.lock().await.insert(query_id, token.clone());  │  │
-│  │   driver.query_with_options(sql, QueryOptions {                │  │
+│  │   Driver::query(&driver, sql, QueryOptions {                   │  │
 │  │     row_limit, allow_write                                     │  │
 │  │   }, token).await                                              │  │
 │  │ }                                                              │  │
 │  └────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────┬─────────────────────────┘
-                                              │ concrete driver call
+                                              │ Driver 契约调用
                                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  crates/db-driver                                                     │
 │  ┌────────────────────────────────────────────────────────────────┐  │
-│  │ MySqlDriver::query_with_options(sql, options, cancel_token)    │  │
+│  │ Driver::query → MySqlDriver::query_with_options               │  │
+│  │   (sql, options, cancel_token)                                 │  │
 │  │   ├─ self.pool: MySqlPool（max=5）                              │  │
 │  │   ├─ prepare_query_sql：拒多语句 / 写确认 / 顶层安全追加 LIMIT       │  │
 │  │   ├─ sqlx::query(prepared.sql).fetch(&self.pool)               │  │
@@ -367,36 +369,24 @@ pub async fn open(
 
 ### 3.2 crates/db-driver
 
-**职责**：给上层 commands 层一个统一的数据库访问接口。**v0.1 不抽 `trait Driver`——直接写具体 `struct MySqlDriver`**，方法是 inherent impl。单实现 trait 是 premature abstraction（trait 签名只能凭猜 PG 需要什么、v0.2 大概率返工），所以 v0.2 加 PostgreSQL 时再用 rust-analyzer extract trait（两个实现在手才设计接口）。下面的方法签名是 `impl MySqlDriver` 的，extract trait 后原样变成 `trait Driver` 的方法。
+**职责**：给上层 commands 层一个统一的数据库访问接口。v0.2 已从 `MySqlDriver` 的真实调用面提取对象安全的最小 `Driver` 契约，使用装箱 Future 避免新增 `async-trait` 依赖。连接创建和方言专属对象操作留在具体实现；通用契约只覆盖 ping、metadata、query/取消与 close。
 
-**核心方法**（v0.1 具体 struct）：
+**核心契约**（v0.2 V2-T1.1）：
 
 ```rust
-/// MySQL driver — v0.1 具体实现，v0.2 extract 为 trait Driver
-///
-/// 加 PG 时：rust-analyzer extract trait → 新增 PostgresDriver 文件，
-/// commands 调用点从 MySqlDriver 换成 Box<dyn Driver>（一次 refactor）。
-impl MySqlDriver {
+pub trait Driver: Send + Sync {
+    fn ping(&self) -> DriverFuture<'_, i64>;
+
     /// 列出所有可见 database（MySQL 叫 schema）
-    async fn list_databases(&self) -> Result<Vec<DatabaseMeta>, DriverError>;
+    fn list_databases(&self) -> DriverFuture<'_, Vec<DatabaseMeta>>;
 
     /// 列出指定 database 下的所有 table
-    async fn list_tables(&self, database: &str) -> Result<Vec<TableMeta>, DriverError>;
+    fn list_tables<'a>(&'a self, database: &'a str)
+        -> DriverFuture<'a, Vec<TableMeta>>;
 
     /// 列出指定 table 的所有 column（v0.1 仅用于浏览，v0.2 用于智能联想）
-    async fn list_columns(&self, database: &str, table: &str)
-        -> Result<Vec<ColumnMeta>, DriverError>;
-
-    /// 创建 database，并负责标识符转义与 charset/collation 参数校验
-    async fn create_database(
-        &self,
-        name: &str,
-        charset: Option<&str>,
-        collation: Option<&str>,
-    ) -> Result<(), DriverError>;
-
-    /// 执行任意 SQL，返回结果集；默认用于 SQL 编辑器
-    async fn query(&self, sql: &str) -> Result<RowSet, DriverError>;
+    fn list_columns<'a>(&'a self, database: &'a str, table: &'a str)
+        -> DriverFuture<'a, Vec<ColumnMeta>>;
 
     /// 执行任意 SQL，支持 row_limit、写操作确认和取消
     ///
@@ -406,15 +396,15 @@ impl MySqlDriver {
     ///   （多取 1 行用于判断 truncated；返回前丢弃第 limit+1 行）。
     ///   顶层已含 LIMIT/FOR/LOCK/INTO/PROCEDURE 时不追加，靠客户端截断兜底
     /// - row_limit 后端 clamp 到 1..=100000，防 OOM
-    async fn query_with_options(
-        &self,
-        sql: &str,
+    fn query<'a>(
+        &'a self,
+        sql: &'a str,
         options: QueryOptions,
         cancel_token: tokio_util::sync::CancellationToken,
-    ) -> Result<RowSet, DriverError>;
+    ) -> DriverFuture<'a, RowSet>;
 
     /// 关闭主 pool 和 control pool
-    async fn close(&self);
+    fn close(&self) -> DriverCloseFuture<'_>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -437,6 +427,8 @@ pub enum DriverError {
 ```
 
 **MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5）。`connect_with_settings` 用 `MySqlConnectOptions` 分字段传参（host/port/user/password/database + SSL + 超时），避免 URL 拼接带来的密码特殊字符编码问题；SSL 默认禁用，但用户显式选择 Preferred / Required / Verify CA / Verify Identity 时会把模式和证书路径传给 sqlx。该链路已有单元测试与配置接线，真实 TLS MySQL 服务器验收仍待 dogfooding。`connect_url` 接受 `mysql://` URL，仅用于 integration 测试等场景。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
+
+**PostgresDriver vertical slice**：v0.2 V2-T1.3 已启用 sqlx `postgres` feature，并实现 `PostgresDriver::connect/connect_url/ping/close`。显式连接使用 `PgConnectOptions::new_without_pgpass()`，不会在密码为空时静默读取用户 `~/.pgpass`；`ping` 执行 `SELECT 1::BIGINT`。当前尚未实现完整 `Driver` metadata/query/cancel 契约，也未接入 AppState；这些分别属于 Week 2/3。连接失败继续只向上暴露稳定 `error.driver.connect_failed` key。
 
 **取消的独立 control pool**：除主 pool 外，MySqlDriver 额外持有一个 max=1 的 control pool（**与主 pool 用同一份连接参数**，走同一隧道同一本地端口，只是独立连接池）。`db_query` 创建 `CancellationToken` 并登记到 `AppState.queries`，`db_query_cancel` 只触发 token；执行中的 `query_with_options` 先取 MySQL `CONNECTION_ID()`，在 `tokio::select!` 的取消分支中用 control pool 发 `KILL QUERY <connection_id>`。理由：若从主 pool 借连接发 KILL，pool 满时会卡在 acquire——恰恰是最需要取消（库被打满）的时候发不出 KILL。control pool 与主 pool 状态解耦。
 
@@ -725,6 +717,7 @@ sqlx::MySqlPool (max_connections = 5)
   {
     "id": "uuid",
     "name": "生产读库 RO",
+    "driver": "mysql",
     "host": "...", "port": 3306, "user": "...", "password": "...", "database": "...",
     "ssh": { "enabled": true, "hops": [ { "host": "...", "port": 22, "username": "...", "authType": "privateKey", "privateKeyPath": "~/.ssh/id_rsa", "password": "..." }, ... ] },
     "ssl": { "mode": "disabled", "caPath": "", "clientCertPath": "", "clientKeyPath": "" },
@@ -734,6 +727,8 @@ sqlx::MySqlPool (max_connections = 5)
   ...
 ]
 ```
+
+`driver` 的稳定值为 `mysql` / `postgresql`。v0.1 旧记录缺少该字段时，反序列化只在内存中补为 `mysql`，启动读取不会重写 `connections.enc`；用户后续显式保存连接时才落成新格式。解密、JSON 或 driver 枚举迁移失败时直接返回错误，不覆盖原密文。
 
 ### 5.2 passphrase 不持久化
 
@@ -894,6 +889,7 @@ interface SshHopStatusPayload {
 interface StoredConnection {
   id: string;            // uuid
   name: string;
+  driver: "mysql" | "postgresql";
   host: string;
   port: number;
   user: string;
@@ -921,7 +917,7 @@ interface SshHop {
 }
 
 interface SslConfig {
-  mode: "disabled" | "preferred" | "required" | "verifyCa" | "verifyIdentity";
+  mode: "disabled" | "preferred" | "required" | "verify_ca" | "verify_identity";
   caPath: string;
   clientCertPath: string;
   clientKeyPath: string;
@@ -1017,15 +1013,17 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 | `db-driver` | MySqlDriver 各方法 / 顶层安全追加 LIMIT（JOIN 重名列不包装、已含 LIMIT/FOR UPDATE 时不追加、ORDER BY/UNION/CTE 语义不破坏）/ SHOW/EXPLAIN/DESC 元数据免确认 / 10w 行截断阈值 / cancel_token + control pool KILL QUERY / CREATE DATABASE 标识符校验 |
 | `src-tauri` | 加密 store round-trip / known_hosts.json 读写 / TOFU manager 超时清理 |
 
-### 10.2 集成测试（不用 Docker，连用户本地 MySQL）
+### 10.2 集成测试（不用 Docker，连用户本地数据库）
 
-- integration 通过 `TINY_SQL_TEST_MYSQL_URL` env var 连**用户本地 MySQL 服务器**（不起 Docker），本地跑（`#[ignore]`，需显式 `--include-ignored`）：
+- integration 通过 `TINY_SQL_TEST_MYSQL_URL` / `TINY_SQL_TEST_POSTGRES_URL` 连接用户本地数据库（不起 Docker），测试均标记 `#[ignore]`：
   ```bash
-  TINY_SQL_TEST_MYSQL_URL=mysql://user:pass@127.0.0.1:3306/test cargo test -p db-driver -- --include-ignored
+  just test-mysql-integration
+  just test-postgres-integration
   ```
-  - `just test-integration` 封装了同一命令。
-- 测试用例：单跳 + MySQL SELECT 1 / 顶层安全追加 LIMIT / KILL QUERY 后 processlist 消失 / 故意挂 SSH 端口验 hop_index 错误
-- **CI 不跑 integration**（无 MySQL 服务器）；MySQL 5.7 已在 dogfooding 期完成验证，后续正式版前保留人工回归
+  - `just test-integration` 顺序执行两个 driver；缺少 PostgreSQL URL 时明确失败，避免假绿。
+- 当前真实 MySQL 用例覆盖连接/ping、database/table/column metadata、NULL/数值解码，以及 `SELECT SLEEP(10)` 经独立 control pool 取消。
+- PostgreSQL vertical slice 用例连接后执行 `SELECT 1::BIGINT`；本机尚未配置 URL，暂未取得通过证据。
+- **CI 不跑 integration**（无外部数据库服务器）；正式版前保留人工双 driver 回归。
 - 3 跳故障测试 + 嵌入式 russh-server 测试推到连接核心稳定后（Week 3），v0.1 Week 2 先 mock 或单跳
 
 ### 10.3 端到端测试
@@ -1059,7 +1057,7 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 ### 11.2 与 redis-desktop-client 的不同
 
 - tiny-sql 是 workspace；redis-desktop-client 是单 crate
-- tiny-sql v0.1 用具体 `struct MySqlDriver`（v0.2 加 PG 时 extract trait）；redis-desktop-client 直接用 `redis` crate
+- tiny-sql v0.2 用对象安全 `Driver` 契约承载多数据库调用，当前首个实现为 `MySqlDriver`；redis-desktop-client 直接用 `redis` crate
 - tiny-sql 用纯 CSS 线性拓扑图展示本机、SSH hop 与 MySQL 状态；redis-desktop-client 无此组件
 - tiny-sql 加 SSH keepalive 60s + 3 次阈值（FR-014）；redis-desktop-client 仅靠 russh 3600s inactivity timeout
 

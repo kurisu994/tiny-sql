@@ -18,6 +18,7 @@ describe("ConnectionForm", () => {
     const conn: StoredConnection = {
       id: "1",
       name: "prod-db",
+      driver: "mysql",
       host: "h",
       port: 3306,
       user: "u",

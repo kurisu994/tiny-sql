@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use db_driver::MySqlDriver;
+use db_driver::{Driver, MySqlDriver};
 use ssh_multihop::SshTunnel;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
@@ -26,7 +26,7 @@ pub struct OpenConnection {
 impl OpenConnection {
     /// 干净关闭：先 await 关闭连接池，再 drop 隧道（满足「先 pool 后 tunnel」）。
     pub async fn close(self) {
-        self.driver.close().await;
+        Driver::close(&self.driver).await;
         drop(self.tunnel);
     }
 }

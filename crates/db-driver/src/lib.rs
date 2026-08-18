@@ -1,7 +1,7 @@
-//! MySQL driver
+//! MySQL / PostgreSQL database drivers
 //!
-//! 设计：v0.1 是具体 `struct MySqlDriver`，**不抽 `trait Driver`**。v0.2 加 PostgreSQL
-//! 时再用 rust-analyzer extract trait（两个实现在手才设计接口，避免抽象提前）。
+//! v0.2 已从现有 MySQL 调用面提取对象安全的最小 [`Driver`] 契约；连接创建仍由
+//! 具体 driver 负责，避免把方言专属配置和后续对象编辑能力塞进通用接口。
 //!
 //! 与隧道的桥接方式：sqlx 不吃自定义 `TcpStream`，所以走"本地 listener 端口 →
 //! `mysql://127.0.0.1:port` URL"。ssh-multihop 暴露本地端口，这里用 host=127.0.0.1
@@ -11,12 +11,15 @@
 //! query 的防 OOM 由「顶层安全时追加 LIMIT + 客户端 10w 行截断」组成；
 //! 取消走独立 control connection 发 KILL QUERY。
 
+use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::time::Duration;
 
 use futures_util::TryStreamExt;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow, MySqlSslMode};
-use sqlx::{Column, ConnectOptions, Executor, MySqlPool, Row, TypeInfo, ValueRef};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::{Column, ConnectOptions, Executor, MySqlPool, PgPool, Row, TypeInfo, ValueRef};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
@@ -27,6 +30,17 @@ pub const TABLE_PREVIEW_LIMIT: usize = 1_000;
 pub const QUERY_RESULT_LIMIT: usize = 100_000;
 
 const CONTROL_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// 连接使用的数据库 Driver 类型。
+///
+/// 序列化值是稳定的持久化/IPC 契约；旧连接记录缺少该字段时默认 MySQL。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DriverKind {
+    #[default]
+    MySql,
+    PostgreSql,
+}
 
 /// driver 错误 —— 每个变体对应一个稳定的前端 i18n key（NFR-041：key 只能加不能改名）
 #[derive(Debug, thiserror::Error)]
@@ -137,7 +151,51 @@ pub struct RowSet {
     pub truncated: bool,
 }
 
-/// MySQL driver —— v0.1 具体实现，v0.2 extract 为 trait Driver。
+/// Driver 异步操作返回值。
+///
+/// 使用装箱 Future 保持 [`Driver`] 对象安全，Week 3 可直接放入多 driver 容器，
+/// 无需依赖额外的 async-trait 宏。
+pub type DriverFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, DriverError>> + Send + 'a>>;
+
+/// Driver 关闭操作返回值。关闭是幂等清理，不向 UI 暴露二次错误。
+pub type DriverCloseFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+
+/// MySQL / PostgreSQL 共用的最小数据库 Driver 契约。
+///
+/// 仅覆盖 v0.2 多 driver 主链路需要的 ping、metadata、query、cancel 与 close。
+/// 连接创建由各 driver factory 负责；取消通过传入 [`CancellationToken`] 实现，
+/// 由具体 driver 映射为数据库原生取消机制。创建/编辑数据库对象等方言专属能力
+/// 不进入本契约。
+pub trait Driver: Send + Sync {
+    /// 验证连接可用，成功返回数据库执行 `SELECT 1` 的结果。
+    fn ping(&self) -> DriverFuture<'_, i64>;
+
+    /// 列出当前连接可见的 database。
+    fn list_databases(&self) -> DriverFuture<'_, Vec<DatabaseMeta>>;
+
+    /// 列出指定 database 下的表。
+    fn list_tables<'a>(&'a self, database: &'a str) -> DriverFuture<'a, Vec<TableMeta>>;
+
+    /// 列出指定 database/table 下的列。
+    fn list_columns<'a>(
+        &'a self,
+        database: &'a str,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<ColumnMeta>>;
+
+    /// 执行 SQL；取消令牌由应用层按 query_id 管理。
+    fn query<'a>(
+        &'a self,
+        sql: &'a str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, RowSet>;
+
+    /// 幂等关闭 driver 持有的连接资源。
+    fn close(&self) -> DriverCloseFuture<'_>;
+}
+
+/// MySQL driver —— [`Driver`] 契约的首个具体实现。
 ///
 /// 内部持有 `sqlx::MySqlPool`（max_connections = 5）。直连传真实 host:port；
 /// 走隧道时 host=127.0.0.1 + 隧道本地端口。`MySqlPool` 内部是 Arc，`Clone`
@@ -197,6 +255,91 @@ pub struct MySqlConnectSettings {
     pub ssl_client_cert_path: Option<String>,
     pub ssl_client_key_path: Option<String>,
     pub connect_timeout: Option<Duration>,
+}
+
+/// PostgreSQL 连接参数。TLS/证书配置在后续安全阶段统一补齐。
+#[derive(Debug, Clone, Default)]
+pub struct PostgresConnectSettings {
+    /// 建立连接池的整体超时；`None` 表示只使用 sqlx acquire timeout。
+    pub connect_timeout: Option<Duration>,
+}
+
+/// PostgreSQL driver 的最窄 vertical slice。
+///
+/// 当前只负责直连、`SELECT 1` 与关闭连接池；metadata/query/cancel 在 Week 2
+/// 完成后再实现完整 [`Driver`] 契约。SSH 仍由上层把目标映射为本地 TCP 端口。
+#[derive(Clone)]
+pub struct PostgresDriver {
+    pool: PgPool,
+}
+
+impl PostgresDriver {
+    /// 建立 PostgreSQL 连接池。`database` 为空时沿用服务端/账号默认数据库。
+    pub async fn connect(
+        host: &str,
+        port: u16,
+        username: &str,
+        password: &str,
+        database: &str,
+    ) -> Result<Self, DriverError> {
+        Self::connect_with_settings(
+            host,
+            port,
+            username,
+            password,
+            database,
+            PostgresConnectSettings::default(),
+        )
+        .await
+    }
+
+    /// 按指定连接参数建立 PostgreSQL 连接池。
+    pub async fn connect_with_settings(
+        host: &str,
+        port: u16,
+        username: &str,
+        password: &str,
+        database: &str,
+        settings: PostgresConnectSettings,
+    ) -> Result<Self, DriverError> {
+        // 显式连接配置不读取用户 ~/.pgpass，避免空密码时静默使用额外凭据。
+        let mut opts = PgConnectOptions::new_without_pgpass()
+            .host(host)
+            .port(port)
+            .username(username)
+            .password(password)
+            .application_name("tiny-sql")
+            .log_statements(log::LevelFilter::Off);
+        if !database.is_empty() {
+            opts = opts.database(database);
+        }
+
+        let pool = connect_postgres_pool(opts, settings.connect_timeout).await?;
+        Ok(Self { pool })
+    }
+
+    /// 用完整 PostgreSQL URL 建立连接池，供本地 integration 测试使用。
+    pub async fn connect_url(url: &str) -> Result<Self, DriverError> {
+        let opts: PgConnectOptions = url
+            .parse()
+            .map_err(|e: sqlx::Error| DriverError::ConnectFailed(e.to_string()))?;
+        let pool = connect_postgres_pool(opts.log_statements(log::LevelFilter::Off), None).await?;
+        Ok(Self { pool })
+    }
+
+    /// 跑一条 `SELECT 1`，用于 PostgreSQL vertical slice 与连接测试。
+    pub async fn ping(&self) -> Result<i64, DriverError> {
+        let row: (i64,) = sqlx::query_as("SELECT 1::BIGINT")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        Ok(row.0)
+    }
+
+    /// 幂等关闭 PostgreSQL 连接池。
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
 }
 
 impl MySqlDriver {
@@ -524,6 +667,46 @@ impl MySqlDriver {
     }
 }
 
+impl Driver for MySqlDriver {
+    fn ping(&self) -> DriverFuture<'_, i64> {
+        Box::pin(MySqlDriver::ping(self))
+    }
+
+    fn list_databases(&self) -> DriverFuture<'_, Vec<DatabaseMeta>> {
+        Box::pin(MySqlDriver::list_databases(self))
+    }
+
+    fn list_tables<'a>(&'a self, database: &'a str) -> DriverFuture<'a, Vec<TableMeta>> {
+        Box::pin(MySqlDriver::list_tables(self, database))
+    }
+
+    fn list_columns<'a>(
+        &'a self,
+        database: &'a str,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<ColumnMeta>> {
+        Box::pin(MySqlDriver::list_columns(self, database, table))
+    }
+
+    fn query<'a>(
+        &'a self,
+        sql: &'a str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, RowSet> {
+        Box::pin(MySqlDriver::query_with_options(
+            self,
+            sql,
+            options,
+            cancel_token,
+        ))
+    }
+
+    fn close(&self) -> DriverCloseFuture<'_> {
+        Box::pin(MySqlDriver::close(self))
+    }
+}
+
 fn mysql_options_from_url(url: &str) -> Result<MySqlConnectOptions, DriverError> {
     let mut opts: MySqlConnectOptions = url
         .parse()
@@ -541,6 +724,25 @@ async fn connect_pool(
 ) -> Result<MySqlPool, DriverError> {
     let fut = MySqlPoolOptions::new()
         .max_connections(max_connections)
+        .acquire_timeout(Duration::from_secs(10))
+        .connect_with(opts);
+    match connect_timeout {
+        Some(duration) => timeout(duration, fut)
+            .await
+            .map_err(|_| DriverError::ConnectFailed("connection timeout".to_string()))?
+            .map_err(|e| DriverError::ConnectFailed(e.to_string())),
+        None => fut
+            .await
+            .map_err(|e| DriverError::ConnectFailed(e.to_string())),
+    }
+}
+
+async fn connect_postgres_pool(
+    opts: PgConnectOptions,
+    connect_timeout: Option<Duration>,
+) -> Result<PgPool, DriverError> {
+    let fut = PgPoolOptions::new()
+        .max_connections(5)
         .acquire_timeout(Duration::from_secs(10))
         .connect_with(opts);
     match connect_timeout {
@@ -910,14 +1112,32 @@ pub async fn ping_select_1(
     database: &str,
 ) -> Result<i64, DriverError> {
     let driver = MySqlDriver::connect(host, port, username, password, database).await?;
-    let result = driver.ping().await;
-    driver.close().await;
+    let result = Driver::ping(&driver).await;
+    Driver::close(&driver).await;
     result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mysql_driver_implements_object_safe_driver_contract() {
+        fn assert_driver<T: Driver>() {}
+        fn accept_driver_object(_driver: &dyn Driver) {}
+
+        assert_driver::<MySqlDriver>();
+        let _object_safe_check: fn(&dyn Driver) = accept_driver_object;
+    }
+
+    #[tokio::test]
+    async fn postgres_invalid_url_uses_stable_connect_error_key() {
+        let error = PostgresDriver::connect_url("not-a-postgres-url")
+            .await
+            .err()
+            .expect("非法 URL 必须失败");
+        assert_eq!(error.i18n_key(), "error.driver.connect_failed");
+    }
 
     #[test]
     fn select_gets_appended_limit() {

@@ -91,6 +91,7 @@ export default function Home() {
   async function duplicateConnection(c: StoredConnection) {
     await create({
       name: `${c.name} 副本`,
+      driver: c.driver,
       host: c.host,
       port: c.port,
       user: c.user,

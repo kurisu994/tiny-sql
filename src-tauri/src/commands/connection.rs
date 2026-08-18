@@ -5,7 +5,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use db_driver::{MySqlConnectSettings, MySqlTlsMode};
+use db_driver::{Driver, DriverKind, MySqlConnectSettings, MySqlTlsMode};
 use serde::{Deserialize, Serialize};
 use ssh_multihop::{
     HopStatusCallback, HopStatusEvent, HostKeyDecision, HostKeyQuery, HostKeyVerifier, SshAuth,
@@ -21,6 +21,9 @@ use crate::state::{AppState, OpenConnection};
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInput {
     pub name: String,
+    /// 数据库类型；旧前端未传时默认 MySQL。
+    #[serde(default)]
+    pub driver: DriverKind,
     pub host: String,
     pub port: u16,
     pub user: String,
@@ -57,6 +60,7 @@ pub async fn connection_create(
     let conn = StoredConnection {
         id: uuid::Uuid::new_v4().to_string(),
         name: input.name,
+        driver: input.driver,
         host: input.host,
         port: input.port,
         user: input.user,
@@ -94,6 +98,10 @@ pub async fn connection_test(
     state: State<'_, AppState>,
     input: ConnectionInput,
 ) -> Result<(), String> {
+    if input.driver != DriverKind::MySql {
+        return Err("error.driver.not_implemented".to_string());
+    }
+
     let hops: Vec<SshHop> = if input.ssh.enabled {
         // 测试连接不带会话 passphrase 缓存，私钥 passphrase 测试留连接打开路径
         build_runtime_hops(&input.ssh, None)?
@@ -130,8 +138,8 @@ pub async fn connection_test(
     )
     .await
     .map_err(|e| e.i18n_key().to_string())?;
-    let result = driver.ping().await;
-    driver.close().await;
+    let result = Driver::ping(&driver).await;
+    Driver::close(&driver).await;
     result.map_err(|e| e.i18n_key().to_string())?;
     Ok(())
     // _tunnel 在此 drop，关闭 listener 与 session
@@ -233,6 +241,10 @@ pub async fn connection_open(
             .ok_or("error.connection.not_found")?
     };
 
+    if conn.driver != DriverKind::MySql {
+        return Err("error.driver.not_implemented".to_string());
+    }
+
     // passphrase：本次传入优先，否则用会话缓存
     let effective_passphrase = passphrase
         .clone()
@@ -278,7 +290,9 @@ pub async fn connection_open(
     .await
     .map_err(|e| e.i18n_key().to_string())?;
     // 立即 ping 确认握手成功（隧道桥接 + MySQL 认证）
-    driver.ping().await.map_err(|e| e.i18n_key().to_string())?;
+    Driver::ping(&driver)
+        .await
+        .map_err(|e| e.i18n_key().to_string())?;
 
     // 成功：缓存本次 passphrase + 落注册表 + 刷新最近使用
     if let Some(pp) = passphrase {

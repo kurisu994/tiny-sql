@@ -11,17 +11,16 @@ last_updated: 2026-08-18
 >
 > 本文件只保留尚未完成的工作。v0.1 已实现内容、历史检查点和架构决策见 [progress.md](../memory-bank/progress.md)。
 
-当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包、`latest.json` 及从 v0.0.3 到 v0.1.0 的应用内更新闭环。PostgreSQL 版本基线已固化；完成以下发布后待办后，进入 v0.2 的 8 周开发周期。
+当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包、`latest.json` 及从 v0.0.3 到 v0.1.0 的应用内更新闭环。PostgreSQL 版本基线已固化，v0.2 Week 1 已开工。
 
 ## v0.1 发布后待办
 
-以下工作不计入 v0.2 的 8 周预算；除真实 GIF 可随 v0.1.1 补充外，其余完成后通过 **V2-CP0**：
+以下代码承诺缺口不计入 v0.2 的 8 周预算，可与 Week 1 并行，但必须在 **V2-CP1** 前处理完成或同步收窄需求承诺：
 
 - [ ] 处理 v0.1 代码承诺缺口：
   - 带 passphrase 私钥的 `connection_test`。
   - `ChannelDropped` / `AcceptLoopDied` 的运行时检测与上报；若不补实现，则同步收窄需求承诺。
   - 在稳定 i18n key 基础上安全传递 MySQL 服务端错误行号，不泄露原始 Rust 错误。
-- [ ] 补 README “右键打开”与多跳拓扑真实 GIF。
 
 ## v0.2 开发计划
 
@@ -58,10 +57,10 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### Week 1：Driver 契约与 PostgreSQL vertical slice（12h）
 
-- [ ] **V2-T1.1 [4h]** 从现有 `MySqlDriver` 调用面提取最小 `Driver` 契约；只覆盖 ping、metadata、query、cancel、close，连接创建由 driver factory 负责，不提前抽象 v0.3 对象编辑能力。
-- [ ] **V2-T1.2 [3h]** 给连接配置增加显式 `driver` 类型并实现向后兼容迁移：旧记录缺字段时默认 MySQL，迁移失败保留原加密文件。
-- [ ] **V2-T1.3 [3h]** 增加 PostgreSQL 最窄 vertical slice：直连 → `SELECT 1` → 稳定 i18n key；SSH 继续复用通用 TCP 隧道。
-- [ ] **V2-T1.4 [2h]** 回归 MySQL 单测与 integration，确认 SQL guard、LIMIT、取消和连接行为没有变化。
+- [x] **V2-T1.1 [4h]** 从现有 `MySqlDriver` 调用面提取最小、对象安全的 `Driver` 契约；覆盖 ping、metadata、query、基于 `CancellationToken` 的 cancel、close，连接创建仍由具体 driver/factory 负责，未提前抽象 v0.3 对象编辑能力。MySQL 生产调用面已通过该契约接线，workspace 编译与 `db-driver` 单测通过。
+- [x] **V2-T1.2 [3h]** 连接配置已增加显式 `driver` 类型，稳定值为 `mysql` / `postgresql`；旧记录缺字段时只在内存中默认迁移为 MySQL，不在启动读取时重写密文，后续显式保存才落成新格式。未知 driver 迁移失败会保留原加密文件，Rust 加密存储测试与前端类型检查通过。
+- [ ] **V2-T1.3 [3h]** PostgreSQL 最窄代码链路已实现：`PostgresDriver` 支持显式直连、`SELECT 1::BIGINT`、关闭连接池与稳定 `error.driver.connect_failed`；SSH 仍由上层复用通用 TCP 隧道。`sqlx-postgres 0.8.6` 已编译，integration 门禁已建立，但本机尚未配置 `TINY_SQL_TEST_POSTGRES_URL`，真实 `SELECT 1` 通过前保持未完成。
+- [x] **V2-T1.4 [2h]** MySQL 18 个单测与 5 个真实 integration 全绿，覆盖连接、metadata、NULL/数值解码以及 `SELECT SLEEP(10)` 取消；SQL guard / LIMIT 单测和独立 control pool 取消行为均无回归。
 
 完成条件：MySQL 现有测试全绿；PostgreSQL `SELECT 1` 通过；旧 `connections.enc` 无损读取；通过 **V2-CP1**。
 
@@ -133,8 +132,8 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 | 检查点 | 时机 | 通过标准 | 不通过的应对 |
 |---|---|---|---|
-| **V2-CP0** 启动准入 | 开工前 | v0.1.0 无紧急回滚问题；代码承诺缺口、应用内更新实测与 PostgreSQL 版本基线完成 | 先修 v0.1.1 候选问题，不创建 v0.2 功能分支 |
-| **V2-CP1** Driver 抽象 | Week 1 末 | MySQL 零回归 + PostgreSQL SELECT 1 + 配置迁移通过 | 收窄 trait，不继续铺 PostgreSQL 全功能 |
+| **V2-CP0** 启动准入 | 开工前 | v0.1.0 无紧急回滚问题；应用内更新实测与 PostgreSQL 版本基线完成 | 先修紧急回滚问题，不进入 v0.2 Week 1 |
+| **V2-CP1** Driver 抽象 | Week 1 末 | MySQL 零回归 + PostgreSQL SELECT 1 + 配置迁移通过；并行代码承诺缺口已处理或收窄 | 收窄 trait，不继续铺 PostgreSQL 全功能 |
 | **V2-CP2** 双 driver 闭环 | Week 3 末 | 两个 driver 的 connect/metadata/query/cancel/UI 可用 | 延后 Week 4，先修状态与 dialect 边界 |
 | **V2-CP3** 安全迁移 | Week 4 末 | 旧配置无损、错误密码不破坏文件、真实 TLS 通过 | 停止发布；保留会话 passphrase，不强推持久化 |
 | **V2-CP4** 查询工作台 | Week 6 末 | history/tab/export 隔离正确，无明显内存回归 | P2 整体推 v0.2.1，保留 P1 SQL 历史 |

@@ -44,13 +44,13 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 - macOS / Windows / Linux x64 打包 / zh-CN only / 无 Apple Developer 代码签名
 - 正式版自动更新（Tauri updater 签名包；RC 不作为更新源）
 
-`v0.1.0` 已于 2026-08-18 正式发布。Release workflow 四个平台构建全部成功，GitHub Release 已包含 macOS arm64/x64、Windows x64、Linux x64 安装包、签名更新包与四平台 `latest.json`；从 v0.0.3 发现、下载、安装并重启到 v0.1.0 的应用内更新闭环也已实测。README 真实 GIF 和少量已知能力缺口作为发布后待办继续跟踪，不影响已发布版本事实。
+`v0.1.0` 已于 2026-08-18 正式发布。Release workflow 四个平台构建全部成功，GitHub Release 已包含 macOS arm64/x64、Windows x64、Linux x64 安装包、签名更新包与四平台 `latest.json`；从 v0.0.3 发现、下载、安装并重启到 v0.1.0 的应用内更新闭环也已实测。少量已知能力缺口作为并行待办继续跟踪，不影响已发布版本事实。
 
 ---
 
 ## v0.2 — 首发后 2-3 个月
 
-启动条件：现有 dogfooding、v0.1.0 全平台发布验收与应用内升级闭环不重做；PostgreSQL 版本基线已固化，开工前只需完成 [PLAN 的发布后待办](./PLAN.md#v01-发布后待办) 中影响代码承诺的事项。真实 GIF 可随 v0.1.1 补充，不阻塞 v0.2 Week 1。
+启动条件：现有 dogfooding、v0.1.0 全平台发布验收与应用内升级闭环不重做；PostgreSQL 版本基线已固化，V2-CP0 已通过。v0.1 代码承诺缺口与 Week 1 并行，但必须在 V2-CP1 前处理或收窄承诺。
 
 详细任务、依赖、检查点与测试矩阵见 [v0.2 开发计划](./PLAN.md#v02-开发计划)。
 
@@ -75,7 +75,7 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 
 ### 工程
 
-- **extract trait Driver**：v0.1 是具体 `struct MySqlDriver`，v0.2 加 PG 时先用 rust-analyzer extract trait（两个实现在手才设计接口），再写 `PostgresDriver`（NFR-042）
+- **Driver 契约**：V2-T1.1 已从 `MySqlDriver` 真实调用面提取对象安全的最小契约；下一步增加 `PostgresDriver` 并根据双实现反馈继续收窄（NFR-042）
 - `AppState` 的活跃连接注册表从具体 `MySqlDriver` 扩展到可容纳多 driver；隧道生命周期仍留在 `src-tauri::OpenConnection` 组合层
 - keepalive 间隔 + 失败阈值可配置，FR-014 的 60s / 连续 3 次（180s）改为默认值
 - 评估 Apple Developer 代码签名 / notarization（$99/年），降低首次打开摩擦

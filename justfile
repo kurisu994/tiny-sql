@@ -73,9 +73,16 @@ test-rust:
 test-web:
     pnpm test
 
-# integration 测试（连本地 MySQL，需 .env 设 TINY_SQL_TEST_MYSQL_URL，见 .env.example）
-test-integration:
-    cargo test -p db-driver -- --include-ignored
+# 双 driver integration（需同时配置 MySQL/PostgreSQL 本地实例，见 .env.example）
+test-integration: test-mysql-integration test-postgres-integration
+
+# 仅回归 MySQL integration
+test-mysql-integration:
+    cargo test -p db-driver --test integration -- --include-ignored
+
+# 仅回归 PostgreSQL integration；缺少 URL 时明确失败，避免假绿
+test-postgres-integration:
+    cargo test -p db-driver --test postgres_integration -- --include-ignored
 
 # === 依赖管理 ===
 

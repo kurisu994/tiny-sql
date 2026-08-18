@@ -6,7 +6,11 @@
 //! 需设环境变量 `TINY_SQL_TEST_MYSQL_URL`（见 .env.example），未设时单测内提前返回。
 //! CI 不跑本文件（无 MySQL 服务器）；MySQL 5.7 兼容验证推 Week 5 dogfooding。
 
-use db_driver::MySqlDriver;
+use std::time::Duration;
+
+use db_driver::{DriverError, MySqlDriver, QueryOptions};
+use tokio::time::{sleep, timeout};
+use tokio_util::sync::CancellationToken;
 
 /// 读取测试用 MySQL URL；未配置则返回 None
 fn test_url() -> Option<String> {
@@ -91,6 +95,34 @@ async fn list_tables_and_columns_on_information_schema() {
             .iter()
             .any(|c| c.name.eq_ignore_ascii_case("table_name")),
         "tables 表应有 table_name 列"
+    );
+    driver.close().await;
+}
+
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn cancel_long_query_returns_query_cancelled() {
+    let url = url_or_skip!();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    let query_driver = driver.clone();
+    let cancel_token = CancellationToken::new();
+    let query_token = cancel_token.clone();
+
+    let query_task = tokio::spawn(async move {
+        query_driver
+            .query_with_options("SELECT SLEEP(10)", QueryOptions::default(), query_token)
+            .await
+    });
+    sleep(Duration::from_millis(100)).await;
+    cancel_token.cancel();
+
+    let result = timeout(Duration::from_secs(5), query_task)
+        .await
+        .expect("取消后查询应在 5 秒内结束")
+        .expect("查询任务不应 panic");
+    assert!(
+        matches!(result, Err(DriverError::QueryCancelled)),
+        "取消应返回稳定 QueryCancelled，实际: {result:?}"
     );
     driver.close().await;
 }

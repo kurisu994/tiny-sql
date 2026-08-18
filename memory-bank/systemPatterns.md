@@ -18,7 +18,7 @@
                ▼                         ▼
 ┌──────────────────────────┐  ┌──────────────────────────────┐
 │  crates/db-driver        │  │  crates/ssh-multihop          │
-│  MySqlDriver（sqlx pool） │  │  open() → N 跳隧道 + 本地端口  │
+│  Driver + MySqlDriver    │  │  open() → N 跳隧道 + 本地端口  │
 │  不知道 SSH 存在          │  │  完全不知道 MySQL 存在         │
 └──────────────────────────┘  └──────────────────────────────┘
 ```
@@ -26,7 +26,7 @@
 **分工铁律**：
 
 - `ssh-multihop` **只知道**「本地监听一个端口，把流量转发到远端 host:port」，不知道上层是 MySQL → 这是它未来能独立 publish 的前提。
-- `db-driver` **只知道**「给我 host/port/user/pass/database/settings，返回 MySqlDriver」，不知道 SSH。
+- `db-driver` **只知道**数据库连接与查询，不知道 SSH。通用调用通过对象安全的 `Driver` 契约；连接创建和方言专属配置仍由具体 driver 负责。
 - `src-tauri` 把两者拼起来 + Tauri IPC + 持久化；走 SSH 时先打开隧道拿本地端口，再创建 `MySqlDriver` 连 `127.0.0.1:port`。
 
 ## 多跳 SSH 机制（核心）
@@ -46,7 +46,7 @@ tiny-sql/
 ├── Cargo.toml                  # workspace 根，members + workspace.dependencies
 ├── crates/
 │   ├── ssh-multihop/src/lib.rs # N 跳隧道 + keepalive + 错误模型 + TunnelHandler/HostKeyVerifier
-│   └── db-driver/src/lib.rs    # MySqlDriver(connect/ping/list_*/query) + cell_to_string
+│   └── db-driver/src/lib.rs    # Driver 契约 + MySqlDriver 实现 + cell_to_string
 ├── src-tauri/
 │   ├── src/lib.rs · main.rs    # setup 装配 store/known_hosts + 注册 command
 │   ├── src/state.rs · tofu.rs  # AppState(注册表/passphrase 缓存) + SshTofuManager
@@ -61,7 +61,7 @@ tiny-sql/
 
 ### 与 ARCHITECTURE 的偏差（实施期决定）
 
-- **db-driver 保持单文件 `MySqlDriver`**：隧道在 src-tauri 的 `OpenConnection` 里与 pool 绑定生命周期，不在 db-driver 内新增 SSH 组合类型。
+- **db-driver 当前保持单文件 `Driver` + `MySqlDriver`**：隧道在 src-tauri 的 `OpenConnection` 里与 pool 绑定生命周期，不在 db-driver 内新增 SSH 组合类型；增加 PostgreSQL 实现时再按实现边界拆文件。
 - **ssh-multihop 不引 `tauri::AppHandle`**：原 `SshTunnelContext{app_handle}` 改为 `TunnelContext` 注入回调闭包，保「可独立 publish」不变量。**写代码前确认是「实际」还是「规划」。**
 
 ## 设计模式
@@ -69,6 +69,8 @@ tiny-sql/
 **Rust 后端**
 
 - 错误用 `thiserror`，每个变体绑定稳定 i18n key（`#[error("error.ssh.connect_failed")]`）；i18n key 是**公开 API 契约**，只能加不能改名。
+- `Driver` 使用装箱 Future 保持对象安全，不引入 `async-trait`；取消令牌作为 query 契约的一部分，由具体 driver 映射为原生取消机制。
+- 连接配置的 `driver` 使用稳定值 `mysql` / `postgresql`；旧密文缺字段时只做内存默认迁移，不在启动读取时重写文件，显式保存才升级格式。迁移失败必须保持原密文不变。
 - 与具体跳相关的 `SshTunnelError` 变体带 `hop_index: usize`；`NoHops` / `LocalListenFailed` 返回 `None`。Tauri command 用 `hop_index()` emit 拓扑状态，错误返回值只暴露稳定 i18n key。
 - 公共类型/函数加中文 doc comment。
 - 隧道 `Drop` 里 abort 所有 keepalive task 和 accept task，防 leak。
@@ -89,7 +91,7 @@ tiny-sql/
 ## 负向约束（❌ 不要做）
 
 - ❌ **不在 `ssh-multihop` 里引用 MySQL/sqlx** —— 破坏独立 publish 前提。
-- ❌ **v0.1 不写 `trait Driver`** —— 单实现 trait 是过早抽象，v0.2 加 PG 时再 rust-analyzer extract。
+- ❌ **不把方言专属对象操作塞进 `Driver`** —— 通用契约只覆盖 ping、metadata、query/cancel、close；连接创建与 MySQL `CREATE DATABASE` 等能力留在具体实现/factory。
 - ❌ **不读不写 `~/.ssh/known_hosts`** —— 用自有 store，不污染用户 OpenSSH 信任域。
 - ❌ **host key 变更不给「忽略」按钮** —— 硬拒绝。
 - ❌ **passphrase 不落盘**（v0.1）—— 仅会话内存。
