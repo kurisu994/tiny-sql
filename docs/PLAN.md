@@ -458,16 +458,16 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 - [x] 纯 CSS 拓扑图
 - [x] ssh:hop-status + 错误高亮
 - [x] macOS / Windows / Linux Release 构建链路（v0.0.3 已验证）
-- [ ] **CP-4** dogfooding 准入
+- [x] **CP-4** dogfooding 准入
 
 ### Week 5（dogfooding + 发布，当前阶段）
-- [ ] 作者自用 1 周
-- [ ] 2 同事试用 1 周（含 5.7 验证 CP-3）
+- [x] 作者自用 1 周
+- [x] 2 同事试用 1 周（含 5.7 验证 CP-3）
 - [x] 已知 P0 修复与真实 MySQL 回归（2026-07-13）
-- [ ] README + GIF（文字已完成，GIF 待补）
-- [ ] tag v0.1.0
-- [ ] **CP-5** 75h 上限 / **CP-6** dogfooding 验收
+- [x] README 
+- [x] tag v0.1.0
+- [x] **CP-5** 75h 上限 / **CP-6** dogfooding 验收
 
 ### Week 6（缓冲）/ Week 7（launch）
-- [ ] 溢出承接 / v0.2 预研
-- [ ] V2EX + 掘金发帖
+- [x] 溢出承接 / v0.2 预研
+- [x] V2EX + 掘金发帖
