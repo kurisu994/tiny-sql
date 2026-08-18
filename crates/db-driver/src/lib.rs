@@ -237,7 +237,7 @@ impl MySqlDriver {
         if !database.is_empty() {
             opts = opts.database(database);
         }
-        // v0.1 不启用 MySQL TLS；sqlx 默认 PREFERRED 会在部分内网 MySQL 上握手失败。
+        // 默认禁用 TLS 以兼容内网 MySQL；用户显式选择 SSL 模式时按配置启用。
         opts = opts
             .ssl_mode(settings.ssl_mode.to_sqlx())
             .log_statements(log::LevelFilter::Off);
@@ -375,7 +375,7 @@ impl MySqlDriver {
             .await
     }
 
-    /// 执行 SQL，支持子查询包装、10w 硬上限与 `KILL QUERY` 取消。
+    /// 执行 SQL，支持顶层安全追加 LIMIT、10w 硬上限与 `KILL QUERY` 取消。
     pub async fn query_with_options(
         &self,
         sql: &str,

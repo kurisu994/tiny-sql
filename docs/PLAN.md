@@ -2,7 +2,7 @@
 title: tiny-sql 开发计划
 version: 0.1.0-draft-2
 status: draft
-last_updated: 2026-06-26
+last_updated: 2026-08-18
 ---
 
 # tiny-sql 开发计划
@@ -10,6 +10,8 @@ last_updated: 2026-06-26
 > 配套文档：[REQUIREMENTS.md](./REQUIREMENTS.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 >
 > **draft-2 变更**：本版按 `/plan-eng-review` 的 9 个 binding 决策重排。最大变化是 **Week 1 改为 vertical slice**（只证明端到端最小链路 work），keepalive/错误模型细分/测试基础设施/拓扑图全部下放到 Week 2-4。决策全表见 §12。
+
+> **当前进度快照（2026-08-18）**：当前预览版为 v0.0.3，Week 1-4 主体实现已落地，最新 `main` CI 通过，v0.0.3 全平台 Release 与 `latest.json` 已成功生成。Week 5 尚未通过 CP-3/CP-4/CP-6：真实 3 跳 GUI dogfooding、MySQL 5.7、作者 + 2 同事各试用 1 周、GIF、`v0.1.0-rc1` / `v0.1.0` 仍未完成；带 passphrase 私钥的测试连接和 ChannelDropped / AcceptLoopDied 运行时检测也需补齐或收窄承诺。因此原定 2026-08 月初发布已延期。
 
 ## 1. 时间线总览
 
@@ -42,7 +44,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 **T1.1 [3h] Tauri + workspace 摩擦点验证（最先做，关键风险检查点 CP-1）**
 - `cargo new --workspace tiny-sql`，建 `crates/ssh-multihop`（先放空 `lib.rs`）
 - `src-tauri/Cargo.toml` 里 `ssh-multihop = { path = "../crates/ssh-multihop" }`
-- 跑 `cargo tauri build` 验证 workspace 成员引用能走通
+- 跑 `just build`（内部为 `pnpm tauri build`）验证 workspace 成员引用能走通
 - **若失败**：立刻退回扁平 mod 方案——`crates/ssh-multihop` 内容挪到 `src-tauri/src/ssh_multihop/mod.rs`，删 workspace 配置。**不要拖到 Week 2**
 
 **T1.2 [3h] 单跳 SSH 隧道（先不要 3 跳）**
@@ -63,18 +65,18 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 
 **T1.5 [1.5h] tauri.conf.json + 最小 CI**
 - 从 redis-desktop-client 抄 `tauri.conf.json` + `capabilities/default.json`（最小 permission 集）
-- GitHub Actions：仅 macOS arm64，跑 `cargo check --workspace` + `cargo tauri build`
+- GitHub Actions：单 macOS arm64 check job，跑前端 build/Vitest + Rust fmt/clippy/test；跨平台桌面构建由 tag release workflow 负责
 - 完整测试矩阵留 Week 2
 
 **T1.6 [0.5h] 收尾**
-- 确认 `cargo tauri dev` 启窗口 → 点按钮 → 单跳隧道 → SELECT 1 → 前端显示成功
+- 确认 `just dev` 启窗口 → 点按钮 → 单跳隧道 → SELECT 1 → 前端显示成功
 
 ### 2.2 验收点（vertical slice 闭环）
 
-- [ ] **CP-1**：`cargo tauri build` 在 workspace 布局下成功（或已决定退回扁平 mod）
+- [x] **CP-1**：`just build` 在 workspace 布局下成功
 - [ ] `cargo tauri dev` 启窗口，点按钮经单跳 SSH 连上 MySQL，`SELECT 1` 返回
 - [ ] 前端 hello 页显示"连接成功"
-- [ ] GitHub Actions（仅 arm64 cargo check + build）跑通
+- [x] GitHub Actions check job 跑通（最新 main CI 于 2026-08-08 成功）
 
 ### 2.3 本周不做（明确推后）
 
@@ -174,8 +176,8 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 - SshTunnel handle 与 MySqlPool 绑定生命周期：tunnel drop → pool drop
 
 **T3.2 [2.5h] SSH keepalive（FR-014 核心）**
-- 每跳起一个 `tokio::spawn` 循环：每 **60s** 调 `session.send_keepalive()`（russh 0.54）
-- **连续 3 次失败（≈180s）才判定断开**，emit `ssh:hop-status` payload `{status: "lost", reason}`，避免弱网/bastion ratelimit 误报
+- 每跳 russh session 配置 `keepalive_interval=60s`、`keepalive_max=2`，由 russh 在第 3 次未响应时结束 session；另起轻量监控 task 探测 session 是否退出
+- **连续 3 次未响应（≈180s）才判定断开**，监控 task emit `ssh:hop-status` payload `{status: "lost", reason}`，避免弱网/bastion ratelimit 误报
 - keepalive 间隔 + 失败阈值留为常量（v0.2 做成可配置）
 - `SshTunnel` 的 Drop 里 abort 所有 keepalive task（避免 leak）
 
@@ -186,6 +188,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
   - `ChannelDropped { hop_index }` → `error.ssh.channel_dropped`（对端主动关 channel，可能是跳板重启）
   - `AcceptLoopDied { hop_index }` → `error.ssh.accept_loop_died`（accept loop panic，代码 bug 需上报）
 - 三种 failure mode 重试策略独立
+- **实际状态**：三个错误变体与 i18n key 已落地；当前运行路径只上报 keepalive `lost`，尚未主动构造 `ChannelDropped` / `AcceptLoopDied`。
 
 **T3.4 [2h] TOFU 流程接通**
 - 后端：`KnownHostsValidator` emit `ssh:tofu-request`（复用代码）
@@ -195,7 +198,7 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 **T3.5 [2.5h] 前端 — SSH 多跳配置表单**
 - 连接编辑对话框加"SSH 跳板"折叠区
 - SshHop 数组编辑器：动态加减、调顺序
-- 单 hop：host/port/username/auth_type（password|privateKey）/password?/private_key_path?（fs picker）/passphrase?（仅会话）
+- 单 hop：host/port/username/auth_type（password|privateKey）/password?/private_key_path?（路径文本输入）；passphrase 不属于持久化 hop，而是在 `connection_open` 时按 connection_id 传入并缓存于本会话
 
 **T3.6 [2h] 前端 — schema/table 左侧树 + 1000 行表格**
 - 连接成功 → `list_databases` → 点 schema → `list_tables`（v0.1 无搜索，FR-020 小库假设）
@@ -248,9 +251,9 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 - 前端 subscribe → zustand 更新 → 拓扑节点 reactive 重渲染
 - status=failed/lost 节点红边 + tooltip 用 `i18n.t(error.i18n_key)`，全部 SshTunnelError 变体（含三件 mid-session）有 zh-CN 翻译
 
-**T4.5 [1.5h] macOS .dmg build**
-- GitHub Actions release job：tag `v0.1.*` 触发 → `cargo tauri build` 出 .dmg → `gh release create` 上传
-- 本地验证：.dmg 在另一台 Mac 右键打开 → 运行
+**T4.5 [1.5h] 全平台桌面包 build**
+- GitHub Actions release job：`v*` tag 触发 → macOS arm64/x64、Windows x64、Linux x64 原生 runner 分别构建 → 单独 release job 上传；正式版同时生成 `latest.json`
+- 流水线已由 v0.0.3 成功验证；v0.1 仍需 RC 下载后的真实安装验收
 
 **T4.6 [1.5h] CP-4 dogfooding 准入自查（见 §5.3）**
 
@@ -426,42 +429,42 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 ## 附录 A：每周快速 checklist
 
 ### Week 1（vertical slice）
-- [ ] **CP-1** Tauri+workspace 摩擦验证（最先做）
-- [ ] 单跳 SSH 隧道复制 + 跑通
-- [ ] sqlx 桥接 SELECT 1
-- [ ] Next.js hello 页
-- [ ] tauri.conf + 最小 CI
+- [x] **CP-1** Tauri+workspace 摩擦验证（最先做）
+- [x] 单跳 SSH 隧道实现
+- [x] sqlx 桥接 SELECT 1
+- [x] Next.js 前端骨架
+- [x] tauri.conf + CI
 - [ ] **CP-1b** 端到端闭环
 
 ### Week 2（测试 + driver + 连接管理）
-- [ ] 测试基础设施一次架齐（无 Docker）
-- [ ] 具体 struct MySqlDriver（不抽 trait）
-- [ ] connection_* commands
-- [ ] 加密 store（passphrase 不落盘）
-- [ ] 连接列表/编辑 UI（无 SSH）
+- [x] 测试基础设施一次架齐（无 Docker）
+- [x] 具体 struct MySqlDriver（不抽 trait）
+- [x] connection_* commands
+- [x] 加密 store（passphrase 不落盘）
+- [x] 连接列表/编辑 UI
 - [ ] **CP-2** 25h 累计检查
 
 ### Week 3（多跳 + keepalive + 错误模型）
-- [ ] 单跳 → 3 跳
-- [ ] keepalive 60s + 3 次阈值
-- [ ] SshTunnelError 三变体 + hop_index
-- [ ] TOFU 流程
-- [ ] SshHop 配置表单
-- [ ] schema/table 树 + 1000 行表格
+- [x] 单跳 → N 跳实现（真实 3 跳仍待 CP-4）
+- [x] russh keepalive 60s + 3 次阈值
+- [x] SshTunnelError 三变体 + hop_index
+- [x] TOFU 流程
+- [x] SshHop 配置表单
+- [x] schema/table 树 + 1000 行表格
 
 ### Week 4（SQL + 拓扑 + dmg）
-- [ ] 顶层安全追加 LIMIT 防 OOM + 拒多语句
-- [ ] control pool + KILL QUERY
-- [ ] 纯 CSS 拓扑图
-- [ ] ssh:hop-status + 错误高亮
-- [ ] macOS .dmg
+- [x] 顶层安全追加 LIMIT 防 OOM + 拒多语句
+- [x] control pool + KILL QUERY
+- [x] 纯 CSS 拓扑图
+- [x] ssh:hop-status + 错误高亮
+- [x] macOS / Windows / Linux Release 构建链路（v0.0.3 已验证）
 - [ ] **CP-4** dogfooding 准入
 
-### Week 5（dogfooding + 发布）
+### Week 5（dogfooding + 发布，当前阶段）
 - [ ] 作者自用 1 周
 - [ ] 2 同事试用 1 周（含 5.7 验证 CP-3）
-- [ ] 修 P0/P1
-- [ ] README + GIF
+- [x] 已知 P0 修复与真实 MySQL 回归（2026-07-13）
+- [ ] README + GIF（文字已完成，GIF 待补）
 - [ ] tag v0.1.0
 - [ ] **CP-5** 75h 上限 / **CP-6** dogfooding 验收
 

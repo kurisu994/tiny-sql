@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # v0.1 Week 1：仅 macOS arm64。Win/Linux + .dmg 打包推 Week 4 / v0.3
+  # 主分支质量检查保持单 macOS arm64 job；跨平台安装包由 release.yml 的 tag workflow 构建。
   check:
     name: check (macOS arm64)
     runs-on: macos-14

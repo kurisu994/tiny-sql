@@ -49,7 +49,7 @@
 | MSRV | 1.77.2 | `rust-version` |
 | Node | 见 `.nvmrc` | CI 用 Node 24 |
 | pnpm | 11+ | pnpm-workspace.yaml |
-| 应用版本 | 0.0.2 | package.json / src-tauri/Cargo.toml / tauri.conf.json |
+| 应用版本 | 0.0.3 | package.json / Cargo.lock / src-tauri/Cargo.toml / tauri.conf.json |
 
 ## 构建命令（justfile，`set dotenv-load`）
 
@@ -58,10 +58,10 @@
 | `just install` | `pnpm install` + `cargo fetch` |
 | `just dev` / `just dev-web` | Tauri 完整开发 / 仅 Next.js |
 | `just build` / `just build-web` | 桌面应用 / 前端静态导出 |
-| `just check` | 提交前自检 = `fmt-check` + `lint-rust` + `test-rust` + `build-web`（对齐 CI） |
+| `just check` | 提交前自检 = `fmt-check` + `lint-rust` + `test-rust` + `test-web` + `build-web`（对齐 CI） |
 | `just lint` / `lint-rust` / `lint-web` | tsc + clippy / 仅 clippy / 仅 tsc |
 | `just fmt` / `fmt-check` | 格式化 / 仅检查 |
-| `just test` / `test-rust` | workspace 单元测试 |
+| `just test` / `test-rust` | Rust workspace + 前端 Vitest / 仅 Rust workspace |
 | `just test-integration` | `cargo test -p db-driver -- --include-ignored`（连本地 MySQL） |
 | `just version <ver>` | 同步 package.json / Cargo.toml / tauri.conf.json 版本号 |
 | `just release <tag>` | 更新版本 + CHANGELOG + commit + tag + push 触发云端构建 |
@@ -69,8 +69,9 @@
 ## CI（.github/workflows/ci.yml）
 
 - 单 job，**macOS arm64**，Node 24 + pnpm + Rust stable（含 clippy）。
-- 步骤：`pnpm install --frozen-lockfile` → `pnpm build` → `cargo fmt --all --check` → `cargo clippy --workspace -- -D warnings` → `cargo test --workspace`。
+- 步骤：`pnpm install --frozen-lockfile` → `pnpm build` → `pnpm test` → `cargo fmt --all --check` → `cargo clippy --workspace -- -D warnings` → `cargo test --workspace`。
 - **CI 不跑 integration**（无 MySQL 服务器）；MySQL 5.7 兼容推到 dogfooding 验证。
+- 最新 main CI（`7f566ae`）于 2026-08-08 成功；`v0.0.3` Release workflow 于 2026-07-03 成功并上传全平台安装包、签名产物与 `latest.json`。
 
 ## 关键配置事实
 

@@ -2,12 +2,14 @@
 title: tiny-sql 需求文档
 version: 0.1.0-draft-2
 status: draft
-last_updated: 2026-06-26
+last_updated: 2026-08-18
 ---
 
 # tiny-sql 需求文档
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
+
+> **实现快照（2026-08-18）**：当前预览版为 v0.0.3，Week 1-4 代码已落地；v0.1 发布仍受真实 3 跳 GUI dogfooding、MySQL 5.7、作者与 2 位同事各试用 1 周、GIF 和最终 RC 验收约束。本文件以当前代码为事实源，未完成的真实环境验收仍保留为发布门槛。
 
 ## 1. 项目愿景
 
@@ -15,7 +17,7 @@ tiny-sql 是一款**多级跳板机友好的 MySQL 桌面客户端**。
 
 主流 SQL 客户端（DBeaver、TablePlus、Navicat、DataGrip、Sequel Ace、Beekeeper Studio）把 SSH 隧道当作"雾中一根管子"——单跳、黑盒、出错无法定位哪一跳挂了。DBeaver 名义上支持 OpenSSH ProxyJump 多跳，但 UI 完全不暴露这层逻辑，调试体验等同于裸 `ssh -L`。
 
-tiny-sql 把跳板机从"雾中一根管子"变成**可观测的路由器**：每一跳都是 UI 上的一等公民节点，有独立的连接状态、独立的错误归因、独立的延迟读数。v0.1 给出"本地 → 跳板 1 → 跳板 2 → 跳板 3 → MySQL"的拓扑图视图；隧道任意一跳挂掉时高亮断点节点，180s 内向 UI 推送 lost 状态。
+tiny-sql 把跳板机从"雾中一根管子"变成**可观测的路由器**：每一跳都是 UI 上的一等公民节点，有独立的连接状态和错误归因。v0.1 给出"本地 → 跳板 1 → 跳板 2 → 跳板 3 → MySQL"的拓扑图视图；隧道任意一跳挂掉时高亮断点节点，180s 内向 UI 推送 lost 状态。每跳实时延迟读数尚未实现，留到 v0.2。
 
 这是即使 DBeaver 下个版本想追也追不上的理念差距：不是 feature 差距，是把 SSH 从"网络层"提升到"数据模型层"的差距。
 
@@ -37,7 +39,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 - **场景 A1：高频日常查询**。开机后 30s 内打开 tiny-sql，连接列表第一个就是"生产读库 RO"，双击连接，3 跳隧道自动建立，左侧列出所有 schema，点 `orders` schema 点 `t_order` 表，看前 1000 行核对昨天的促销数据。整个流程预期 15s 内完成。
 - **场景 A2：故障排查**。线上告警，需要立刻连库 SELECT 状态。点开"生产读库 RO"连接，第 2 跳堡垒机因为业务方网络抖动连不上，UI 上 hop[1] 节点变红，tooltip 提示"connection timeout"。立刻判定是堡垒机的问题，不浪费时间排查本地网络或 MySQL。
-- **场景 A3：执行修复 SQL**。需要 `UPDATE t_order SET status = ... WHERE id IN (...)` 一行修数据。粘贴 SQL 进编辑器，点执行，弹出"检测到 UPDATE 操作，确认执行？"对话框，输 yes 二次确认。执行成功显示影响行数。
+- **场景 A3：执行修复 SQL**。需要 `UPDATE t_order SET status = ... WHERE id IN (...)` 一行修数据。粘贴 SQL 进编辑器，点执行，弹出写操作确认对话框，用户点击「确认执行」后提交。执行成功显示影响行数。
 
 ### 2.2 用户画像 B：同事推广
 
@@ -50,7 +52,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **典型场景**：
 
 - **场景 B1：上手 5 分钟**。从作者群消息拿到 .dmg 链接，下载、右键打开、配第一个连接：填 3 跳 SSH + MySQL 信息，TOFU 弹窗确认指纹，连接成功。整个流程预期 5 分钟内，不需要看文档。
-- **场景 B2：连接配置分享**。同事 C 想用同样的连接，作者把 tiny-sql 加密后的连接配置 JSON 发给 C（v0.1 手动复制配置文件；v0.2 加密导出/导入），C 输入自己的 SSH 私钥 passphrase 后即可使用。
+- **场景 B2：连接配置分享**。v0.1 不支持分享或导入连接配置：`connections.enc` 依赖同机 `master.key`，不能把加密文件单独发给同事使用。同事 C 需要手动新建自己的连接；带独立导出密码的加密导出/导入留到 v0.3。
 - **场景 B3：替代 Navicat**。同事 B 用 1 周后反馈：日常浏览数据、查 schema、跑 SELECT 完全够用，唯一缺失的是"导出 CSV"和"SQL 历史"（这些是 v0.2 范围）。
 
 ### 2.3 用户画像 C：开源社区用户
@@ -81,7 +83,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-001 [P0] 连接配置 CRUD**
 
 - 用户能创建、编辑、删除、列出 MySQL 连接配置。
-- 单条配置含：name / host / port / username / password / database（可选默认） / ssh_hops[]（可选）。
+- 单条配置含：name / host / port / user / password / database（可选默认） / ssh（可选多跳）/ ssl / advanced。
 - 配置以 AES-GCM 加密落盘到 `~/Library/Application Support/tiny-sql/connections.enc`。
 - **验收标准**：
   - 新建一个 3 跳 + MySQL 配置，重启应用后配置仍在列表中。
@@ -91,6 +93,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-002 [P0] 连接测试**
 
 - 创建/编辑对话框上有"测试连接"按钮，点击立刻尝试建立完整链路（SSH 隧道 + MySQL 握手 + `SELECT 1`），成功显示绿色对勾，失败显示具体错误（i18n key 翻译后的中文）。
+- **当前实现缺口**：`connection_test` 不接收 passphrase，也不读取正式连接的会话缓存；无口令私钥可以测试，带口令私钥只能在 `connection_open` 的弹窗流程验证。v0.1 发布前需补齐或收窄本条“完整链路”承诺。
 - **验收标准**：
   - 配置正确 → 5s 内显示成功。
   - SSH 第 2 跳故意填错端口 → 30s 内显示"第 2 跳连接失败"。
@@ -105,8 +108,8 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **FR-010 [P0] 配置 N 跳 SSH 隧道**
 
-- UI 上"SSH 跳板"区块是动态数组，用户可以"+"添加 hop、"-"删除 hop、拖动调整顺序。
-- 单条 hop 含：host / port（默认 22） / username / auth_type（password / privateKey） / password? / private_key_path? / passphrase?（仅会话内存，不落盘）。
+- UI 上"SSH 跳板"区块是动态数组，用户可以"+"添加 hop、删除 hop，并用上移 / 下移按钮调整顺序。
+- 单条持久化 hop 含：host / port（默认 22） / username / auth_type（password / privateKey） / password? / private_key_path?；passphrase 不属于 hop 配置，由 `connection_open` 参数传入并按 connection_id 缓存在本会话内存。
 - v0.1 测试到 3 跳；理论上无硬上限（性能限制留待 v0.2 评估）。
 - **验收标准**：
   - 配置 1 跳能连。
@@ -136,7 +139,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-013 [P0] 隧道断点定位**
 
 - 任意一跳建立失败时，UI 必须高亮**断点的那一跳**的拓扑节点（红边 + tooltip 显示 i18n 错误消息）。
-- 错误归因机制：`SshTunnelError` 每个变体都带 `hop_index: usize` 字段，从后端原样透传到前端。
+- 错误归因机制：与具体跳相关的 `SshTunnelError` 变体带 `hop_index: usize`；`NoHops` / `LocalListenFailed` 这类无单跳语义的错误返回 `None`。Tauri command 读取 `hop_index()` 后单独 emit `ssh:hop-status`，命令错误只返回稳定 i18n key。
 - **验收标准**：
   - 第 2 跳 host 填错 → hop[1] 节点红，hop[0] 绿。
   - 第 3 跳认证失败 → hop[2] 节点红。
@@ -144,9 +147,10 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **FR-014 [P0] SSH keepalive 与隧道断开感知**
 
-- 隧道建立后，每 **60s** 向每一跳发 `russh::session::send_keepalive()`。
-- **连续 3 次失败（≈180s）才判定断开**——避免弱网抖动 / 企业 bastion ratelimit 误报。判定断开时 emit `ssh:hop-status` event，payload 含 `connection_id / hop_index / status: "lost" / reason`，前端拓扑节点变红。
+- 隧道建立后给每一跳 russh session 配置 `keepalive_interval=60s`、`keepalive_max=2`；russh 在第 3 次未响应时结束 session。每跳另有轻量监控 task 探测 session 是否已退出。
+- **连续 3 次未响应（≈180s）才判定断开**——避免弱网抖动 / 企业 bastion ratelimit 误报。监控 task 发现 session 已退出时 emit `ssh:hop-status` event，payload 含 `connection_id / hop_index / status: "lost" / reason`，前端拓扑节点变红。
 - `SshTunnelError` 新增三个 mid-session 变体（各有独立 i18n key）：`TunnelLost { hop_index, reason }`（keepalive 超时）/ `ChannelDropped { hop_index }`（对端主动关 channel，可能跳板重启）/ `AcceptLoopDied { hop_index }`（accept loop panic，代码 bug 需上报）。
+- **当前实现状态**：三个公共错误变体与 i18n key 已定义；运行路径目前只通过 `HopStatus::Lost` 上报 keepalive 断开，没有主动构造 `ChannelDropped` / `AcceptLoopDied`。后两类检测是 v0.1 P0 承诺缺口。
 - keepalive 间隔（60s）与失败阈值（3 次）v0.1 是常量，v0.2 做成可配置。
 - **验收标准**：
   - 隧道连接稳定时 → 不 emit lost 事件。
@@ -187,13 +191,13 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **FR-022 [P0] SQL 执行**
 
-- 顶部 SQL 编辑器基于 CodeMirror 6，支持 MySQL 语法高亮、行号、基础 database/table 补全、本地结构错误提示、MySQL 错误行标识和 `Cmd/Ctrl+Enter` 快捷执行。
+- 顶部 SQL 编辑器基于 CodeMirror 6，支持 MySQL 语法高亮、行号、基础 database/table 补全、本地结构错误提示和 `Cmd/Ctrl+Enter` 快捷执行。
 - 结果以表格展示，复用 FR-021 的虚拟滚动组件。
 - **客户端结果集硬上限 10w 行**：超出截断并显示提示"已截断到 10w 行，请加 LIMIT"。
 - **验收标准**：
   - `SELECT * FROM t_order LIMIT 100` → 显示 100 行。
   - `SELECT * FROM huge_table`（500w 行表，无 LIMIT）→ 显示 10w 行 + 截断提示。
-  - 语法错 → 显示 MySQL 服务端原文错误（带行号）。
+  - 语法错 → 当前显示稳定 i18n 文案「SQL 执行失败」；后端不会向前端透传原始 sqlx/MySQL 错误，因此服务端 `line N` 行标识尚未生效，需作为后续错误契约改造处理。
 
 **FR-023 [P0] SQL 取消**
 
@@ -218,7 +222,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-025 [P0] MySQL 5.7 + 8.0 兼容**
 
 - 必须同时支持 MySQL 5.7（默认 `mysql_native_password`）和 8.0（默认 `caching_sha2_password`）。
-- 用 `sqlx 0.8` features=["mysql", "runtime-tokio-rustls", "chrono", "bigdecimal"] 实现（chrono / bigdecimal 用于结果集日期与 Decimal 解码）。**v0.1 编译进 rustls 但不启用也不测试 MySQL TLS**，v0.2 启用时再补 webpki-roots/native-tls CA 链选型。
+- 用 `sqlx 0.8` features=["mysql", "runtime-tokio-rustls", "chrono", "bigdecimal"] 实现（chrono / bigdecimal 用于结果集日期与 Decimal 解码）。连接默认 `ssl-mode=disabled`，但 v0.1 已允许用户显式选择 Preferred / Required / Verify CA / Verify Identity，并传入 CA、客户端证书与私钥路径；真实 TLS MySQL 环境尚未验收，留到 dogfooding / v0.2 打磨。
 - **验收标准**（不用 Docker，连用户本地 MySQL）：
   - 用户本地 MySQL 8.0 经 `TINY_SQL_TEST_MYSQL_URL` integration test → 能连、能查（caching_sha2_password 握手通过）。
   - **MySQL 5.7 兼容验证推到 Week 5 dogfooding** 找用 5.7 的同事验证（CP-3），不进 CI 矩阵。
@@ -231,6 +235,13 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **验收标准**：
   - 同时打开 5 个 tab 跑不同 SQL → 复用同一 pool，不报"too many connections"。
   - 隧道挂了 → SQL 报错 + UI 显示连接已断开。**"重连"按钮暂未实现**，v0.2 补。
+
+**FR-027 [P1] MySQL SSL/TLS 连接配置**
+
+- 新建 / 编辑连接的 SSL 标签页支持 Disabled / Preferred / Required / Verify CA / Verify Identity。
+- CA、客户端证书、客户端私钥路径随连接加密保存；`connection_test` 与 `connection_open` 都把同一配置传给 `MySqlDriver::connect_with_settings`。
+- 默认 Disabled，避免部分内网 MySQL 声明 SSL 能力但握手配置不完整时连接失败。
+- **当前验收状态**：配置持久化、模式解析与 driver 接线已有代码/单测；真实 TLS 服务端、双向证书和错误提示仍待验收，因此不作为已完成的发布质量声明。
 
 #### 3.1.4 国际化与本地化
 
@@ -280,7 +291,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 - **FR-100** PostgreSQL driver（v0.2 用 rust-analyzer extract trait Driver，v0.1 是具体 struct）
 - **FR-102** 加密 passphrase 存储（用户主密码 derive key）
-- **FR-103** MySQL TLS 连接启用（webpki-roots / native-tls CA 链选型）
+- **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（基础模式/路径已接线）
 - **FR-104** Schema-aware 智能联想（点 user_id 列自动提示 JOIN 候选）
 - **FR-105** 实时隧道延迟动画（每跳的 RTT 显示在边上）
 - **FR-106** SQL 历史
@@ -364,13 +375,13 @@ v0.1 **不做**的事情，全部有明确理由：
 - **导出 CSV / Excel**：推 v0.2（FR-107）。
 - **多 tab 同时执行**：v0.1 单 tab，单 SQL。理由：复杂度 +30%，dogfooding 场景里作者本人 80% 时间只开一个查询。
 - **大表 LRU schema cache**：v0.1 假设小库（FR-020 注），每次开 schema 重查 `information_schema`。大库 cache 推 v0.2。
-- **MySQL TLS 启用**：v0.1 sqlx feature `rustls` 编译进去，但**不启用、不测试** MySQL TLS 连接。理由：CA 链选型（webpki-roots vs native-tls）和测试需要 1-2 天，v0.1 不值。
-- **断线自动重连**：v0.1 隧道断开后用户手动点"重连"（FR-026）。理由：自动重连策略（指数退避 / 最大次数 / 用户配置）是个独立设计，避免 v0.1 引入死锁。
+- **MySQL TLS 生产级验收与诊断 UX**：v0.1 已接线 SSL 模式和证书路径，但真实 TLS/双向证书环境、证书选择器和错误诊断尚未完成，推 v0.2 打磨。
+- **断线自动重连**：v0.1 隧道断开后需先点「断开」再重新打开连接（FR-026），没有独立「重连」按钮。理由：自动重连策略（指数退避 / 最大次数 / 用户配置）是个独立设计，避免 v0.1 引入死锁。
 
 ### 5.4 协同与团队范围之外
 
 - **多人协同编辑同一连接**：tiny-sql 是单机工具。
-- **加密分享连接配置**：v0.1 用户手动复制配置文件给同事（场景 B2）。v0.3 可能加加密导出/导入（ROADMAP.md）。
+- **加密分享连接配置**：v0.1 不支持；`connections.enc` 绑定同机 `master.key`，不得把“复制加密文件”描述成可用分享流程。v0.3 可能加带独立导出密码的加密导出/导入（ROADMAP.md）。
 - **审计日志**：v0.1 不记录"用户在 X 时间对 Y 库执行了 Z SQL"。理由：审计是企业场景，副业项目不背书。
 
 ### 5.5 监控与告警范围之外
@@ -413,7 +424,7 @@ v0.1 **不做**的事情，全部有明确理由：
 - [ ] FR-041 dogfooding：作者 + 2 同事 × 1 周 × 0 数据丢失
 - [ ] README 含"右键打开"GIF + 中文操作说明
 - [ ] CHANGELOG 0.1.0 已写
-- [ ] GitHub Actions 跑通 macOS arm64/x64、Windows x64、Linux x64 build
+- [x] GitHub Actions 跑通 macOS arm64/x64、Windows x64、Linux x64 build（已由 v0.0.3 Release 验证）
 - [ ] tag v0.1.0 推送后 GitHub Releases 自动出现 `.dmg` / `.exe` / `.AppImage`、updater artifact 和 `latest.json`
 
 ---

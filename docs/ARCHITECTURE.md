@@ -2,7 +2,7 @@
 title: tiny-sql 架构设计
 version: 0.1.0-draft-3
 status: draft
-last_updated: 2026-08-08
+last_updated: 2026-08-18
 ---
 
 # tiny-sql 架构设计
@@ -356,7 +356,7 @@ pub async fn open(
 2. **每跳认证**：`authenticate_hop()` 按 `auth_type` 分支调 password 或 publickey；publickey 自动协商 RSA 最佳 hash 算法。
 3. **session 全链路保活**：`SshTunnel._sessions: Vec<SharedSession>` 持有所有中间跳板的 session 引用，中间任何一跳 drop 都会导致下一跳的 channel stream 失活，所以必须整链保活。
 4. **本地 listener loop**：`tokio::spawn` 的循环里 accept → `tokio::spawn` 一个新 task → 在最后一跳 session 上开 direct-tcpip → `copy_bidirectional(socket, stream)`。
-5. **keepalive task**（**FR-014 新增**）：每跳的 session 建立后，再 spawn 一个 `tokio::interval(60s)` 循环调 `session.send_keepalive()`，**连续 3 次失败（≈180s）才判定断开** emit `ssh:hop-status` `{status: "lost"}` event（避免弱网/bastion ratelimit 误报）。task handle 存到 `SshTunnel.keepalive_tasks: Vec<JoinHandle<()>>`，drop 时一起 abort。channel 被对端主动关 → `ChannelDropped`；accept loop panic → `AcceptLoopDied`。
+5. **keepalive task**（**FR-014 新增**）：russh session 配置 `keepalive_interval=60s`、`keepalive_max=2`，由 russh 在第 3 次未响应时结束 session；每跳另起轻量监控 task 周期调用 `send_keepalive(false)` 探测 session 是否已经退出，失败后 emit `ssh:hop-status` `{status: "lost"}`。监控 task handle 存到 `SshTunnel.keepalive_tasks: Vec<JoinHandle<()>>`，drop 时一起 abort。v0.1 代码没有单独识别 channel drop / accept loop panic 并主动构造对应错误变体，这两类公共错误目前主要用于稳定错误契约与后续接线。
 
 **known_hosts 存储**：自有 store，路径 `~/Library/Application Support/tiny-sql/known_hosts.json`。结构为 `{ "host:port": "sha256:xxx", ... }`。**不读、不写** `~/.ssh/known_hosts`（NFR-012）。
 
@@ -436,7 +436,7 @@ pub enum DriverError {
 }
 ```
 
-**MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5）。`connect_with_settings` 用 `MySqlConnectOptions` 分字段传参（host/port/user/password/database + SSL + 超时），避免 URL 拼接带来的密码特殊字符编码问题；`connect_url` 接受 `mysql://` URL，仅用于 integration 测试等场景。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
+**MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5）。`connect_with_settings` 用 `MySqlConnectOptions` 分字段传参（host/port/user/password/database + SSL + 超时），避免 URL 拼接带来的密码特殊字符编码问题；SSL 默认禁用，但用户显式选择 Preferred / Required / Verify CA / Verify Identity 时会把模式和证书路径传给 sqlx。该链路已有单元测试与配置接线，真实 TLS MySQL 服务器验收仍待 dogfooding。`connect_url` 接受 `mysql://` URL，仅用于 integration 测试等场景。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
 
 **取消的独立 control pool**：除主 pool 外，MySqlDriver 额外持有一个 max=1 的 control pool（**与主 pool 用同一份连接参数**，走同一隧道同一本地端口，只是独立连接池）。`db_query` 创建 `CancellationToken` 并登记到 `AppState.queries`，`db_query_cancel` 只触发 token；执行中的 `query_with_options` 先取 MySQL `CONNECTION_ID()`，在 `tokio::select!` 的取消分支中用 control pool 发 `KILL QUERY <connection_id>`。理由：若从主 pool 借连接发 KILL，pool 满时会卡在 acquire——恰恰是最需要取消（库被打满）的时候发不出 KILL。control pool 与主 pool 状态解耦。
 
@@ -483,7 +483,7 @@ impl OpenConnection {
 | `connection_update` | `(connection)` | `()` | 同上 |
 | `connection_list` | - | `Vec<StoredConnection>` | 按最近使用倒序；Week 2 简化返回完整配置（含明文 password）供前端编辑回显，落盘已整体加密 |
 | `connection_delete` | `id` | `()` | 加密落盘后删 |
-| `connection_test` | `config` | `()` | 完整建立（同样走 TOFU 校验）→ SELECT 1 → 销毁 |
+| `connection_test` | `config` | `()` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；当前不接收 passphrase，带口令私钥测试是已知缺口 |
 | `connection_open` | `(id, passphrase?)` | `()` | 建立持久连接，注册到 AppState；幂等，成功刷新最近使用 |
 | `connection_close` | `id` | `()` | 关闭并清理 |
 | `db_create_database` | `(id, name, charset?, collation?)` | `()` | 创建 database |
@@ -605,10 +605,10 @@ v0.1 每跳的生命周期简化为 **4 态**（FR-015），与 `ssh:hop-status`
 | `HostKeyMismatch { hop_index, host, port }` | `error.ssh.host_key_mismatch` | 已信任 host 公钥变更 | 硬拒绝，警告对话框 |
 | `HostKeyRejected { hop_index }` | `error.ssh.host_key_rejected` | 用户 TOFU 弹窗拒绝 / 120s 超时 | hop[i] 红边 |
 | **`TunnelLost { hop_index, reason }`** | `error.ssh.tunnel_lost` | keepalive 连续 3 次失败（**FR-014**） | hop[i] 闪烁红边 + toast |
-| **`ChannelDropped { hop_index }`** | `error.ssh.channel_dropped` | 某跳 channel 被对端主动关闭（可能跳板重启） | hop[i] 红边 + toast"第 N 跳已断开，请重连" |
-| **`AcceptLoopDied { hop_index }`** | `error.ssh.accept_loop_died` | 某跳 accept loop panic（代码 bug） | hop[i] 红边 + toast"遇到内部错误，请上报" |
+| **`ChannelDropped { hop_index }`** | `error.ssh.channel_dropped` | 某跳 channel 被对端主动关闭（可能跳板重启） | 公共契约已定义；当前运行路径未主动构造 |
+| **`AcceptLoopDied { hop_index }`** | `error.ssh.accept_loop_died` | 某跳 accept loop panic（代码 bug） | 公共契约已定义；当前运行路径未主动构造 |
 
-> 三个 mid-session 变体（TunnelLost / ChannelDropped / AcceptLoopDied）覆盖运行中断开的三种 failure mode，重试策略独立：keepalive 超时可调阈值、channel drop 多半是跳板重启需人工重连、accept panic 是 bug 需上报。codex review 曾建议合并为统一连接状态机，v0.1 先用三个独立公共变体，若 dogfooding 发现 i18n key 膨胀，v0.2 重构（见 [ROADMAP v0.2 待定项](./ROADMAP.md#v02-待定项codex-review-surface实施期决定)）。
+> 三个 mid-session 变体（TunnelLost / ChannelDropped / AcceptLoopDied）用于稳定覆盖三类 failure mode 的错误契约；当前实际运行上报只有 keepalive `HopStatus::Lost`，后两类尚未接入检测。codex review 曾建议合并为统一连接状态机，v0.1 先保留三个公共变体；发布前需补运行接线或收窄需求，后续若 i18n key 膨胀再在 v0.2 重构（见 [ROADMAP v0.2 待定项](./ROADMAP.md#v02-待定项codex-review-surface实施期决定)）。
 
 **稳定 i18n key 契约**（NFR-041）：每个变体的 i18n key 是公开 API 的一部分。新增变体可以加新 key，但已有 key 不能改名。前端翻译表向后兼容。
 

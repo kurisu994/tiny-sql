@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：v0.1 开发中，已进入 Week 5 dogfooding**。Week 1-4 的静态验证、本地 `.dmg` 打包、SQL 执行/取消、拓扑图和多跳 SSH 主链路已经落地；当前重点是真实 3 跳 SSH + MySQL 试用、MySQL 5.7 兼容验证、README/GIF 与发布准备。完整范围与进度见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：当前预览版为 v0.0.3，v0.1 仍处于 Week 5 dogfooding，原定 2026-08 月初的正式发布已延期**。Week 1-4 的实现与静态验证已经落地；v0.0.3 也已通过 GitHub Actions 产出 macOS / Windows / Linux 安装包、签名更新包和 `latest.json`。当前发布门槛是真实 3 跳 SSH + MySQL GUI 试用、MySQL 5.7、作者与 2 位同事各使用 1 周、README GIF，以及最终 `v0.1.0` RC / 正式版验收。完整范围与进度见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -22,11 +22,12 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 ## v0.1 当前能力
 
 - N 跳 SSH 配置与连接：密码 / 私钥认证、passphrase 会话缓存、TOFU host key 校验、指纹变更硬拒绝。
+- MySQL SSL/TLS 配置：默认禁用，可显式选择 Preferred / Required / Verify CA / Verify Identity，并传入 CA、客户端证书与私钥路径；真实 TLS 服务器验收尚未完成。
 - MySQL 数据浏览：列出 database / table，点表浏览前 1000 行。（`db_list_columns` 后端已实现，前端列清单 UI 留 v0.2）
 - SQL 执行：CodeMirror SQL 编辑器支持语法高亮、行号、基础 schema/table 补全和快捷执行；后端拒绝空 SQL / 多语句，`SELECT` / `WITH` 顶层安全时自动追加 `LIMIT`，结果上限 10 万行。
 - SQL 取消：执行时记录 MySQL `CONNECTION_ID()`，取消时通过独立 control pool 发 `KILL QUERY`。
 - 拓扑状态：本机 → N 跳 → MySQL 的只读拓扑图，支持 `pending` / `connected` / `failed` / `lost`。
-- 跨平台打包：GitHub Release workflow 监听 `v0.1.*` tag，产出 macOS Apple Silicon + Intel `.dmg`、Windows x64 `.exe`、Linux x64 `.AppImage`，正式版同时发布 Tauri 自动更新清单。
+- 跨平台打包：GitHub Release workflow 监听 `v*` tag，产出 macOS Apple Silicon + Intel `.dmg`、Windows x64 `.exe`、Linux x64 `.AppImage`，正式版同时发布 Tauri 自动更新清单。
 - 自动更新：桌面端启动后每日检查一次正式版更新，macOS 应用菜单可手动检查；RC / beta / alpha 不作为自动更新源。
 
 ## 技术栈
@@ -39,7 +40,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 | SSH 隧道 | russh 0.54（N 跳，纯 Rust 异步） |
 | 数据库 | sqlx 0.8（MySQL；v0.2 加 PostgreSQL） |
 
-> v0.2 之后再考虑 PostgreSQL、MySQL TLS、SQL 历史、导出与 schema-aware 智能联想。详见 [ROADMAP](./docs/ROADMAP.md)。
+> v0.2 之后再考虑 PostgreSQL、MySQL TLS 真实环境验收与证书 UX 打磨、SQL 历史、导出与 schema-aware 智能联想。详见 [ROADMAP](./docs/ROADMAP.md)。
 
 ## 开发环境准备
 
@@ -81,7 +82,7 @@ just build-web    # 仅构建前端（静态导出到 out/）
 | `just lint-web` | 仅前端类型检查（tsc） |
 | `just fmt` | 格式化 Rust 代码 |
 | `just fmt-check` | 仅检查格式不修改（CI 用） |
-| `just test` | Rust 单元测试（workspace） |
+| `just test` | Rust workspace + 前端 Vitest 单元测试 |
 | `just test-integration` | integration 测试（连本地 MySQL，需 `.env` 设 `TINY_SQL_TEST_MYSQL_URL`，见 `.env.example`） |
 | `just version <ver>` | 同步更新各配置版本号（如 `just version 0.2.0`） |
 | `just release <tag>` | 🚀 一键发布：更新版本号 + Commit + 打 Tag + 推送触发云端构建（如 `just release v0.1.0`） |
@@ -120,7 +121,7 @@ justfile                    # 项目命令入口
 
 ## 安装
 
-> v0.1 尚未正式发布。Week 5 dogfooding 使用本地或 GitHub Release 产出的桌面安装包；正式发布后前往 [Releases](https://github.com/kurisu994/tiny-sql/releases) 下载。
+> v0.1 尚未正式发布。当前可从 [Releases](https://github.com/kurisu994/tiny-sql/releases) 下载 v0.0.3 预览版；Week 5 dogfooding 继续使用本地或 GitHub Release 产出的桌面安装包。
 
 v0.1 先提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`；Windows / Linux 产物先用于 dogfooding 与兼容验证。
 

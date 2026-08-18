@@ -6,11 +6,12 @@
 
 | 版本 | 状态 | 说明 |
 |---|---|---|
-| v0.1.0 | 🚧 开发中（Week 5 dogfooding 已启动） | MySQL + 3 跳 SSH + 拓扑图 + macOS / Windows / Linux 打包 + 正式版自动更新，预期 2026-08 月初发布 |
-| v0.2 | 规划 | PG driver + passphrase 加密 + TLS + Schema-aware 联想 |
+| v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
+| v0.1.0 | 🚧 开发中（Week 5 dogfooding） | 主体实现完成；原定 2026-08 月初发布已延期，待真实 3 跳 / MySQL 5.7 / 同事试用 / GIF / RC |
+| v0.2 | 规划 | PG driver + passphrase 加密 + TLS 验收/UX + Schema-aware 联想 |
 | v0.3+ | 规划 | 平台安装体验打磨 + crate 独立 publish + 多集群 diff |
 
-CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级写法：只概括连接管理、多跳 SSH、数据浏览、SQL 执行、配置加密、自动更新、体验优化、安全稳定性、发布准备和待验证事项，不再按 crate、workflow、API、字段名或具体产物路径展开内部实现细节。最新 `[Unreleased]` 已覆盖 CodeMirror SQL 编辑器、schema 树图标与数据库展开 / 收起修复。
+CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级写法。CodeMirror、schema 树图标与数据库展开 / 收起已发布在 `0.0.3`；当前 `[Unreleased]` 记录 2026-07-13 的元数据 SQL、JOIN/LIMIT、并发查询和测试连接 host key 修复。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -19,7 +20,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | Week 1 | vertical slice（workspace + 单跳 SSH + sqlx SELECT 1 + hello 页） | ✅ 静态验证完成，CP-1b 待用户 GUI smoke |
 | Week 2 | 测试基础设施 + `MySqlDriver` struct + 加密 store + 连接管理 UI | ✅ 静态验证完成（playwright E2E 推迟；CP-2 工时未记录） |
 | Week 3 | 多跳 SSH + keepalive + 错误模型三变体 + TOFU + 表浏览 | ✅ 静态验证完成（CP-1b 待 GUI smoke：3 跳/TOFU/180s lost） |
-| Week 4 | SQL 执行（子查询包装 + KILL QUERY）+ 拓扑图 + .dmg | ✅ 静态验证完成（真实 SSH/MySQL dogfooding 待 Week 5） |
+| Week 4 | SQL 执行（顶层安全追加 LIMIT + KILL QUERY）+ 拓扑图 + 全平台 Release | ✅ 代码与云端流水线完成（真实 SSH/MySQL dogfooding 待 Week 5） |
 | Week 5 | dogfooding + 修 bug + README/GIF + tag v0.1.0 | 🚧 已启动（README/日志模板/自动化验证/release checklist 完成；真实环境待测） |
 | Week 6 / 7 | 缓冲 / launch（V2EX + 掘金） | ⬜ |
 
@@ -63,9 +64,14 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | `3228efd` | feat(sql): 接入 CodeMirror 编辑器 |
 | `02cf40a` | fix(schema): 支持收起数据库节点 |
 | `15b0613` | style(schema): 移除数据库展开箭头 |
-| `582efe2` | fix(schema): 调整数据库树打开交互（HEAD） |
+| `582efe2` | fix(schema): 调整数据库树打开交互 |
+| `f9e5fb6` | release: v0.0.3（全平台 Release 成功） |
+| `b5a2a3b` / `9c5f9fd` | fix: 修复 SQL 查询链路与测试连接 host key 校验 |
+| `f12fa45` | docs: 记录 P0 修复到 CHANGELOG 与活跃上下文 |
+| `0b13a76` | chore: 更新 Cargo.lock 依赖 |
+| `7f566ae` | docs: 同步文档与当前代码实现（HEAD / origin/main） |
 
-> 注：截至本次文档同步前，`origin/main` 在 `9452a70`，本地 `main` 领先 4 个 schema / SQL 交互提交（`3228efd`、`02cf40a`、`15b0613`、`582efe2`）。后续推送或发 RC 前仍需重新 `git fetch` / `git status -sb` 复核远端状态。
+> 注：2026-08-18 已执行 `git fetch origin`；本地 `main` 与 `origin/main` 均为 `7f566ae`，没有领先/落后提交。发 RC 前仍需重新刷新一次远端与 tag 状态。
 
 ## 重大决策与架构变更记录
 
@@ -92,8 +98,9 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 - **2026-06-30 release 与 CI 触发分流**：`ci.yml` 在 `push.main` 下对 `CHANGELOG.md`、`Cargo.lock`、`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 设置 `paths-ignore`，让 `just release` 产生的 release-only 版本提交不重复触发 CI；PR 仍完整跑 CI。`just version` 定向刷新 `Cargo.lock` 中 `tiny-sql` 本地 package 版本，`just release` 暂存范围补入 `Cargo.lock`，tag push 继续触发 `release.yml` 全平台打包。
 - **2026-06-30 CHANGELOG 写法收敛**：按用户要求把 `CHANGELOG.md` 从模块/实现细节清单改为功能大项概览；后续发布说明应继续面向使用者，只写主要功能、体验变化、安全稳定性、发布准备和待验证事项。
 - **2026-07-01 连接表单标签页与 SSL/高级配置契约**：新建 / 编辑连接弹窗拆成常规、SSH、SSL、高级四个标签页，新增本地 radix `Tabs` 组件；`StoredConnection` 增加 `ssl` / `advanced` 并用 `serde(default)` 兼容旧连接文件；`db-driver` 新增 `MySqlConnectSettings`，已接线 SSL mode、CA / client cert / client key path 和连接超时。读取超时、写入超时、保持连接间隔、压缩、自动连接先随连接保存，后续再按 driver/SSH 行为逐项实现。
-- **2026-07-03 SQL 编辑器与 schema 树交互收口**：SQL 输入从裸 textarea 升级到 CodeMirror 6，提供 MySQL 高亮、行号、基础 database/table 补全、本地结构错误 gutter、MySQL 错误行标识和 `Cmd/Ctrl+Enter`；schema 树改成数据库双击打开 / 切换、单击折叠已打开库，并通过独立 `expandedDb` 保留当前表和结果。文档同步时把 README、需求、架构、计划、路线图和 memory-bank 中的旧 textarea、react-flow、左侧工具区更新入口、依赖矩阵等描述改为当前实现。
+- **2026-07-03 SQL 编辑器与 schema 树交互收口**：SQL 输入从裸 textarea 升级到 CodeMirror 6，提供 MySQL 高亮、行号、基础 database/table 补全、本地结构错误 gutter 和 `Cmd/Ctrl+Enter`；前端虽有 MySQL `line N` 解析逻辑，但后端只返回稳定 i18n key，服务端错误行标识尚未真正接通。schema 树改成数据库双击打开 / 切换、单击折叠已打开库，并通过独立 `expandedDb` 保留当前表和结果。
 - **2026-08-08 文档与代码全面对齐**：全量核对 README / REQUIREMENTS / ARCHITECTURE / PLAN / ROADMAP / memory-bank 与当前代码的偏差并同步。要点：(1) SQL 执行描述从「子查询包装」统一改为「顶层安全追加 LIMIT + 客户端截断兜底」（derived table 包装在多表 JOIN 重名列触发 1060，已弃用）；(2) 写操作二次确认从「黑名单正则」改为「首 token 白名单分类」（SELECT/WITH 读、SHOW/EXPLAIN/DESC/DESCRIBE 元数据免确认、其余一律需 allow_write），前后端同构；(3) 状态机收敛为 4 态（pending/connected/failed/lost），ARCHITECTURE 与代码及 FR-015 对齐，移除不存在的 connecting/reconnecting/latency_ms；(4) passphrase 流程改为 `connection_open(id, passphrase?)` 参数直传 + per-connection 会话缓存，无 `ssh_set_passphrase` command；(5) master key 从「内置固定 key」改为「首次随机生成落盘 master.key（0600）」；(6) keepalive 机制改为 russh 内置配置 + 每跳监控 task，非自建 interval 循环；(7) control pool 与主 pool 同一连接参数（非独立本地端口）；(8) 加密文件结构改为扁平 `Vec<StoredConnection>`（无 version 包装 / mysql 嵌套），schema 补充 ssl / advanced；(9) 明确标注 v0.1 已知 UI 缺口：列清单展示、列宽拖拽、重连按钮、语言下拉框均未实现，已登记到 ROADMAP v0.2（FR-110~112）与 ARCHITECTURE §10.3；(10) playwright E2E 推迟状态补齐到 PLAN / ARCHITECTURE，integration 命令修正为 `cargo test -p db-driver -- --include-ignored`。
+- **2026-08-18 进度与事实基线再对齐**：刷新 `origin` 并核对 GitHub Release / Actions。确认 `main == origin/main == 7f566ae`、当前应用版本为 `0.0.3`、最新 main CI 成功、v0.0.3 全平台 Release 与 `latest.json` 已成功；同时发现 MySQL TLS 已接线但未真实验收、passphrase 测试连接未覆盖、ChannelDropped / AcceptLoopDied 尚无运行时构造路径，并据此修正文档口径。
 
 ## 已解决的阻碍
 
@@ -105,21 +112,24 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | CP-1（Tauri+workspace 摩擦，Week 1 最大风险） | — | 已验证通过，`cargo check --workspace` 正常引用 crate |
 | Turbopack 在沙箱内 build 失败 | Next/Turbopack 处理 CSS 时需创建子进程并绑定本地端口，沙箱返回 `Operation not permitted` | `just check` / `pnpm tauri build` 在沙箱外重跑通过；代码无改动 workaround |
 | 普通浏览器预览报 Tauri IPC 错 | `@tauri-apps/api` 在无 Tauri runtime 时调用 `invoke/listen` | 增加 `isTauriRuntime()` guard：Web 预览为空列表、跳过事件监听；Tauri/Vitest 不受影响 |
-| 正式版 `latest.json` 生成失败 | Linux updater artifact 实际是 `.AppImage` + `.AppImage.sig`，workflow 误按 `.AppImage.tar.gz` 查找 | `release.yml` 改为匹配 `*x86_64*.AppImage` / `*amd64*.AppImage` / `*x64*.AppImage` / `*.AppImage`，本地用失败文件名集合模拟 manifest 生成通过 |
-| 文档与最新实现漂移 | README/docs/memory-bank 仍写 textarea、react-flow、左侧工具区更新入口和旧依赖矩阵 | 已按 CodeMirror、纯 CSS 拓扑、macOS 应用菜单更新入口、当前 package 依赖与 v0.0.2 版本号同步 |
+| 正式版 `latest.json` 生成失败 | Linux updater artifact 实际是 `.AppImage` + `.AppImage.sig`，workflow 误按 `.AppImage.tar.gz` 查找 | 修正 artifact 匹配；v0.0.3 Release 已真实生成全平台 `latest.json` |
+| 文档与最新实现漂移 | README/docs/memory-bank 曾保留旧编辑器、拓扑、版本、发布风险与 TLS 口径 | 2026-08-18 再次按代码、Git 和 GitHub Release/Actions 状态同步 |
 
 ## 待验证 / 风险跟踪
 
 - **CP-4 / GUI dogfooding**：待真实环境 `pnpm tauri dev` 或安装 `.dmg`。Week 4 后需验收：配 3 跳 SSH 连真实 MySQL、TOFU 首次弹窗/已信任静默/指纹变更硬拒绝、passphrase 首次弹窗本会话静默、左侧树点表看前 1000 行、SQL 编辑器 SELECT/JOIN/聚合、`SELECT SLEEP(60)` 取消后 `SHOW PROCESSLIST` 消失、故意 kill 中间跳 sshd 验证 180s 内 hop 变 lost。
 - **CP-2** Week 2/3 累计工时检查（PLAN §3.3）：未正式记录工时，下次同步补。
 - **CP-3** MySQL 5.7 `caching_sha2`/`native_password` 兼容：推到 Week 5 dogfooding（不进 CI）。
-- **RC 产物验证**：尚未创建 `v0.1.0-rc1` / `v0.1.0` tag；release workflow 的 macOS `.dmg`、Windows `.exe`、Linux `.AppImage` 仍需通过真实 GitHub Actions run 验证。
+- **RC 产物验证**：跨平台 Release workflow 已由 v0.0.3 真实验证；`v0.1.0-rc1` / `v0.1.0` tag 仍未创建，RC 下载后的真实安装与业务链路仍待验证。
 - **发布脚本暂存范围**：`just version` 已会同步 `Cargo.lock` 本地 package 版本，`just release` 已收窄到版本/CHANGELOG/Cargo.lock 相关文件；正式发版前仍必须确认工作区没有无关改动。
 - **自动更新 GitHub Secrets**：release workflow 依赖 `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。本地按 Redis 项目方式把真实私钥写入 ignored `.env`，`just build` 会加载；直接 `pnpm tauri build` 不经 justfile 注入 `.env`，仍需手动 export，且无密码私钥要显式保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`。
 - **连接 tab 表单 GUI 验证**：常规 / SSH / SSL / 高级标签页、SSL 证书路径输入、高级设置 checkbox + 数字输入以及保存/测试连接手感仍待真实 Tauri GUI 点验；本轮自动浏览器工具没有可用实例，仅完成静态与构建验证。
 - **R-001** Tauri+workspace 摩擦：已规避（CP-1 通过）。
 - **R-002** caching_sha2 握手：Week 5 验证。
 - **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task（PLAN §4.3 风险）。
-- **R-updater-release** 自动更新端到端仍需真实 Release 验证：本地已生成 macOS `.app.tar.gz.sig`，Linux manifest 已修正为 `.AppImage` + `.sig`；GitHub Actions 全平台 artifact、正式版 `latest.json`、旧版本发现新正式版并安装重启仍待 RC/正式版流程验证。
+- **R-updater-release** 云端全平台 artifact 与正式版 `latest.json` 已由 v0.0.3 验证；剩余风险是从旧正式版发现新版本、下载、安装并重启的应用内端到端流程。
+- **R-ssh-runtime-errors** `ChannelDropped` / `AcceptLoopDied` 只有公共错误定义与 key 测试，当前运行路径只上报 keepalive `lost`；需在 v0.1 前补代码或收窄 P0 承诺。
+- **R-passphrase-test** `connection_test` 不接收 passphrase，带口令私钥只能在正式打开连接时验证完整链路。
+- **R-query-error-contract** 前端 server-line gutter 需要 MySQL 行号，但后端只返回稳定 i18n key；需用结构化安全字段补行号，不能直接泄露原始 Rust/sqlx 错误。
 
 相关：[[activeContext]] · [[projectbrief]]

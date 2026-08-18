@@ -69,7 +69,7 @@ tiny-sql/
 **Rust 后端**
 
 - 错误用 `thiserror`，每个变体绑定稳定 i18n key（`#[error("error.ssh.connect_failed")]`）；i18n key 是**公开 API 契约**，只能加不能改名。
-- `SshTunnelError` 每个变体带 `hop_index: usize`，错误能定位到具体跳。
+- 与具体跳相关的 `SshTunnelError` 变体带 `hop_index: usize`；`NoHops` / `LocalListenFailed` 返回 `None`。Tauri command 用 `hop_index()` emit 拓扑状态，错误返回值只暴露稳定 i18n key。
 - 公共类型/函数加中文 doc comment。
 - 隧道 `Drop` 里 abort 所有 keepalive task 和 accept task，防 leak。
 
@@ -84,6 +84,7 @@ tiny-sql/
 - LIMIT 防护用**顶层安全追加 LIMIT**（顶层无 LIMIT/FOR/LOCK/INTO/PROCEDURE 时末尾追加 `LIMIT n+1`），**不做 derived table 包装**（JOIN 重名列触发 1060）；顶层已含这些子句时客户端截断兜底，截断且无服务端 LIMIT 时主动 KILL QUERY 止损。
 - 写操作二次确认为**首 token 白名单分类**（SELECT/WITH 读、SHOW/EXPLAIN/DESC/DESCRIBE 元数据免确认、其余一律需 allow_write），前后端同一套规则，不用黑名单正则。
 - 取消用**独立 control pool**（max=1，同一连接参数独立连接池，非独立本地端口）发 `KILL QUERY`，不从主 pool 借连接（pool 满时借不到）。
+- MySQL SSL 默认 `Disabled`；用户显式选择 Preferred / Required / Verify CA / Verify Identity 时，`src-tauri` 把模式与 CA / 客户端证书 / 私钥路径传给 `db-driver::MySqlConnectSettings`。不要把“真实 TLS 尚未验收”写成“代码完全未启用”。
 
 ## 负向约束（❌ 不要做）
 

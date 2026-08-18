@@ -2,7 +2,7 @@
 title: tiny-sql 路线图
 version: 0.1.0-draft-2
 status: draft
-last_updated: 2026-06-26
+last_updated: 2026-08-18
 ---
 
 # tiny-sql 路线图
@@ -15,7 +15,7 @@ last_updated: 2026-06-26
 v0.1  (5-6 周) ── MySQL + 3 跳 SSH + 拓扑图 + macOS/Windows/Linux 打包 + 自动更新
    │
    ▼
-v0.2  (首发后 2-3 个月) ── PG driver + passphrase 加密 + TLS + Schema-aware 智能联想
+v0.2  (首发后 2-3 个月) ── PG driver + passphrase 加密 + TLS 验收/UX + Schema-aware 智能联想
    │
    ▼
 v0.3+ (半年+) ── 平台安装体验打磨 + ssh-multihop crate 独立 publish + 多集群 diff + 加密分享
@@ -32,13 +32,13 @@ v0.3+ (半年+) ── 平台安装体验打磨 + ssh-multihop crate 独立 publ
 核心卖点：
 
 - 多级 SSH 跳板可视化拓扑（FR-015）
-- 每跳错误归因（FR-013，含 TunnelLost/ChannelDropped/AcceptLoopDied 三个 mid-session 变体）
+- 每跳错误归因（FR-013；TunnelLost/ChannelDropped/AcceptLoopDied 公共错误已定义，后两类运行检测仍待补）
 - 180s 内感知隧道断开（FR-014，keepalive 60s + 连续 3 次失败阈值）
 - MySQL 5.7 + 8.0 浏览 / SQL 执行 / 取消 / 只读保护
 - macOS / Windows / Linux x64 打包 / zh-CN only / 无 Apple Developer 代码签名
 - 正式版自动更新（Tauri updater 签名包；RC 不作为更新源）
 
-发布时间预期：2026-08 月初。
+原发布时间预期为 2026-08 月初；截至 2026-08-18，v0.0.3 预览版已完成全平台 Release，v0.1 仍因真实 dogfooding、MySQL 5.7、同事试用与 GIF 门槛未完成而延期，暂不重新承诺日期。
 
 ---
 
@@ -52,7 +52,7 @@ v0.3+ (半年+) ── 平台安装体验打磨 + ssh-multihop crate 独立 publ
 |---|---|---|---|
 | **FR-100** | PostgreSQL driver | P0 | 1 周 |
 | **FR-102** | 加密 passphrase 存储（用户主密码 derive key） | P0 | 1 周 |
-| **FR-103** | MySQL TLS 连接启用（webpki-roots / native-tls 选型） | P1 | 0.5 周 |
+| **FR-103** | MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（模式/证书路径已接线） | P1 | 0.5 周 |
 | **FR-104** | Schema-aware 智能联想（点 user_id 列自动 JOIN 候选） | P1 | 1.5 周 |
 | **FR-105** | 实时隧道延迟动画（每跳 RTT 显示在边上） | P1 | 0.5 周 |
 | **FR-110** | 隧道断开后的「重连」按钮（v0.1 需先断开再重新打开） | P1 | 0.3 周 |

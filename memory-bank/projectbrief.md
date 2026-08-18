@@ -8,7 +8,7 @@
 
 ## 核心愿景
 
-主流 SQL 客户端（DBeaver / TablePlus / Navicat / DataGrip / Sequel Ace）把 SSH 隧道当作单跳、黑盒的「一根管子」，出错无法定位是第几跳挂了。tiny-sql 把**每一跳都做成 UI 上的一等公民节点**：独立连接状态、独立错误归因、独立延迟读数。连接失败时拓扑图高亮断点那一跳，隧道任意一跳挂掉 180s 内推送 lost 状态到 UI。
+主流 SQL 客户端（DBeaver / TablePlus / Navicat / DataGrip / Sequel Ace）把 SSH 隧道当作单跳、黑盒的「一根管子」，出错无法定位是第几跳挂了。tiny-sql 把**每一跳都做成 UI 上的一等公民节点**：独立连接状态与错误归因。连接失败时拓扑图高亮断点那一跳，隧道任意一跳挂掉 180s 内推送 lost 状态到 UI；每跳实时延迟读数留到 v0.2。
 
 这是把 SSH 从「网络层」提升到「数据模型层」的理念差距，而非单纯 feature 差距。
 
@@ -24,7 +24,7 @@
 
 - **范围**：MySQL only（5.7 + 8.0）+ 3 跳 SSH + 拓扑图 + macOS arm64/x64、Windows x64、Linux x64 打包 + zh-CN only + 正式版自动更新；v0.1 无 Apple Developer 代码签名 / notarization。
 - **预算**：5-6 周 × 12-13 小时/周 = 60-75 小时。
-- **交付物**：GitHub Releases 上的 `.dmg` / `.exe` / `.AppImage`、Tauri updater artifact / `.sig` 与正式版 `latest.json`；tag `v0.1.0` 触发 CI 自动构建上传。
+- **交付物**：GitHub Releases 上的 `.dmg` / `.exe` / `.AppImage`、Tauri updater artifact / `.sig` 与正式版 `latest.json`；`v*` tag 触发 Release workflow 自动构建上传。当前 v0.0.3 已验证全平台产物链路，目标正式版仍是 v0.1.0。
 - **发布门槛**：作者 + 2 同事 dogfooding ≥ 1 周，0 数据丢失、0 不可恢复 crash。
 
 ## 关键产品决策

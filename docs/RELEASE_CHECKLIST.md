@@ -4,6 +4,8 @@
 
 ## 当前发布范围
 
+> **已验证基线（2026-08-18 核对）**：`v0.0.3` Release workflow 已成功完成，GitHub Release 中存在 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 和正式版 `latest.json`。这证明跨平台打包与 manifest 生成链路可用；`v0.1.0-rc1`、真实安装试用以及“旧版本发现并安装新版本后重启”仍需按本清单验收。
+
 - 平台：macOS Apple Silicon + Intel、Windows x64、Linux x64。
 - 数据库：MySQL 5.7 / 8.0 / 8.4。
 - 连接：0 跳 / 1 跳 / 3 跳 SSH；v0.1 不支持 GSSAPI / Kerberos。
