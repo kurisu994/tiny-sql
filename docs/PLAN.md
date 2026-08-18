@@ -1,6 +1,6 @@
 ---
 title: tiny-sql 开发计划
-version: 0.1.0-draft-2
+version: 0.2.0-draft-1
 status: draft
 last_updated: 2026-08-18
 ---
@@ -10,8 +10,10 @@ last_updated: 2026-08-18
 > 配套文档：[REQUIREMENTS.md](./REQUIREMENTS.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 >
 > **draft-2 变更**：本版按 `/plan-eng-review` 的 9 个 binding 决策重排。最大变化是 **Week 1 改为 vertical slice**（只证明端到端最小链路 work），keepalive/错误模型细分/测试基础设施/拓扑图全部下放到 Week 2-4。决策全表见 §12。
+>
+> **v0.2 draft-1 变更**：保留 v0.1 计划与历史检查点，在 §13 新增 v0.2 的 8 周可执行计划、依赖顺序、检查点、测试矩阵与降级规则。
 
-> **当前进度快照（2026-08-18）**：当前预览版为 v0.0.3，Week 1-4 主体实现已落地，最新 `main` CI 通过，v0.0.3 全平台 Release 与 `latest.json` 已成功生成。Week 5 尚未通过 CP-3/CP-4/CP-6：真实 3 跳 GUI dogfooding、MySQL 5.7、作者 + 2 同事各试用 1 周、GIF、`v0.1.0-rc1` / `v0.1.0` 仍未完成；带 passphrase 私钥的测试连接和 ChannelDropped / AcceptLoopDied 运行时检测也需补齐或收窄承诺。因此原定 2026-08 月初发布已延期。
+> **当前进度快照（2026-08-18）**：当前预览版仍为 v0.0.3；用户提交 `4f54f02` 已确认 CP-3/CP-4/CP-5/CP-6、作者与同事试用及 launch 活动完成。经 `git fetch --tags --prune origin` 复核，仓库与远端仍没有 `v0.1.0-rc1` / `v0.1.0` tag，应用版本也仍为 `0.0.3`，仓库内没有 README GIF；带 passphrase 私钥的测试连接和 ChannelDropped / AcceptLoopDied 运行时检测也仍需补齐或收窄承诺。因此 v0.1 尚未正式发布，v0.2 只能在 §13.1 的启动门槛全部满足后开工。
 
 ## 1. 时间线总览
 
@@ -74,8 +76,8 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 ### 2.2 验收点（vertical slice 闭环）
 
 - [x] **CP-1**：`just build` 在 workspace 布局下成功
-- [ ] `cargo tauri dev` 启窗口，点按钮经单跳 SSH 连上 MySQL，`SELECT 1` 返回
-- [ ] 前端 hello 页显示"连接成功"
+- [x] `cargo tauri dev` 启窗口，点按钮经单跳 SSH 连上 MySQL，`SELECT 1` 返回
+- [x] 前端 hello 页显示"连接成功"
 - [x] GitHub Actions check job 跑通（最新 main CI 于 2026-08-08 成功）
 
 ### 2.3 本周不做（明确推后）
@@ -264,15 +266,15 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 - [ ] 只读保护：UPDATE/DELETE 命中弹确认，SHOW/EXPLAIN/DESC 直接执行
 - [ ] 拓扑图按"本地 → hop[..] → MySQL"画对，节点状态实时变化
 - [ ] tag `v0.1.0-rc1` 后 GitHub Releases 出现 macOS / Windows / Linux 桌面安装包
-- [ ] **CP-4 dogfooding 准入**
+- [x] **CP-4 dogfooding 准入**
 
 ### 5.3 Week 4 末检查点（CP-4，dogfooding 准入）
 
-- [ ] 应用稳定运行 ≥ 30 分钟不 crash
-- [ ] 连接失败有明确错误消息（不是 panic / 纯英文 stack trace）
-- [ ] 本地 build .dmg 能在另一台 Mac 跑起来
-- [ ] 已自测 ≥ 10 个不同 SQL（含 SELECT/JOIN/聚合）
-- [ ] 隧道断开能感知（FR-014 实测，180s 内）
+- [x] 应用稳定运行 ≥ 30 分钟不 crash
+- [x] 连接失败有明确错误消息（不是 panic / 纯英文 stack trace）
+- [x] 本地 build .dmg 能在另一台 Mac 跑起来
+- [x] 已自测 ≥ 10 个不同 SQL（含 SELECT/JOIN/聚合）
+- [x] 隧道断开能感知（FR-014 实测，180s 内）
 
 **若不通过**：Week 5 推迟 1 周，Week 6 缓冲挪到 Week 5。
 
@@ -305,8 +307,8 @@ Week 7    -    launch 活动（V2EX / 掘金 / GIF），不计 dev 工量
 
 ### 6.2 验收点
 
-- [ ] 作者 + 2 同事用 ≥ 1 周，0 数据丢失，0 不可恢复 crash（FR-041）
-- [ ] **CP-3**：MySQL 5.7 在同事环境验证通过
+- [x] 作者 + 2 同事用 ≥ 1 周，0 数据丢失，0 不可恢复 crash（FR-041）
+- [x] **CP-3**：MySQL 5.7 在同事环境验证通过
 - [ ] README 含右键打开 GIF + 3 跳隧道 GIF
 - [ ] tag v0.1.0 发布成功，下载的 macOS / Windows / Linux 安装包能跑
 
@@ -426,6 +428,163 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 
 ---
 
+## 13. v0.2 开发计划
+
+**周期与预算**：8 周，约 96-100h（当前拆分约 98h）。
+
+**定位**：v0.2 不是在 v0.1 上平铺功能，而是先把单一 MySQL 实现演进成稳定的多 driver 架构，再交付 PostgreSQL、凭据安全、TLS 验收、schema intelligence、查询工作台和 SSH 可观测性增强。完整范围以 [ROADMAP v0.2](./ROADMAP.md#v02--首发后-2-3-个月) 为准。
+
+### 13.1 Phase 0：补发 v0.1 与启动准入
+
+Phase 0 不计入 v0.2 的 8 周开发预算。现有实现与 dogfooding 验收不重做；先补发一个 v0.1 正式版，完成后即可进入 v0.2 Week 1：
+
+- [x] §2.2 vertical slice、CP-3/CP-4/CP-5/CP-6、作者与同事试用已验收。
+- [ ] `connection_test` passphrase、ChannelDropped / AcceptLoopDied 和查询错误契约等 v0.1 承诺缺口已补齐或正式降级。
+- [ ] README 真实 GIF、`CHANGELOG.md` v0.1.0 段和版本号已收口。
+- [ ] 推送 `v0.1.0` tag；全平台安装包、签名更新包、`latest.json` 与应用内更新链路完成真实验收。
+- [ ] PostgreSQL 最低支持版本与测试版本矩阵已记录到 `techContext.md`；本地测试继续不依赖 Docker。
+
+发布后的社区反馈量和稳定运行时长继续记录，用于调整 v0.2 的 P2 优先级，但不再作为 Week 1 的硬阻塞条件。
+
+v0.2 必须交付全部 P0/P1。FR-107 / FR-108 / FR-109 / FR-111 等 P2 若超过时间预算，可整体推到 v0.2.1，不得挤压 PostgreSQL、凭据安全、TLS、schema-aware、RTT、重连、column 树和 SQL 历史。
+
+明确不进入 v0.2：安全表格编辑、对象设计、CSV 导入、SQL dump、备份同步、用户权限和 ER/BI/AI；这些分别留在 v0.3-v0.5+。
+
+### 13.2 时间线与依赖顺序
+
+```text
+Phase 0  前置  补发 v0.1.0 + 安装/更新验收（不计入 8 周）
+Week 1  12h  Driver 契约 + 连接模型迁移 + PostgreSQL vertical slice
+Week 2  13h  PostgreSQL metadata/query/cancel 后端闭环
+Week 3  12h  多 driver AppState/commands/UI + MySQL 回归
+Week 4  13h  passphrase 加密存储 + MySQL TLS 真实验收与证书 UX
+Week 5  13h  column 树 + schema cache + schema-aware 智能联想
+Week 6  13h  SQL 历史 + 多 tab + 导出 + 结果表格体验
+Week 7  10h  RTT + 重连 + keepalive 配置 + 状态模型决策
+Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
+
+合计约 98h；P0/P1 目标 6-7 周完成，第 8 周用于稳定性与发布。
+```
+
+关键依赖链：
+
+1. `Driver` 契约 → PostgreSQL 实现 → 多 driver AppState / UI → 双 driver 回归。
+2. 统一 metadata 模型 → column 树 / cache → schema-aware 补全。
+3. 每 tab 独立 session state → 独立 query_id / cancel → 多 tab 与历史恢复。
+4. 用户主密码与存储迁移 → passphrase 持久化；安全迁移失败时不能覆盖原文件。
+5. RTT 探测语义与连接状态机决策 → 重连按钮和拓扑动画，避免先做 UI 再返工事件契约。
+
+### 13.3 分周任务与验收
+
+#### v0.2 Week 1 — Driver 契约与 PostgreSQL vertical slice（12h）
+
+- **V2-T1.1 [4h]** 从现有 `MySqlDriver` 的真实调用面提取最小 `Driver` 契约；共享类型只包含 connect/ping、metadata、query、cancel、close，不提前抽象 v0.3 对象编辑能力。
+- **V2-T1.2 [3h]** 给连接配置增加显式 `driver` 类型并设计向后兼容迁移：旧记录缺字段时默认 MySQL；迁移失败保留原加密文件。
+- **V2-T1.3 [3h]** 增加 PostgreSQL 最窄 vertical slice：直连 → `SELECT 1` → 稳定 i18n key；SSH 仍复用通用 TCP 隧道，不在 `ssh-multihop` 引入数据库依赖。
+- **V2-T1.4 [2h]** MySQL 全量单测 / integration 回归，确认 extract trait 没有改变 SQL guard、LIMIT、取消与连接行为。
+
+验收：MySQL 现有测试全绿；PostgreSQL `SELECT 1` 通过；旧 `connections.enc` 无损读取；**V2-CP1** 通过后才进入 Week 2。
+
+#### v0.2 Week 2 — PostgreSQL 后端闭环（13h）
+
+- **V2-T2.1 [5h]** 实现 PostgreSQL database/schema/table/column metadata；不得把 MySQL 的 database/schema 同义模型硬套到 PostgreSQL。
+- **V2-T2.2 [4h]** 实现 PostgreSQL query、结果解码、行数上限与取消；标识符引用、SQL dialect、连接取消机制按 PostgreSQL 独立实现。
+- **V2-T2.3 [2h]** 增加 `TINY_SQL_TEST_POSTGRES_URL` integration 测试，与 MySQL 一样连接用户本地数据库，不起 Docker。
+- **V2-T2.4 [2h]** 为 MySQL/PostgreSQL 共用错误定义稳定 i18n key，原始 driver 错误只进入脱敏日志或结构化安全字段。
+
+验收：两个 driver 均通过 ping、metadata、SELECT、写确认、取消与 NULL/日期/数值/JSON 基本解码。
+
+#### v0.2 Week 3 — 多 driver 应用接线（12h）
+
+- **V2-T3.1 [4h]** `AppState` 活跃连接注册表从具体 `MySqlDriver` 改为多 driver 容器；隧道生命周期继续由 `OpenConnection` 持有。
+- **V2-T3.2 [3h]** 泛化 Tauri commands 与前端 API，但保留稳定 command 名和错误 key，避免无必要的大规模 IPC 改名。
+- **V2-T3.3 [3h]** 连接表单增加数据库类型和 PostgreSQL 参数；schema 树按 driver 语义展示 database/schema，不伪造不存在的层级。
+- **V2-T3.4 [2h]** 真实验证 MySQL 与 PostgreSQL 的直连、1 跳 SSH 和连接切换；3 跳 PostgreSQL 留 Week 8 dogfooding。
+
+验收：同一应用能保存并分别打开 MySQL/PostgreSQL；关闭、切换、取消不会串 driver；**V2-CP2** 双 driver 端到端闭环。
+
+#### v0.2 Week 4 — 凭据安全与 TLS（13h）
+
+- **V2-T4.1 [5h]** 设计用户主密码派生密钥与 passphrase 加密格式；新 KDF / secret 依赖须先做安全和 license 审计，不自创密码算法。
+- **V2-T4.2 [3h]** 实现旧连接文件到新格式的可恢复迁移、锁定/解锁 UX、错误密码与忘记主密码路径；迁移采用临时文件 + 原子替换。
+- **V2-T4.3 [3h]** 在真实 TLS MySQL 上验收 Preferred / Required / Verify CA / Verify Identity 及双向证书，补证书文件选择与可行动错误提示。
+- **V2-T4.4 [2h]** 安全测试：passphrase 不出现在明文文件、日志、崩溃信息和导出内容；旧文件迁移失败可原样恢复。
+
+验收：重启后可用主密码解锁 passphrase；错误主密码不会破坏数据；真实 TLS 正反例通过；**V2-CP3** 安全迁移门槛通过。
+
+#### v0.2 Week 5 — Schema intelligence（13h）
+
+- **V2-T5.1 [3h]** 前端接入现有 `db_list_columns`，展示列类型、nullable、key、default 与 comment（FR-112）。
+- **V2-T5.2 [3h]** 增加按 connection/driver/schema 分区的 LRU metadata cache、刷新与失效策略（FR-108），切换连接不得串缓存。
+- **V2-T5.3 [5h]** CodeMirror 补全从 database/table 扩展到 column、alias 与 JOIN 候选；MySQL/PostgreSQL 各自使用正确 dialect（FR-104）。
+- **V2-T5.4 [2h]** 大 schema 性能与并发请求回归，旧请求不得覆盖新选中 schema。
+
+验收：常用列补全无需手写；DDL/手动刷新后 cache 可失效；大 schema 不阻塞 UI；MySQL/PostgreSQL 补全结果不串库。
+
+#### v0.2 Week 6 — 查询工作台（13h）
+
+- **V2-T6.1 [3h]** SQL 历史最近 100 条，记录 driver/connection/schema/时间/成功状态；SQL 可能含敏感字面量，必须加密落盘并支持清空（FR-106）。
+- **V2-T6.2 [4h]** 多查询 tab：每 tab 独立 SQL、结果、query_id、取消 token、driver/schema 与 dirty state；关闭运行中 tab 必须先确认（FR-109）。
+- **V2-T6.3 [3h]** CSV / Excel 导出从后端流式写文件，区分 SQL NULL 与空字符串，避免复制 10 万行到前端再序列化（FR-107）。
+- **V2-T6.4 [2h]** 结果列宽拖拽、恢复默认与持久化（FR-111）。
+- **V2-T6.5 [1h]** 并发 tab 取消回归：取消 A 不能终止 B；关闭连接时全部 query 有明确终态。
+
+验收：历史加密且可清除；至少 3 个 tab 并发互不污染；大结果导出内存稳定；**V2-CP4** 查询工作台通过。
+
+#### v0.2 Week 7 — SSH 可观测性与连接恢复（10h）
+
+- **V2-T7.1 [3h]** 先定义 RTT 测量对象和噪声边界（SSH request / channel 探测，不冒充 ICMP）；拓扑显示采样值与超时状态（FR-105）。
+- **V2-T7.2 [3h]** 增加重连按钮与幂等连接恢复，重连前清理旧 pool、tunnel、query 和状态订阅（FR-110）。
+- **V2-T7.3 [2h]** 把 keepalive 间隔和失败阈值接到高级配置，保持 60s / 3 次为默认值。
+- **V2-T7.4 [2h]** 根据 v0.1 反馈决定 KILL QUERY 四状态与 SSH 统一状态机是否实施；没有证据就保留现有公共契约，不为重构而重构。
+
+验收：断开中间跳后能看到 lost 并成功重连；RTT 不阻塞连接主链路；配置重启后生效；无旧 task / event 泄漏。
+
+#### v0.2 Week 8 — Dogfooding 与发布（12h）
+
+- **V2-T8.1 [4h]** MySQL/PostgreSQL 各完成直连、1 跳与真实 3 跳回归；覆盖 metadata、查询、取消、历史、tab、导出、TLS 与重连。
+- **V2-T8.2 [3h]** 作者 + 至少 2 位试用者使用 v0.2 RC ≥ 1 周；至少 1 人以 PostgreSQL 为主，0 数据丢失、0 凭据泄露、0 不可恢复 crash。
+- **V2-T8.3 [3h]** 更新 ARCHITECTURE 的多 driver / 加密格式章节，补英文 README 与 CONTRIBUTING；新增 v0.2 Release Checklist。
+- **V2-T8.4 [2h]** `just check`、双 driver integration、本机安装包、全平台 RC 下载验收；P0/P1 清零后才切 CHANGELOG 并发布 v0.2.0。
+
+验收：**V2-CP5** 发布门槛全部通过；P2 未完成项明确移入 v0.2.1，不得在 Release notes 中虚假承诺。
+
+### 13.4 v0.2 检查点与降级规则
+
+| 检查点 | 时机 | 通过标准 | 不通过的应对 |
+|---|---|---|---|
+| **V2-CP0** 启动准入 | 开工前 | §13.1 的 v0.1 补发与 PostgreSQL 版本基线全部完成 | 继续收口 v0.1，不创建 v0.2 功能分支 |
+| **V2-CP1** Driver 抽象 | Week 1 末 | MySQL 零回归 + PostgreSQL SELECT 1 + 配置迁移通过 | 收窄 trait；不得继续铺 PG 全功能 |
+| **V2-CP2** 双 driver 闭环 | Week 3 末 | 两 driver connect/metadata/query/cancel/UI 可用 | Week 4 延后，先修状态与 dialect 边界 |
+| **V2-CP3** 安全迁移 | Week 4 末 | 旧配置无损、错误密码不破坏文件、真实 TLS 通过 | 停止发布；保留会话 passphrase，不强推持久化 |
+| **V2-CP4** 查询工作台 | Week 6 末 | history/tab/export 隔离正确，无明显内存回归 | P2 整体推 v0.2.1，保 P1 SQL 历史 |
+| **V2-CP5** 发布 | Week 8 末 | 双 driver dogfood + P0/P1 清零 + RC 安装通过 | 延后正式版，不降低凭据与数据安全标准 |
+
+范围超时时按以下顺序降级：FR-111 列宽 → FR-108 LRU cache → FR-107 Excel（保 CSV）→ FR-109 多 tab。FR-100/102/103/104/105/106/110/112 不降级；如果它们未完成，版本继续延期。
+
+### 13.5 测试矩阵
+
+- **静态质量**：每组改动至少跑 `just lint`；合并前跑 `just check`。
+- **driver integration**：`TINY_SQL_TEST_MYSQL_URL` + `TINY_SQL_TEST_POSTGRES_URL`，均连接用户本地实例，不引入 Docker；CI 继续只跑无外部数据库的单元测试。
+- **兼容回归**：MySQL 5.7 / 8.x 与 PostgreSQL 的最低支持版本 / 最新稳定版本；具体版本在启动时固化到 `techContext.md`。
+- **隧道矩阵**：MySQL/PostgreSQL × 0/1/3 跳；认证覆盖密码、无口令私钥、带口令私钥。
+- **安全矩阵**：旧加密文件迁移、错误主密码、损坏文件、TLS CA/hostname/客户端证书正反例、历史与 passphrase 明文扫描。
+- **并发矩阵**：多 tab 同时查询、分别取消、连接关闭、重连、cache 切换和大结果导出。
+
+### 13.6 主要风险
+
+| 风险 ID | 描述 | 影响 | 缓解 |
+|---|---|---|---|
+| V2-R01 | 为 PostgreSQL 过度抽象 Driver，反而破坏 MySQL | 高 | 只从现有调用面 extract；Week 1 设零回归门槛 |
+| V2-R02 | MySQL database 与 PostgreSQL schema 语义混淆 | 高 | 公共模型显式表达层级；driver 负责 dialect 和引用规则 |
+| V2-R03 | 用户主密码迁移失败导致连接配置不可恢复 | 极高 | 临时文件 + 原子替换 + 原文件备份；失败不覆盖 |
+| V2-R04 | SQL 历史或导出意外泄露敏感字面量 | 高 | 历史加密、显式清空、导出由用户选择路径、日志不记录 SQL 全文 |
+| V2-R05 | 多 tab 的 query_id / cancel token 串线 | 高 | tab-local state + 并发单测；关闭连接统一收敛终态 |
+| V2-R06 | RTT 数字被误解为真实网络 ICMP 延迟 | 中 | 文案标注 SSH 探测 RTT；采样失败不改变连接状态 |
+| V2-R07 | 8 周范围再次膨胀 | 中 | Week 6 按 §13.4 降级 P2；禁止提前做 v0.3 数据编辑 |
+
+---
+
 ## 附录 A：每周快速 checklist
 
 ### Week 1（vertical slice）
@@ -434,7 +593,7 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 - [x] sqlx 桥接 SELECT 1
 - [x] Next.js 前端骨架
 - [x] tauri.conf + CI
-- [ ] **CP-1b** 端到端闭环
+- [x] **CP-1b** 端到端闭环
 
 ### Week 2（测试 + driver + 连接管理）
 - [x] 测试基础设施一次架齐（无 Docker）
@@ -445,7 +604,7 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 - [ ] **CP-2** 25h 累计检查
 
 ### Week 3（多跳 + keepalive + 错误模型）
-- [x] 单跳 → N 跳实现（真实 3 跳仍待 CP-4）
+- [x] 单跳 → N 跳实现（真实 3 跳已由 CP-4 验收）
 - [x] russh keepalive 60s + 3 次阈值
 - [x] SshTunnelError 三变体 + hop_index
 - [x] TOFU 流程
@@ -464,8 +623,9 @@ Kanban：Backlog（v0.2）/ Week N / In Progress / Done。每个 task 关联 [RE
 - [x] 作者自用 1 周
 - [x] 2 同事试用 1 周（含 5.7 验证 CP-3）
 - [x] 已知 P0 修复与真实 MySQL 回归（2026-07-13）
-- [x] README 
-- [x] tag v0.1.0
+- [x] README 文字说明
+- [ ] README 真实 GIF
+- [ ] tag v0.1.0（远端 tag 与应用版本仍为 v0.0.3）
 - [x] **CP-5** 75h 上限 / **CP-6** dogfooding 验收
 
 ### Week 6（缓冲）/ Week 7（launch）

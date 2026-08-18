@@ -7,8 +7,8 @@
 | 版本 | 状态 | 说明 |
 |---|---|---|
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
-| v0.1.0 | 🚧 开发中（Week 5 dogfooding） | 主体实现完成；原定 2026-08 月初发布已延期，待真实 3 跳 / MySQL 5.7 / 同事试用 / GIF / RC |
-| v0.2 | 规划 | PG driver + passphrase 加密 + TLS 验收/UX + Schema-aware 联想 |
+| v0.1.0 | 🚧 发布收口中 | CP-3/4/5/6 与试用已由 `4f54f02` 标记完成；待 GIF、v0.1 承诺缺口、RC / 正式 tag |
+| v0.2 | 规划 | 8 周约 98h：PG driver + passphrase 加密 + TLS + schema intelligence + 查询工作台 + RTT/重连 |
 | v0.3 | 规划 | 保存/打开 SQL、index/constraint 树、对象搜索、服务端筛选分页、多结果与可靠事务 |
 | v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
 | v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
@@ -19,12 +19,12 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 
 | 周 | 内容 | 状态 |
 |---|---|---|
-| Week 1 | vertical slice（workspace + 单跳 SSH + sqlx SELECT 1 + hello 页） | ✅ 静态验证完成，CP-1b 待用户 GUI smoke |
+| Week 1 | vertical slice（workspace + 单跳 SSH + sqlx SELECT 1 + hello 页） | ✅ CP-1 / CP-1b 已验收 |
 | Week 2 | 测试基础设施 + `MySqlDriver` struct + 加密 store + 连接管理 UI | ✅ 静态验证完成（playwright E2E 推迟；CP-2 工时未记录） |
-| Week 3 | 多跳 SSH + keepalive + 错误模型三变体 + TOFU + 表浏览 | ✅ 静态验证完成（CP-1b 待 GUI smoke：3 跳/TOFU/180s lost） |
-| Week 4 | SQL 执行（顶层安全追加 LIMIT + KILL QUERY）+ 拓扑图 + 全平台 Release | ✅ 代码与云端流水线完成（真实 SSH/MySQL dogfooding 待 Week 5） |
-| Week 5 | dogfooding + 修 bug + README/GIF + tag v0.1.0 | 🚧 已启动（README/日志模板/自动化验证/release checklist 完成；真实环境待测） |
-| Week 6 / 7 | 缓冲 / launch（V2EX + 掘金） | ⬜ |
+| Week 3 | 多跳 SSH + keepalive + 错误模型三变体 + TOFU + 表浏览 | ✅ 实现完成，真实环境状态由 CP-4 验收覆盖 |
+| Week 4 | SQL 执行（顶层安全追加 LIMIT + KILL QUERY）+ 拓扑图 + 全平台 Release | ✅ 代码、云端流水线与 CP-4 已完成 |
+| Week 5 | dogfooding + 修 bug + README/GIF + tag v0.1.0 | 🚧 Dogfooding/CP 已由用户标记完成；GIF 与 tag 尚缺 |
+| Week 6 / 7 | 缓冲 / launch（V2EX + 掘金） | ✅ 用户提交 `4f54f02` 标记完成 |
 
 ## Git 提交历史
 
@@ -72,9 +72,11 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | `f12fa45` | docs: 记录 P0 修复到 CHANGELOG 与活跃上下文 |
 | `0b13a76` | chore: 更新 Cargo.lock 依赖 |
 | `7f566ae` | docs: 同步文档与当前代码实现 |
-| `354ec35` | docs: 对齐代码与项目进度（HEAD / origin/main） |
+| `354ec35` | docs: 对齐代码与项目进度 |
+| `a1c7fef` | docs(roadmap): 规划后续管理能力 |
+| `4f54f02` | docs(PLAN): 更新任务状态以反映当前进度（HEAD / origin/main） |
 
-> 注：本地 `main` 与 `origin/main` 均为 `354ec35`，没有领先/落后提交。发 RC 前仍需重新刷新一次远端与 tag 状态。
+> 注：2026-08-18 本地 `main` 与 `origin/main` 均为 `4f54f02`；刷新远端 tag 后最高仍为 `v0.0.3`。发 RC 前仍需重新复核版本文件、tag 与工作区状态。
 
 ## 重大决策与架构变更记录
 
@@ -105,6 +107,9 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 - **2026-08-08 文档与代码全面对齐**：全量核对 README / REQUIREMENTS / ARCHITECTURE / PLAN / ROADMAP / memory-bank 与当前代码的偏差并同步。要点：(1) SQL 执行描述从「子查询包装」统一改为「顶层安全追加 LIMIT + 客户端截断兜底」（derived table 包装在多表 JOIN 重名列触发 1060，已弃用）；(2) 写操作二次确认从「黑名单正则」改为「首 token 白名单分类」（SELECT/WITH 读、SHOW/EXPLAIN/DESC/DESCRIBE 元数据免确认、其余一律需 allow_write），前后端同构；(3) 状态机收敛为 4 态（pending/connected/failed/lost），ARCHITECTURE 与代码及 FR-015 对齐，移除不存在的 connecting/reconnecting/latency_ms；(4) passphrase 流程改为 `connection_open(id, passphrase?)` 参数直传 + per-connection 会话缓存，无 `ssh_set_passphrase` command；(5) master key 从「内置固定 key」改为「首次随机生成落盘 master.key（0600）」；(6) keepalive 机制改为 russh 内置配置 + 每跳监控 task，非自建 interval 循环；(7) control pool 与主 pool 同一连接参数（非独立本地端口）；(8) 加密文件结构改为扁平 `Vec<StoredConnection>`（无 version 包装 / mysql 嵌套），schema 补充 ssl / advanced；(9) 明确标注 v0.1 已知 UI 缺口：列清单展示、列宽拖拽、重连按钮、语言下拉框均未实现，已登记到 ROADMAP v0.2（FR-110~112）与 ARCHITECTURE §10.3；(10) playwright E2E 推迟状态补齐到 PLAN / ARCHITECTURE，integration 命令修正为 `cargo test -p db-driver -- --include-ignored`。
 - **2026-08-18 进度与事实基线再对齐**：刷新 `origin` 并核对 GitHub Release / Actions。确认 `main == origin/main == 7f566ae`、当前应用版本为 `0.0.3`、最新 main CI 成功、v0.0.3 全平台 Release 与 `latest.json` 已成功；同时发现 MySQL TLS 已接线但未真实验收、passphrase 测试连接未覆盖、ChannelDropped / AcceptLoopDied 尚无运行时构造路径，并据此修正文档口径。
 - **2026-08-18 后续版本吸收 Navicat 能力缺口**：不新增 v2.0，也不重复 v0.2 已有的 SQL 历史、CSV/Excel 导出、column 树和多查询 tab；把其余能力按依赖拆入 v0.3（查询工作台、元数据检索、服务端筛选分页、可靠事务）、v0.4（主键单表安全编辑、Table/View 对象管理、CSV/SQL dump 导入）和 v0.5+（备份同步、用户权限、ER/BI/AI）。同时撤销“图形化编辑、ER、备份永久不做”的旧边界，保留单表主键定位、SQL 预览确认和不建设独立监控平台等安全约束。
+- **2026-08-18 v0.2 可执行计划落地**：`docs/PLAN.md` 新增 8 周 / 约 98h 计划，以 Driver/PG → 多 driver 应用 → passphrase/TLS → schema intelligence → 查询工作台 → RTT/重连 → 双 driver dogfooding/发布为依赖顺序；定义 V2-CP0~5、双数据库/隧道/安全/并发测试矩阵，并规定 P2 超时降级到 v0.2.1。
+- **2026-08-18 v0.2 启动前置收窄**：用户确认 §2.2 vertical slice 全部通过；v0.2 前增加不计入 8 周的 Phase 0，只补发 v0.1.0、验收安装/更新链路并固化 PostgreSQL 版本基线。发布后的稳定时长与社区反馈只影响 P2 排序，不再阻塞 Week 1。
+- **2026-08-18 v0.1 状态冲突收口**：用户提交 `4f54f02` 将 CP-3/4/5/6、试用与 launch 标记完成，项目记忆据此接受外部验收状态；但刷新远端 tag 后最高仍为 `v0.0.3`、版本文件仍为 `0.0.3` 且仓库无 GIF，因此 tag/GIF/正式发布继续按未完成记录。
 
 ## 已解决的阻碍
 
@@ -121,15 +126,15 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 
 ## 待验证 / 风险跟踪
 
-- **CP-4 / GUI dogfooding**：待真实环境 `pnpm tauri dev` 或安装 `.dmg`。Week 4 后需验收：配 3 跳 SSH 连真实 MySQL、TOFU 首次弹窗/已信任静默/指纹变更硬拒绝、passphrase 首次弹窗本会话静默、左侧树点表看前 1000 行、SQL 编辑器 SELECT/JOIN/聚合、`SELECT SLEEP(60)` 取消后 `SHOW PROCESSLIST` 消失、故意 kill 中间跳 sshd 验证 180s 内 hop 变 lost。
+- **CP-4 / GUI dogfooding**：用户提交 `4f54f02` 已标记完成；真实记录在 ignored `docs/dogfooding-log.md`，本轮未读取其中环境细节。
 - **CP-2** Week 2/3 累计工时检查（PLAN §3.3）：未正式记录工时，下次同步补。
-- **CP-3** MySQL 5.7 `caching_sha2`/`native_password` 兼容：推到 Week 5 dogfooding（不进 CI）。
+- **CP-3** MySQL 5.7 兼容已由用户提交 `4f54f02` 标记完成；不进入 CI 的策略不变。
 - **RC 产物验证**：跨平台 Release workflow 已由 v0.0.3 真实验证；`v0.1.0-rc1` / `v0.1.0` tag 仍未创建，RC 下载后的真实安装与业务链路仍待验证。
 - **发布脚本暂存范围**：`just version` 已会同步 `Cargo.lock` 本地 package 版本，`just release` 已收窄到版本/CHANGELOG/Cargo.lock 相关文件；正式发版前仍必须确认工作区没有无关改动。
 - **自动更新 GitHub Secrets**：release workflow 依赖 `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。本地按 Redis 项目方式把真实私钥写入 ignored `.env`，`just build` 会加载；直接 `pnpm tauri build` 不经 justfile 注入 `.env`，仍需手动 export，且无密码私钥要显式保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`。
 - **连接 tab 表单 GUI 验证**：常规 / SSH / SSL / 高级标签页、SSL 证书路径输入、高级设置 checkbox + 数字输入以及保存/测试连接手感仍待真实 Tauri GUI 点验；本轮自动浏览器工具没有可用实例，仅完成静态与构建验证。
 - **R-001** Tauri+workspace 摩擦：已规避（CP-1 通过）。
-- **R-002** caching_sha2 握手：Week 5 验证。
+- **R-002** caching_sha2 握手：MySQL 5.7 兼容已由用户提交 `4f54f02` 标记验证完成。
 - **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task（PLAN §4.3 风险）。
 - **R-updater-release** 云端全平台 artifact 与正式版 `latest.json` 已由 v0.0.3 验证；剩余风险是从旧正式版发现新版本、下载、安装并重启的应用内端到端流程。
 - **R-ssh-runtime-errors** `ChannelDropped` / `AcceptLoopDied` 只有公共错误定义与 key 测试，当前运行路径只上报 keepalive `lost`；需在 v0.1 前补代码或收窄 P0 承诺。

@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：当前预览版为 v0.0.3，v0.1 仍处于 Week 5 dogfooding，原定 2026-08 月初的正式发布已延期**。Week 1-4 的实现与静态验证已经落地；v0.0.3 也已通过 GitHub Actions 产出 macOS / Windows / Linux 安装包、签名更新包和 `latest.json`。当前发布门槛是真实 3 跳 SSH + MySQL GUI 试用、MySQL 5.7、作者与 2 位同事各使用 1 周、README GIF，以及最终 `v0.1.0` RC / 正式版验收。完整范围与进度见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：当前预览版为 v0.0.3，v0.1 dogfooding 门槛已由项目提交确认完成，但正式发布仍延期**。Week 1-4 的实现与静态验证已经落地；v0.0.3 也已通过 GitHub Actions 产出 macOS / Windows / Linux 安装包、签名更新包和 `latest.json`。截至 2026-08-18，仓库与远端仍没有 `v0.1.0-rc1` / `v0.1.0` tag，应用版本仍是 `0.0.3`，README 真实 GIF 与少量 v0.1 承诺缺口也尚未收口。完整范围与进度见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 

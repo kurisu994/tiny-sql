@@ -6,11 +6,11 @@
 
 ## 当前状态
 
-**当前预览版 v0.0.3，v0.1 处于 Week 5 dogfooding，原定 2026-08 月初发布已延期。** Week 1-4 的主体实现已经落地：N 跳 SSH、TOFU、keepalive lost 事件、连接配置加密、数据库 / 表浏览、CodeMirror SQL 编辑器、查询护栏与取消、拓扑图、连接管理 UI、新建数据库、自动更新和跨平台 Release workflow 都已有代码。真正阻塞 `v0.1.0` 的是现实环境验收与少量实现缺口，而不是基础架构或打包流水线。
+**当前预览版 v0.0.3；v0.1 实现与 dogfooding 门槛已验收，只差发布收口。** Week 1 vertical slice、CP-3/CP-4/CP-5/CP-6、作者与同事试用和 launch 活动均已被项目提交标记完成；仓库可客观验证的剩余项是 README GIF、少量 v0.1 承诺缺口，以及尚未创建的 `v0.1.0` tag。v0.2 已形成 8 周实施计划，先通过 Phase 0 补发 v0.1.0 并验证安装/更新链路，随后即可启动 Week 1。
 
 ### 本轮核对后的事实基线
 
-- Git：`main` / `origin/main` 均为 `354ec35`，工作区在本轮路线图调整开始时干净。
+- Git：本轮开始时 `main` / `origin/main` 均为 `4f54f02`；2026-08-18 已刷新远端 tags，最高仍为 `v0.0.3`。
 - 版本：`package.json`、`Cargo.lock`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 一致为 `0.0.3`。
 - CI：最新 main run（`7f566ae`）于 2026-08-08 成功。
 - Release：`v0.0.3` workflow 成功；GitHub Release 已有 macOS arm64/x64 `.dmg` 和 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 与 `latest.json`。跨平台打包、签名产物上传和 manifest 生成已通过真实云端验证。
@@ -55,25 +55,28 @@
 - 把 `v0.0.3` 云端成功作为发布流水线基线；v0.1 RC 仍需下载、安装与真实业务链路验证。
 - Navicat 日常替代能力不新增突兀的 v2.0：剔除 v0.2 已规划的 SQL 历史、CSV/Excel 导出、column 树和多查询 tab 后，剩余能力按依赖拆到 v0.3（查询/浏览/事务）、v0.4（安全编辑/对象管理/导入）和 v0.5+（备份同步/权限/ER/BI/AI）。
 - 原“图形化编辑、ER、备份永久不做”边界已收窄：v0.4 只允许主键单表安全编辑与有 SQL 预览的对象操作；v0.5+ 可做 ER 和备份，但 JOIN/聚合结果写回、应用 RBAC 与独立监控平台仍不做。
+- v0.2 采用 8 周 / 约 98h 计划：先完成最小 Driver 契约与 PostgreSQL，再接多 driver 应用、安全/TLS、schema intelligence、查询工作台、RTT/重连，最后双 driver dogfooding 和发布；P2 超时整体降级到 v0.2.1。
+- v0.2 开工前增加不计入 8 周的 Phase 0：现有验收不重做，补发 v0.1.0 并验证全平台安装与应用内更新；发布后的 1 个月稳定时长和 5 条社区反馈改为 P2 排序依据，不再作为硬门槛。
+- 外部 dogfooding 完成状态以用户提交 `4f54f02` 为准；tag、应用版本和媒体资产继续以 Git / 文件系统事实为准，不能把 checklist 勾选当成已发布。
 - `activeContext.md` 只保留当前状态；历史决策和已解决问题继续放 `progress.md`。
-- 不把 ignored 的 `docs/dogfooding-log.md` 初始记录改写成已完成；它仍准确表明真实 dogfooding 尚未开始。
+- ignored 的 `docs/dogfooding-log.md` 继续只保存脱敏环境细节；完成状态以用户提交 `4f54f02` 为准，本轮不读取或改写该文件。
 
 ## 下一步（按优先级）
 
 1. 决定并补齐三类代码缺口：带 passphrase 私钥的 `connection_test`；`ChannelDropped` / `AcceptLoopDied` 的运行时检测与上报；既保留稳定 i18n key、又能安全传递 MySQL 行号的错误契约。它们都与当前文档承诺有关。
 2. 用真实 Tauri GUI 回归 2026-07-13 P0：SHOW / EXPLAIN / DESC、JOIN SELECT *、大结果截断、测试连接 TOFU；同时点连接四标签页、新建数据库、schema 树、更新菜单。
-3. 完成 CP-4：真实 3 跳 SSH + MySQL、30 分钟稳定运行、至少 10 条 SQL、长查询取消后 processlist 消失、断中间跳后 180s 内 lost。
-4. 完成 CP-3 / CP-6：MySQL 5.7；作者 + 2 位同事各用 1 周，每人至少 5 条反馈，0 数据丢失、0 不可恢复 crash。
-5. 补 README 真实 GIF，发布 `v0.1.0-rc1`，下载验证全平台安装包；修完 P0/P1 后再切 CHANGELOG 并发布 `v0.1.0`。
-6. 从旧正式版验证应用内发现、下载、安装并重启到新正式版。
+3. 补 README 真实 GIF，发布 `v0.1.0-rc1`，下载验证全平台安装包；修完 P0/P1 后再切 CHANGELOG 并发布 `v0.1.0`。
+4. 从旧正式版验证应用内发现、下载、安装并重启到新正式版。
+5. 完成 `docs/PLAN.md` §13.1 的 v0.1 补发与 PostgreSQL 版本基线后，通过 V2-CP0 并启动 v0.2 Week 1。
 
 ## 阻塞 / 风险
 
-- **CP-3 / CP-4 / CP-6 未完成**：这是 v0.1 正式发布的主阻塞。
+- **v0.1 尚未产生 RC / 正式 tag**：远端 tags 与应用版本均停留在 `0.0.3`，不能把 checklist 勾选视为 Release 完成。
 - **两类 SSH 承诺与运行实现不完全一致**：passphrase 测试连接、ChannelDropped / AcceptLoopDied 检测需决定是补代码还是降级 v0.1 需求。
 - **MySQL 服务端错误行标识未真正接通**：前端解析逻辑存在，但后端只返回稳定 key；需设计结构化错误 payload，不能直接泄露原始 Rust 错误。
 - **MySQL TLS 只完成接线**：真实 TLS/双向证书与错误 UX 未验收。
 - **高级设置部分仅持久化**：读取/写入超时、keepalive 间隔、压缩、自动连接不能描述成已生效。
 - **README GIF 缺失，v0.1.0-rc1 / v0.1.0 尚未发布**。
+- **v0.2 范围约 98h**：必须执行 Week 6 降级规则，禁止为了完整 P2 挤压 driver、凭据和 TLS 安全门槛。
 
 相关：[[progress]] · [[systemPatterns]]
