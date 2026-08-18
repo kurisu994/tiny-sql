@@ -125,6 +125,9 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 - **2026-08-18 v0.2 Week 3 多 driver 应用接线**：`OpenConnection` 改为 `ActiveDriver::{MySql, PostgreSql}` 并统一转发 `Driver` 契约；connection/metadata/query commands 按 driver 泛化，新增 schema command 与可选 schema scope。连接表单可选数据库类型，PostgreSQL 使用 database → schema → table 树和双引号预览 SQL；自动门禁与真实 integration 9/9 全绿，Tauri 调试包已验证 MySQL 直连、元数据树与 `SELECT 1`。PostgreSQL 直连、双 driver 切换/取消及各自 1 跳 SSH 仍留 V2-T3.4；PostgreSQL 当前只展开连接所在 database，证书路径尚未接线。
 - **2026-08-18 带口令私钥测试连接缺口关闭**：`connection_test` 新增瞬时 `passphrase?` 参数，连接表单只在存在 privateKey hop 时显示“仅测试”密码框；该值不进入 `ConnectionInput`、加密文件或正式连接会话缓存。后端运行时 hop 转换和前端 IPC 调用链均有回归测试，V2-CP1 剩余 `ChannelDropped` / `AcceptLoopDied` 运行检测与安全 SQL 行号两项缺口。
 - **2026-08-18 V2-CP1 历史代码承诺全部关闭**：`TunnelHandler::disconnected` 与 keepalive fallback 区分首跳 `tunnel_lost` / 嵌套跳 `channel_dropped` 并原子去重，accept worker 由独立 monitor 捕获 panic/意外退出；正常 drop 先置 shutdown 防误报。`db_query` 改用 `{ key, line? }` 安全错误载荷，后端只解析 MySQL 正整数行号，原始数据库错误和 SQL 片段不跨 IPC。加上已完成的瞬时 passphrase 测试连接，V2-CP1 通过。
+- **2026-08-18 V2-T5.1 column 树**：前端 session state 接入现有 `db_list_columns`，MySQL/PostgreSQL 表节点以独立控件按需展开，展示类型、nullable、key、default 与 comment；收起、切库或切 schema 后异步旧响应不会覆盖当前树。暂不缓存列元数据，分区 LRU、刷新和失效统一留 V2-T5.2；前端 46 项测试与 TypeScript 检查通过。
+- **2026-08-18 V2-T5.2 metadata cache**：新增纯内存 128 项 / 5 分钟 TTL LRU，key 包含 connection/driver/database/schema/resource/table；schema/table/column 加载均先查 cache。树顶部支持手动刷新，重连、关闭、建库及成功 DDL 会清理对应连接 cache；异步返回继续核对当前命名空间。前端 54 项测试、TypeScript 与 Next.js 生产构建通过。
+- **2026-08-18 V2-T5.3 schema-aware completion**：CodeMirror 按连接使用 MySQL/PostgreSQL dialect；对象树加载过的列按表累积到当前 session，原生 schema source 提供 column/alias completion。独立 completion 模块按真实列的 `target_id → target.id`、反向或同名 key/id 关系生成 JOIN + ON 候选，支持双方言引号和 schema-qualified table，不新增传递依赖。前端 59 项测试、TypeScript 与 Next.js 生产构建通过。
 
 ## 已解决的阻碍
 

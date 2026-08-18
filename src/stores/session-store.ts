@@ -6,10 +6,17 @@
 import { create } from "zustand";
 
 import {
+  metadataCache,
+  type MetadataCacheKey,
+  type MetadataResource,
+} from "@/lib/metadata-cache";
+import { invalidatesMetadataCache } from "@/lib/sql-guard";
+import {
   connectionApi,
   dbApi,
   translateError,
   type CreateDatabaseInput,
+  type ColumnMeta,
   type DatabaseMeta,
   type HopStatusPayload,
   type RowSet,
@@ -35,6 +42,17 @@ export interface TopologyHopStatus {
 
 function createQueryId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `q_${Date.now()}_${Math.random()}`;
+}
+
+function metadataKey(
+  connectionId: string,
+  driver: StoredConnection["driver"],
+  database: string,
+  schema: string | null,
+  resource: MetadataResource,
+  table?: string,
+): MetadataCacheKey {
+  return { connectionId, driver, database, schema, resource, table };
 }
 
 function initialHopStatuses(
@@ -78,6 +96,13 @@ interface SessionState {
   expandedSchema: string | null;
   selectedSchema: string | null;
   tables: TableMeta[];
+  /** 当前展开列信息的表；数据来自按命名空间分区的内存 LRU cache。 */
+  expandedTable: string | null;
+  tableColumns: ColumnMeta[];
+  /** 当前 database/schema 已加载过的各表列，供 CodeMirror schema-aware 补全。 */
+  columnsByTable: Record<string, ColumnMeta[]>;
+  loadingColumns: boolean;
+  refreshingMetadata: boolean;
   selectedTable: string | null;
   rowSet: RowSet | null;
   loadingData: boolean;
@@ -101,6 +126,8 @@ interface SessionState {
   toggleExpandedDb: (db: string) => void;
   selectSchema: (schema: string) => Promise<void>;
   toggleExpandedSchema: (schema: string) => void;
+  toggleTableColumns: (table: string) => Promise<void>;
+  refreshMetadata: () => Promise<void>;
   createDatabase: (id: string, input: CreateDatabaseInput) => Promise<void>;
   selectTable: (table: string) => Promise<void>;
   setSqlText: (sql: string) => void;
@@ -126,6 +153,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   expandedSchema: null,
   selectedSchema: null,
   tables: [],
+  expandedTable: null,
+  tableColumns: [],
+  columnsByTable: {},
+  loadingColumns: false,
+  refreshingMetadata: false,
   selectedTable: null,
   rowSet: null,
   loadingData: false,
@@ -147,6 +179,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     });
     try {
       await connectionApi.open(id, passphrase);
+      metadataCache.clearConnection(id);
       const databases = await dbApi.listDatabases(id);
       set({
         openId: id,
@@ -159,6 +192,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         expandedSchema: null,
         selectedSchema: null,
         tables: [],
+        expandedTable: null,
+        tableColumns: [],
+        columnsByTable: {},
+        loadingColumns: false,
+        refreshingMetadata: false,
         selectedTable: null,
         rowSet: null,
         hopStatuses: connectedHopStatuses(connection ?? get().activeConnection),
@@ -187,6 +225,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       } catch {
         // 关闭失败不阻塞 UI 复位
       }
+      metadataCache.clearConnection(openId);
     }
     set({
       openId: null,
@@ -201,6 +240,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       expandedSchema: null,
       selectedSchema: null,
       tables: [],
+      expandedTable: null,
+      tableColumns: [],
+      columnsByTable: {},
+      loadingColumns: false,
+      refreshingMetadata: false,
       selectedTable: null,
       rowSet: null,
       sqlText: "SELECT 1",
@@ -233,19 +277,41 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       expandedSchema: null,
       selectedSchema: null,
       tables: [],
+      expandedTable: null,
+      tableColumns: [],
+      columnsByTable: {},
+      loadingColumns: false,
+      refreshingMetadata: false,
       selectedTable: null,
       rowSet: null,
       loadingData: true,
     });
     try {
+      const driver = activeConnection?.driver ?? "mysql";
       if (activeConnection?.driver === "postgresql") {
+        const key = metadataKey(openId, driver, db, null, "schemas");
+        const cached = metadataCache.get<SchemaMeta[]>(key);
+        if (cached) {
+          if (get().selectedDb !== db) return;
+          set({ schemas: cached, loadingData: false });
+          return;
+        }
         const schemas = await dbApi.listSchemas(openId, db);
         if (get().selectedDb !== db) return;
+        metadataCache.set(key, schemas);
         set({ schemas, loadingData: false });
+        return;
+      }
+      const key = metadataKey(openId, driver, db, null, "tables");
+      const cached = metadataCache.get<TableMeta[]>(key);
+      if (cached) {
+        if (get().selectedDb !== db) return;
+        set({ tables: cached, loadingData: false });
         return;
       }
       const tables = await dbApi.listTables(openId, db, null);
       if (get().selectedDb !== db) return;
+      metadataCache.set(key, tables);
       set({ tables, loadingData: false });
     } catch (e) {
       if (get().selectedDb !== db) return;
@@ -270,13 +336,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       expandedSchema: schema,
       selectedSchema: schema,
       tables: [],
+      expandedTable: null,
+      tableColumns: [],
+      columnsByTable: {},
+      loadingColumns: false,
+      refreshingMetadata: false,
       selectedTable: null,
       rowSet: null,
       loadingData: true,
     });
     try {
+      const driver = get().activeConnection?.driver ?? "postgresql";
+      const key = metadataKey(
+        openId,
+        driver,
+        selectedDb,
+        schema,
+        "tables",
+      );
+      const cached = metadataCache.get<TableMeta[]>(key);
+      if (cached) {
+        if (get().selectedDb !== selectedDb || get().selectedSchema !== schema)
+          return;
+        set({ tables: cached, loadingData: false });
+        return;
+      }
       const tables = await dbApi.listTables(openId, selectedDb, schema);
       if (get().selectedDb !== selectedDb || get().selectedSchema !== schema) return;
+      metadataCache.set(key, tables);
       set({ tables, loadingData: false });
     } catch (error) {
       if (get().selectedDb !== selectedDb || get().selectedSchema !== schema) return;
@@ -291,6 +378,210 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         expandedSchema: state.expandedSchema === schema ? null : schema,
       };
     }),
+
+  toggleTableColumns: async (table) => {
+    const {
+      openId,
+      selectedDb,
+      selectedSchema,
+      activeConnection,
+      expandedTable,
+    } = get();
+    if (!openId || !selectedDb) return;
+    if (expandedTable === table) {
+      set({
+        expandedTable: null,
+        tableColumns: [],
+        loadingColumns: false,
+        refreshingMetadata: false,
+      });
+      return;
+    }
+    const schema =
+      activeConnection?.driver === "postgresql" ? selectedSchema : null;
+    if (activeConnection?.driver === "postgresql" && !schema) return;
+    const driver = activeConnection?.driver ?? "mysql";
+    const key = metadataKey(
+      openId,
+      driver,
+      selectedDb,
+      schema,
+      "columns",
+      table,
+    );
+
+    set({
+      expandedTable: table,
+      tableColumns: [],
+      loadingColumns: true,
+      refreshingMetadata: false,
+      errorMsg: null,
+    });
+    try {
+      const cached = metadataCache.get<ColumnMeta[]>(key);
+      if (cached) {
+        if (get().expandedTable !== table) return;
+        set((state) => ({
+          tableColumns: cached,
+          columnsByTable: { ...state.columnsByTable, [table]: cached },
+          loadingColumns: false,
+        }));
+        return;
+      }
+      const tableColumns = await dbApi.listColumns(
+        openId,
+        selectedDb,
+        schema,
+        table,
+      );
+      const current = get();
+      if (
+        current.openId !== openId ||
+        current.selectedDb !== selectedDb ||
+        current.selectedSchema !== selectedSchema ||
+        current.expandedTable !== table
+      ) {
+        return;
+      }
+      metadataCache.set(key, tableColumns);
+      set((state) => ({
+        tableColumns,
+        columnsByTable: { ...state.columnsByTable, [table]: tableColumns },
+        loadingColumns: false,
+      }));
+    } catch (error) {
+      const current = get();
+      if (
+        current.openId !== openId ||
+        current.selectedDb !== selectedDb ||
+        current.selectedSchema !== selectedSchema ||
+        current.expandedTable !== table
+      ) {
+        return;
+      }
+      set({ errorMsg: translateError(error), loadingColumns: false });
+    }
+  },
+
+  refreshMetadata: async () => {
+    const {
+      openId,
+      activeConnection,
+      selectedDb,
+      selectedSchema,
+      expandedTable,
+    } = get();
+    if (!openId || !activeConnection) return;
+    if (!selectedDb) {
+      set({ refreshingMetadata: true, errorMsg: null });
+      try {
+        const databases = await dbApi.listDatabases(openId);
+        if (get().openId !== openId || get().selectedDb !== null) return;
+        set({ databases, refreshingMetadata: false });
+      } catch (error) {
+        if (get().openId !== openId || get().selectedDb !== null) return;
+        set({
+          errorMsg: translateError(error),
+          refreshingMetadata: false,
+        });
+      }
+      return;
+    }
+    const driver = activeConnection.driver;
+    const schema = driver === "postgresql" ? selectedSchema : null;
+    metadataCache.invalidateScope({
+      connectionId: openId,
+      driver,
+      database: selectedDb,
+    });
+    set({
+      refreshingMetadata: true,
+      loadingColumns: expandedTable !== null,
+      errorMsg: null,
+    });
+
+    try {
+      const databasesPromise = dbApi.listDatabases(openId);
+      const schemasPromise =
+        driver === "postgresql"
+          ? dbApi.listSchemas(openId, selectedDb)
+          : Promise.resolve<SchemaMeta[] | null>(null);
+      const tablesPromise =
+        driver === "mysql" || schema
+          ? dbApi.listTables(openId, selectedDb, schema)
+          : Promise.resolve<TableMeta[] | null>(null);
+      const columnsPromise =
+        expandedTable && (driver === "mysql" || schema)
+          ? dbApi.listColumns(openId, selectedDb, schema, expandedTable)
+          : Promise.resolve<ColumnMeta[] | null>(null);
+      const [databases, schemas, tables, tableColumns] = await Promise.all([
+        databasesPromise,
+        schemasPromise,
+        tablesPromise,
+        columnsPromise,
+      ]);
+      const current = get();
+      if (
+        current.openId !== openId ||
+        current.selectedDb !== selectedDb ||
+        current.selectedSchema !== selectedSchema ||
+        current.expandedTable !== expandedTable
+      ) {
+        return;
+      }
+      if (schemas) {
+        metadataCache.set(
+          metadataKey(openId, driver, selectedDb, null, "schemas"),
+          schemas,
+        );
+      }
+      if (tables) {
+        metadataCache.set(
+          metadataKey(openId, driver, selectedDb, schema, "tables"),
+          tables,
+        );
+      }
+      if (tableColumns && expandedTable) {
+        metadataCache.set(
+          metadataKey(
+            openId,
+            driver,
+            selectedDb,
+            schema,
+            "columns",
+            expandedTable,
+          ),
+          tableColumns,
+        );
+      }
+      set({
+        databases,
+        ...(schemas ? { schemas } : {}),
+        ...(tables ? { tables } : {}),
+        ...(tableColumns ? { tableColumns } : {}),
+        columnsByTable:
+          tableColumns && expandedTable
+            ? { [expandedTable]: tableColumns }
+            : {},
+        refreshingMetadata: false,
+        loadingColumns: false,
+      });
+    } catch (error) {
+      const current = get();
+      if (
+        current.openId !== openId ||
+        current.selectedDb !== selectedDb ||
+        current.selectedSchema !== selectedSchema
+      ) {
+        return;
+      }
+      set({
+        errorMsg: translateError(error),
+        refreshingMetadata: false,
+        loadingColumns: false,
+      });
+    }
+  },
 
   createDatabase: async (id, input) => {
     const { openId } = get();
@@ -311,6 +602,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         charset: input.charset,
         collation: input.collation,
       });
+      metadataCache.clearConnection(id);
       const databases = await dbApi.listDatabases(id);
       set({
         databases,
@@ -320,6 +612,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         expandedSchema: null,
         selectedSchema: null,
         tables: [],
+        expandedTable: null,
+        tableColumns: [],
+        columnsByTable: {},
+        loadingColumns: false,
+        refreshingMetadata: false,
         selectedTable: null,
         rowSet: null,
         loadingData: false,
@@ -389,6 +686,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         rowLimit: options?.rowLimit ?? 100000,
         allowWrite: options?.allowWrite ?? false,
       });
+      if (invalidatesMetadataCache(sql)) {
+        metadataCache.clearConnection(openId);
+        set({
+          expandedTable: null,
+          tableColumns: [],
+          columnsByTable: {},
+          loadingColumns: false,
+        });
+      }
       set({
         rowSet,
         loadingData: false,

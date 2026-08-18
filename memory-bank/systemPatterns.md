@@ -84,6 +84,8 @@ tiny-sql/
 
 - `"use client"` 组件 + `invoke<T>()` 调 command；i18n key → 中文映射（v0.1 用静态 `ERROR_ZH` map，完整 i18next runtime 留英文 UI 时接入）。
 - 状态用 zustand；拓扑图用纯 CSS 静态布局；结果表格用 `react-virtuoso` 虚拟滚动。
+- schema metadata cache 只能是进程内 LRU，key 必须包含 connection/driver/database/schema/resource/table 完整边界；重连、建库、成功 DDL 和手动刷新必须失效，异步旧响应不得覆盖当前命名空间。
+- CodeMirror 必须按连接 driver 使用 MySQL/PostgreSQL dialect；column/alias 复用原生 schema completion，JOIN 候选只基于已加载实际列的保守命名启发式，不得伪造 FOREIGN KEY 关系。
 - UI 组件库用 **shadcn/ui**（radix base，组件源码落 `src/components/ui/`，用 `cn()` 合并 className）：新建/编辑表单用 `Dialog`、右键菜单用 `ContextMenu`、二次确认用 `AlertDialog`；确认统一走全局命令式 `confirm-store`（`await confirm({...})`）替代 `window.confirm`。
 
 **数据库（被连接的 MySQL）**

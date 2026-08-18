@@ -274,6 +274,18 @@ src-tauri/src/
 
 > 拓扑图当前用纯 CSS 线性布局，不引入 `@xyflow/react`；错误翻译 v0.1 用前端静态 `ERROR_ZH` map，完整 i18next runtime 留后续英文 UI 时接入。
 
+### 2.4 前端 metadata cache（v0.2）
+
+`src/lib/metadata-cache.ts` 提供纯内存 LRU，默认最多 128 项、TTL 5 分钟。key 固定包含 `connectionId + driver + database + schema + resource + table?`，其中 resource 为 schemas / tables / columns；不能以同名 database/schema/table 复用其他连接或 driver 的结果。读取命中会提升最近使用顺序，过期项在读取时删除，进程退出后不保留。
+
+`session-store` 在 schema、table、column 按需加载时先查 cache；连接重开/关闭、新建 database 及成功执行 CREATE / ALTER / DROP / TRUNCATE / RENAME / COMMENT 后清除该连接的全部 metadata。树顶部“刷新”会失效当前 database 下的分区并重新请求 database、schema、table 和当前展开列；异步响应仍需核对当前 connection/database/schema/table，旧响应不得覆盖新选择。
+
+### 2.5 Schema-aware SQL completion（v0.2）
+
+`src/lib/sql-completion.ts` 是 React/CodeMirror 组件之外的纯 metadata 适配层。编辑器按连接 driver 选择 `MySQL` 或 `PostgreSQL` dialect；MySQL 以 database、PostgreSQL 以 schema 作为 CodeMirror `defaultSchema`。用户在对象树展开过的列会按 table 累积在当前 session，CodeMirror 原生 schema completion 据此提供 column 与 alias 补全，列候选附带类型、nullable、key 和 comment。
+
+JOIN 候选不读取或假造 FOREIGN KEY：只使用实际加载的列元数据，按 `target_id → target.id`、反向关系或同名 key/id 列做保守启发式。输入 `JOIN <prefix>` 时，自定义 completion source 返回 `target ON source.column = target.column` 片段；目标列元数据未加载或关系不明确时不提供候选。解析器跳过字符串/注释并支持 MySQL 反引号、PostgreSQL 双引号及 schema-qualified table。
+
 ---
 
 ## 3. crate 详解

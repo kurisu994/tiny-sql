@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**v0.1.0 已于 2026-08-18 正式发布，v0.2 Week 1/2 后端与 Week 3 多 driver 应用接线已完成。** PostgreSQL 已接入 `AppState`、Tauri commands、连接表单和 database → schema → table 浏览树；MySQL/PostgreSQL 真实 driver integration 共 9 项全绿。带口令私钥测试、SSH 三类运行故障上报和安全 SQL 行号三项历史代码承诺均已关闭，V2-CP1 已通过；Tauri 调试包已验证 MySQL 直连、元数据树与 `SELECT 1`，V2-T3.4 仍缺 PostgreSQL、切换/取消与 1 跳 SSH 验收，因此 CP2 保持未完成。
+**v0.1.0 已于 2026-08-18 正式发布，v0.2 Week 1/2 后端、Week 3 多 driver 应用接线与 V2-T5.1-T5.3 schema intelligence 主链已完成。** PostgreSQL 已接入 `AppState`、Tauri commands、连接表单和 database → schema → table → column 浏览树；MySQL/PostgreSQL 真实 driver integration 共 9 项全绿。带口令私钥测试、SSH 三类运行故障上报和安全 SQL 行号三项历史代码承诺均已关闭，V2-CP1 已通过；Tauri 调试包已验证 MySQL 直连、元数据树与 `SELECT 1`，V2-T3.4 仍缺 PostgreSQL、切换/取消与 1 跳 SSH 验收，因此 CP2 保持未完成。
 
 ### 本轮核对后的事实基线
 
@@ -18,7 +18,7 @@
 - 自动更新：已在 `/Applications/tiny-sql.app` 从 v0.0.3 通过原生菜单 `Check for Updates...` 发现 v0.1.0，完成签名更新包下载、安装和重启；重启后 bundle 版本为 0.1.0，连接配置保留，更新菜单仍可用。
 - 手动检查更新反馈：应用菜单触发检查后，有更新继续打开下载弹窗；无更新改为弹窗提示“当前已是最新版本”，失败也显示结果。后台每日自动检查保持静默。
 - P0 SQL/SSH 修复：2026-07-13 已在真实 MySQL 上验证元数据语句、JOIN 重名列、顶层 LIMIT、截断止损和测试连接 host key 校验；当时 `just check` 与 4 个 integration test 通过。
-- v0.2 当前验证：`db-driver` 26 个单测、`ssh-multihop` 5 个单测、`app_lib` 18 个单测、前端 42 个测试及 workspace Clippy/TypeScript/Next.js build 均通过；5 个真实 MySQL integration 与 4 个真实 PostgreSQL integration 全绿。PostgreSQL 15/18 双端点仍留正式版兼容矩阵，当前单一本地实例不能替代。
+- v0.2 当前验证：`db-driver` 26 个单测、`ssh-multihop` 5 个单测、`app_lib` 18 个单测、前端 59 个测试及 workspace Clippy/TypeScript/Next.js build 均通过；5 个真实 MySQL integration 与 4 个真实 PostgreSQL integration 全绿。PostgreSQL 15/18 双端点仍留正式版兼容矩阵，当前单一本地实例不能替代。
 
 ## 已实现能力
 
@@ -29,7 +29,9 @@
 - 多 driver 基础：对象安全的 `Driver` 契约已覆盖 kind、ping、database/schema/table/column metadata、query/取消与 close；`MetadataScope` 显式区分 database/schema，MySQL 的 Tauri 生产调用面保持兼容。
 - PostgreSQL：独立 `postgres.rs` 已实现直连、四层 metadata、query/动态解码、DML `RETURNING`、10 万行上限与独立 control pool `pg_cancel_backend` 取消；`ActiveDriver`、通用 commands、连接表单和 schema 浏览树均已接线，真实 integration 全绿。
 - SQL 分类：SELECT/WITH 为读；SHOW/EXPLAIN/DESC/DESCRIBE 为元数据；其余需 `allow_write`。前后端规则同构，`EXPLAIN ANALYZE` 写语句仍需确认。
-- UI：纯 CSS 拓扑图、数据库 / 表图标、数据库折叠状态与当前选择分离、react-virtuoso 结果表格。
+- UI：纯 CSS 拓扑图、database/schema/table/column 树、按需列元信息、手动对象刷新、数据库折叠状态与当前选择分离、react-virtuoso 结果表格。
+- Metadata cache：schema/table/column 使用 128 项、5 分钟 TTL 的进程内 LRU，按 connection/driver/database/schema/resource/table 完整隔离；重连、建库、成功 DDL 和手动刷新会失效。
+- SQL completion：按 driver 使用 MySQL/PostgreSQL dialect；已加载列进入 CodeMirror schema，提供 column/alias 及保守的 JOIN + ON 片段候选。
 - 发布：`v*` tag 全平台构建；预发布不生成 `latest.json`，正式版生成 stable-only updater manifest；手动检查更新无新版本或失败时显示结果弹窗。
 
 ## 已知代码 / 承诺边界
@@ -70,6 +72,8 @@
 - PostgreSQL 取消使用独立 control pool 调 `pg_cancel_backend`；取消或无服务端 LIMIT 的客户端截断后关闭执行连接，避免协议残留回池。MySQL JSON 同步改用 sqlx `JsonValue`，真实测试不再返回 `<unsupported>`。
 - SQL guard 按方言处理 PostgreSQL `TABLE`/`VALUES`、`OFFSET`/`FETCH` 与 dollar-quoted body；数据修改 CTE 仍需写确认，DML `RETURNING` 确认后返回结果行。
 - V2-CP1 三项历史承诺均以代码关闭：测试连接 passphrase 仅作瞬时参数；SSH 运行期断链按首跳/channel/accept worker 分类并去重；查询错误 IPC 只含稳定 key 与可选正整数行号。
+- V2-T5.2 cache 只保留 metadata，不持久化业务数据；手动刷新当前 database 的完整对象链，连接级 DDL 失效采用保守的整连接清理，避免解析 DDL 目标命名空间出错。
+- V2-T5.3 JOIN 候选不解析 FOREIGN KEY：只对当前命名空间已加载列使用 `target_id → target.id`、反向或同名 key/id 启发式；关系证据不足时不建议。
 - v0.2 开工前不重做 v0.1.0 发布验收；Phase 0 的应用内升级实测和 PostgreSQL 版本基线现已完成，只剩影响代码承诺的已知缺口。发布后的稳定时长和社区反馈只用于调整 P2 优先级。
 - PostgreSQL v0.2 正式支持 15-18，最低版本为 15；必测 `15.latest` 与当前最新稳定大版本 `18.latest`。14 及以下仅 best-effort 且不主动阻止连接；若 RC 前 PostgreSQL 19 正式发布，则补一次最新 GA 发布回归。
 - 更新检查反馈按触发来源区分：后台每日检查无更新或失败时保持静默；用户从应用菜单手动检查时必须显示“已是最新版本”或失败原因。
@@ -82,7 +86,8 @@
 
 1. 完成 V2-T3.4：在真实 Tauri 应用中补验 PostgreSQL 直连、MySQL/PostgreSQL 各自 1 跳 SSH、连接切换与取消不串线，通过后关闭 V2-CP2。
 2. 确认 Week 4 安全方案：Argon2id v19（19 MiB / t=2 / p=1）派生 32 字节 key、AES-256-GCM v2 envelope、后端独立 secrets map 与可回滚原子迁移；确认后再改存储协议。
-3. 准备真实 MySQL TLS 正反例环境，验收 CA、hostname 与客户端证书路径。
+3. 完成 V2-T5.4：回归大 schema 性能、并发 metadata 请求和快速切换 schema，证明旧请求不会覆盖新选择。
+4. 准备真实 MySQL TLS 正反例环境，验收 CA、hostname 与客户端证书路径。
 
 ## 阻塞 / 风险
 

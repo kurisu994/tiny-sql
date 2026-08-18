@@ -293,11 +293,11 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-100** PostgreSQL driver（后端与 AppState/Tauri/UI 代码已接线，真实 driver integration 通过；Tauri 直连/1 跳 SSH 应用验收仍待 V2-T3.4）
 - **FR-102** 加密 passphrase 存储（用户主密码 derive key）
 - **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（基础模式/路径已接线）
-- **FR-104** Schema-aware 智能联想（点 user_id 列自动提示 JOIN 候选）
+- **FR-104** Schema-aware 智能联想：按 MySQL/PostgreSQL 方言补全当前命名空间的 table、column 和 alias；已加载列满足 `target_id → target.id`、反向关系或同名 key/id 时，在输入 `JOIN` 后提供带 ON 条件的候选片段。
 - **FR-105** 实时隧道延迟动画（每跳的 RTT 显示在边上）
 - **FR-106** SQL 历史
 - **FR-107** 导出 CSV / Excel
-- **FR-108** 大表 LRU schema cache
+- **FR-108** 大表 LRU schema cache：按 connection/driver/database/schema 分区，覆盖 schema/table/column metadata；提供手动刷新，重连、建库和成功 DDL 后必须失效，禁止跨连接或跨 driver 命中。
 - **FR-109** 多 tab 同时执行
 - **FR-110** 隧道断开后的重连按钮
 - **FR-111** 结果表格列宽拖拽调整

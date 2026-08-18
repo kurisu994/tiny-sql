@@ -1,6 +1,6 @@
 "use client";
 
-import { sql, MySQL, type SQLNamespace } from "@codemirror/lang-sql";
+import { sql } from "@codemirror/lang-sql";
 import { forceLinting, linter, lintGutter, type Diagnostic } from "@codemirror/lint";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
@@ -12,7 +12,16 @@ import {
   extractSqlErrorLine,
   type SqlDiagnostic,
 } from "@/lib/sql-editor";
-import type { DatabaseMeta, TableMeta } from "@/lib/tauri-api";
+import {
+  buildSqlConfig,
+  joinCompletionSource,
+  type SqlCompletionMetadata,
+} from "@/lib/sql-completion";
+import type {
+  ColumnMeta,
+  DriverKind,
+  TableMeta,
+} from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 
 interface SqlCodeEditorProps {
@@ -21,9 +30,11 @@ interface SqlCodeEditorProps {
   onRun: () => void;
   disabled: boolean;
   queryErrorMsg: string | null;
-  databases: DatabaseMeta[];
-  selectedDb: string | null;
+  driver: DriverKind;
+  namespaces: string[];
+  selectedNamespace: string | null;
   tables: TableMeta[];
+  columnsByTable: Record<string, ColumnMeta[]>;
 }
 
 const editableCompartment = new Compartment();
@@ -90,25 +101,33 @@ const editorTheme = EditorView.theme({
   },
 });
 
-/** CodeMirror 6 SQL 编辑器：MySQL 高亮、schema 补全、错误 gutter。 */
+/** CodeMirror 6 SQL 编辑器：双 driver 方言、schema-aware 补全和错误 gutter。 */
 export function SqlCodeEditor({
   value,
   onChange,
   onRun,
   disabled,
   queryErrorMsg,
-  databases,
-  selectedDb,
+  driver,
+  namespaces,
+  selectedNamespace,
   tables,
+  columnsByTable,
 }: SqlCodeEditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onRunRef = useRef(onRun);
 
-  const schema = useMemo(
-    () => buildSqlSchema(databases, selectedDb, tables),
-    [databases, selectedDb, tables],
+  const completionMetadata = useMemo<SqlCompletionMetadata>(
+    () => ({
+      driver,
+      namespaces,
+      selectedNamespace,
+      tables,
+      columnsByTable,
+    }),
+    [columnsByTable, driver, namespaces, selectedNamespace, tables],
   );
 
   onChangeRef.current = onChange;
@@ -135,8 +154,8 @@ export function SqlCodeEditor({
             },
           ]),
           editableCompartment.of(editableExtensions(disabled)),
-          languageCompartment.of(sqlExtension(schema, selectedDb)),
-          lintCompartment.of(sqlLintExtension(queryErrorMsg)),
+          languageCompartment.of(sqlExtension(completionMetadata)),
+          lintCompartment.of(sqlLintExtension(queryErrorMsg, driver)),
           EditorView.updateListener.of((update) => {
             if (!update.docChanged) return;
             onChangeRef.current(update.state.doc.toString());
@@ -174,18 +193,22 @@ export function SqlCodeEditor({
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
-      effects: languageCompartment.reconfigure(sqlExtension(schema, selectedDb)),
+      effects: languageCompartment.reconfigure(
+        sqlExtension(completionMetadata),
+      ),
     });
-  }, [schema, selectedDb]);
+  }, [completionMetadata]);
 
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
-      effects: lintCompartment.reconfigure(sqlLintExtension(queryErrorMsg)),
+      effects: lintCompartment.reconfigure(
+        sqlLintExtension(queryErrorMsg, driver),
+      ),
     });
     forceLinting(view);
-  }, [queryErrorMsg]);
+  }, [driver, queryErrorMsg]);
 
   return (
     <div
@@ -202,22 +225,33 @@ function editableExtensions(disabled: boolean): Extension {
   ];
 }
 
-function sqlExtension(schema: SQLNamespace, selectedDb: string | null): Extension {
-  return sql({
-    dialect: MySQL,
-    schema,
-    defaultSchema: selectedDb ?? undefined,
-    upperCaseKeywords: true,
-  });
+function sqlExtension(metadata: SqlCompletionMetadata): Extension {
+  const config = buildSqlConfig(metadata);
+  const dialect = config.dialect;
+  return [
+    sql(config),
+    ...(dialect
+      ? [
+          dialect.language.data.of({
+            autocomplete: joinCompletionSource(metadata),
+          }),
+        ]
+      : []),
+  ];
 }
 
-function sqlLintExtension(queryErrorMsg: string | null): Extension {
+function sqlLintExtension(
+  queryErrorMsg: string | null,
+  driver: DriverKind,
+): Extension {
   return linter((view) => {
     const diagnostics = analyzeSqlEditorText(view.state.doc.toString())
       .diagnostics.map((diagnostic) => toCodeMirrorDiagnostic(view, diagnostic));
     const serverLine = extractSqlErrorLine(queryErrorMsg);
     if (serverLine) {
-      diagnostics.push(serverErrorDiagnostic(view, serverLine, queryErrorMsg ?? ""));
+      diagnostics.push(
+        serverErrorDiagnostic(view, serverLine, queryErrorMsg ?? "", driver),
+      );
     }
     return diagnostics;
   });
@@ -242,6 +276,7 @@ function serverErrorDiagnostic(
   view: EditorView,
   lineNumber: number,
   message: string,
+  driver: DriverKind,
 ): Diagnostic {
   const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
   const to = Math.min(
@@ -253,28 +288,11 @@ function serverErrorDiagnostic(
     to,
     severity: "error",
     message,
-    source: "MySQL",
+    source: driver === "postgresql" ? "PostgreSQL" : "MySQL",
   };
 }
 
 function posFromLineColumn(view: EditorView, lineNumber: number, column: number) {
   const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
   return Math.min(line.to, line.from + Math.max(0, column - 1));
-}
-
-function buildSqlSchema(
-  databases: DatabaseMeta[],
-  selectedDb: string | null,
-  tables: TableMeta[],
-): SQLNamespace {
-  const schema: Record<string, SQLNamespace> = {};
-  for (const db of databases) {
-    schema[db.name] = [];
-  }
-  if (selectedDb) {
-    schema[selectedDb] = Object.fromEntries(
-      tables.map((table) => [table.name, []]),
-    );
-  }
-  return schema;
 }

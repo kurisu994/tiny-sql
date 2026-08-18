@@ -2,6 +2,14 @@ import type { DriverKind } from "@/lib/tauri-api";
 
 /** EXPLAIN ANALYZE 的 FORMAT 修饰 token，定位被分析语句时跳过 */
 const EXPLAIN_FORMAT_TOKENS = new Set(["FORMAT", "TREE", "JSON", "TRADITIONAL"]);
+const METADATA_MUTATION_TOKENS = new Set([
+  "CREATE",
+  "ALTER",
+  "DROP",
+  "TRUNCATE",
+  "RENAME",
+  "COMMENT",
+]);
 
 /**
  * best-effort 写操作识别：与后端按首 token 分类保持一致——SELECT/WITH 与
@@ -33,6 +41,12 @@ export function needsWriteConfirmation(
     return !["SELECT", "WITH", "TABLE"].includes(analyzed);
   }
   return false;
+}
+
+/** 成功执行后需要失效 schema metadata cache 的 DDL 首 token。 */
+export function invalidatesMetadataCache(sql: string): boolean {
+  const first = sqlTokens(stripLiteralsAndComments(sql))[0];
+  return first ? METADATA_MUTATION_TOKENS.has(first) : false;
 }
 
 function stripLiteralsAndComments(sql: string): string {

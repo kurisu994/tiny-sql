@@ -84,9 +84,9 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### Week 5：Schema intelligence（13h）
 
-- [ ] **V2-T5.1 [3h]** 前端接入 `db_list_columns`，展示列类型、nullable、key、default 与 comment（FR-112）。
-- [ ] **V2-T5.2 [3h]** 增加按 connection/driver/schema 分区的 LRU metadata cache、刷新与失效策略（FR-108）。
-- [ ] **V2-T5.3 [5h]** CodeMirror 补全扩展到 column、alias 与 JOIN 候选；MySQL/PostgreSQL 分别使用正确 dialect（FR-104）。
+- [x] **V2-T5.1 [3h]** 前端已接入 `db_list_columns`，MySQL/PostgreSQL 表节点均可按需展开列，并展示类型、nullable、key、default 与 comment；收起或切换命名空间后旧请求不会覆盖当前树（FR-112）。
+- [x] **V2-T5.2 [3h]** 已增加按 connection/driver/database/schema/resource/table 完整分区的内存 LRU metadata cache（128 项、5 分钟 TTL）；schema/table/column 加载均接入 cache，提供手动刷新，并在重连、建库和成功 DDL 后按连接失效（FR-108）。
+- [x] **V2-T5.3 [5h]** CodeMirror 已按连接选择 MySQL/PostgreSQL dialect；原生 schema source 使用当前命名空间已加载的列元数据补全 column 与 alias，自定义 source 按 `target_id → target.id`、反向关系或同名 key/id 列生成可直接应用的 JOIN + ON 片段（FR-104）。
 - [ ] **V2-T5.4 [2h]** 回归大 schema 性能和并发请求，旧请求不得覆盖新选中 schema。
 
 完成条件：DDL/手动刷新后 cache 可失效；大 schema 不阻塞 UI；两个 driver 的补全结果不串库。

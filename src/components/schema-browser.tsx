@@ -1,11 +1,17 @@
 "use client";
 
+import { useMemo } from "react";
 import { Virtuoso } from "react-virtuoso";
 
 import { SqlCodeEditor } from "@/components/sql-code-editor";
 import { TopologyGraph } from "@/components/topology-graph";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
-import type { RowSet, StoredConnection, TableMeta } from "@/lib/tauri-api";
+import type {
+  ColumnMeta,
+  RowSet,
+  StoredConnection,
+  TableMeta,
+} from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -25,6 +31,11 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     expandedSchema,
     selectedSchema,
     tables,
+    expandedTable,
+    tableColumns,
+    columnsByTable,
+    loadingColumns,
+    refreshingMetadata,
     selectedTable,
     rowSet,
     loadingData,
@@ -38,6 +49,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     toggleExpandedDb,
     selectSchema,
     toggleExpandedSchema,
+    toggleTableColumns,
+    refreshMetadata,
     selectTable,
     setSqlText,
     executeSql,
@@ -45,6 +58,13 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     close,
   } = useSessionStore();
   const confirm = useConfirmStore((s) => s.confirm);
+  const sqlNamespaces = useMemo(
+    () =>
+      connection.driver === "postgresql"
+        ? schemas.map((schema) => schema.name)
+        : databases.map((database) => database.name),
+    [connection.driver, databases, schemas],
+  );
 
   async function runSql() {
     const sql = sqlText.trim();
@@ -108,7 +128,19 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
 
       <div className="flex min-h-0 flex-1">
         {/* 左：database / schema / table 树 */}
-        <aside className="w-60 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
+        <aside className="w-72 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-100 bg-white/95 px-3 py-1.5 text-xs text-neutral-500 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
+            <span>数据库对象</span>
+            <button
+              type="button"
+              onClick={refreshMetadata}
+              disabled={!connected || refreshingMetadata}
+              aria-label="刷新数据库对象"
+              className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+            >
+              {refreshingMetadata ? "刷新中…" : "刷新"}
+            </button>
+          </div>
           {!connected && (
             <p className="px-3 py-3 text-xs text-neutral-500">
               {status === "error" ? "连接失败，请检查上方断点。" : "正在建立连接…"}
@@ -136,9 +168,14 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 <TableTreeList
                   tables={tables}
                   loading={loadingData}
+                  loadingColumns={loadingColumns}
+                  expandedTable={expandedTable}
+                  columns={tableColumns}
                   selectedTable={selectedTable}
+                  onToggleColumns={toggleTableColumns}
                   onSelect={selectTable}
                   paddingClass="pl-8"
+                  columnPaddingClass="pl-12"
                 />
               )}
               {expandedDb === db.name && connection.driver === "postgresql" && (
@@ -170,9 +207,14 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                         <TableTreeList
                           tables={tables}
                           loading={loadingData}
+                          loadingColumns={loadingColumns}
+                          expandedTable={expandedTable}
+                          columns={tableColumns}
                           selectedTable={selectedTable}
+                          onToggleColumns={toggleTableColumns}
                           onSelect={selectTable}
                           paddingClass="pl-12"
+                          columnPaddingClass="pl-16"
                         />
                       )}
                     </li>
@@ -192,11 +234,13 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               onRun={runSql}
               disabled={!connected || queryRunning}
               queryErrorMsg={queryErrorMsg}
-              databases={databases}
-              selectedDb={
+              driver={connection.driver}
+              namespaces={sqlNamespaces}
+              selectedNamespace={
                 connection.driver === "postgresql" ? selectedSchema : selectedDb
               }
               tables={tables}
+              columnsByTable={columnsByTable}
             />
             <div className="mt-2 flex items-center gap-2">
               <button
@@ -257,15 +301,25 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
 function TableTreeList({
   tables,
   loading,
+  loadingColumns,
+  expandedTable,
+  columns,
   selectedTable,
+  onToggleColumns,
   onSelect,
   paddingClass,
+  columnPaddingClass,
 }: {
   tables: TableMeta[];
   loading: boolean;
+  loadingColumns: boolean;
+  expandedTable: string | null;
+  columns: ColumnMeta[];
   selectedTable: string | null;
+  onToggleColumns: (table: string) => Promise<void>;
   onSelect: (table: string) => Promise<void>;
   paddingClass: string;
+  columnPaddingClass: string;
 }) {
   return (
     <ul className="pb-1">
@@ -276,23 +330,125 @@ function TableTreeList({
       )}
       {tables.map((table) => (
         <li key={table.name}>
-          <button
-            onClick={() => onSelect(table.name)}
-            title={table.comment ?? undefined}
+          <div
             className={cn(
-              "flex w-full min-w-0 items-center gap-1.5 px-3 py-1 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800",
+              "flex w-full min-w-0 items-center gap-1 px-3 py-1 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800",
               paddingClass,
               selectedTable === table.name
                 ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
                 : "text-neutral-600 dark:text-neutral-400",
             )}
           >
-            <TableTreeIcon active={selectedTable === table.name} />
-            <span className="min-w-0 truncate">{table.name}</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => onToggleColumns(table.name)}
+              aria-label={`${expandedTable === table.name ? "收起" : "展开"} ${table.name} 的列`}
+              className="w-3 shrink-0 text-center text-[10px] text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+            >
+              {expandedTable === table.name ? "▾" : "▸"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelect(table.name)}
+              title={table.comment ?? undefined}
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+            >
+              <TableTreeIcon active={selectedTable === table.name} />
+              <span className="min-w-0 truncate">{table.name}</span>
+            </button>
+          </div>
+          {expandedTable === table.name && (
+            <ColumnTreeList
+              columns={columns}
+              loading={loadingColumns}
+              paddingClass={columnPaddingClass}
+            />
+          )}
         </li>
       ))}
     </ul>
+  );
+}
+
+/** 表下按需展开的列信息，完整展示类型、可空、索引、默认值和注释。 */
+function ColumnTreeList({
+  columns,
+  loading,
+  paddingClass,
+}: {
+  columns: ColumnMeta[];
+  loading: boolean;
+  paddingClass: string;
+}) {
+  if (loading) {
+    return (
+      <p className={cn("px-3 py-1 text-xs text-neutral-400", paddingClass)}>
+        加载列…
+      </p>
+    );
+  }
+  if (columns.length === 0) {
+    return (
+      <p className={cn("px-3 py-1 text-xs text-neutral-400", paddingClass)}>
+        （无列）
+      </p>
+    );
+  }
+  return (
+    <ul className="pb-1">
+      {columns.map((column) => (
+        <li
+          key={column.name}
+          className={cn(
+            "px-3 py-1 text-[11px] text-neutral-500 dark:text-neutral-400",
+            paddingClass,
+          )}
+        >
+          <div className="flex min-w-0 items-center gap-1">
+            <ColumnTreeIcon />
+            <span className="min-w-0 truncate font-medium text-neutral-700 dark:text-neutral-200">
+              {column.name}
+            </span>
+            {column.columnKey && (
+              <span className="shrink-0 rounded bg-amber-100 px-1 text-[9px] font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                {column.columnKey}
+              </span>
+            )}
+          </div>
+          <div className="ml-5 flex flex-wrap gap-x-1.5 text-[10px] leading-4">
+            <span title="列类型">{column.dataType}</span>
+            <span title="是否允许 NULL">
+              {column.nullable ? "NULL" : "NOT NULL"}
+            </span>
+          </div>
+          {column.defaultValue !== null && (
+            <p
+              className="ml-5 truncate text-[10px] leading-4"
+              title={column.defaultValue}
+            >
+              默认 {column.defaultValue}
+            </p>
+          )}
+          {column.comment && (
+            <p
+              className="ml-5 line-clamp-2 text-[10px] leading-4"
+              title={column.comment}
+            >
+              {column.comment}
+            </p>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ColumnTreeIcon() {
+  return (
+    <span
+      className="h-3 w-3 shrink-0 rounded-sm border border-cyan-500/50 bg-cyan-100 shadow-sm dark:bg-cyan-900"
+      aria-hidden="true"
+    />
   );
 }
 

@@ -5,6 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@tauri-apps/api/core";
 
+import { metadataCache } from "@/lib/metadata-cache";
 import type { DriverKind, StoredConnection } from "@/lib/tauri-api";
 import { useSessionStore } from "@/stores/session-store";
 
@@ -51,6 +52,7 @@ function routeInvoke(map: Record<string, unknown>) {
 
 beforeEach(() => {
   mockInvoke.mockReset();
+  metadataCache.clear();
   useSessionStore.setState({
     openId: null,
     activeConnection: null,
@@ -64,6 +66,11 @@ beforeEach(() => {
     expandedSchema: null,
     selectedSchema: null,
     tables: [],
+    expandedTable: null,
+    tableColumns: [],
+    columnsByTable: {},
+    loadingColumns: false,
+    refreshingMetadata: false,
     selectedTable: null,
     rowSet: null,
     loadingData: false,
@@ -266,6 +273,191 @@ describe("session-store", () => {
       rowLimit: 1000,
       allowWrite: false,
     });
+  });
+
+  it("MySQL 按需加载表列并保留完整元信息", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      activeConnection: sampleConnection("mysql"),
+      selectedDb: "app",
+    });
+    routeInvoke({
+      db_list_columns: [
+        {
+          name: "id",
+          dataType: "bigint unsigned",
+          nullable: false,
+          columnKey: "PRI",
+          defaultValue: "0",
+          comment: "主键",
+        },
+      ],
+    });
+
+    await useSessionStore.getState().toggleTableColumns("users");
+
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_columns", {
+      id: "c1",
+      database: "app",
+      schema: null,
+      table: "users",
+    });
+    const state = useSessionStore.getState();
+    expect(state.expandedTable).toBe("users");
+    expect(state.tableColumns).toEqual([
+      {
+        name: "id",
+        dataType: "bigint unsigned",
+        nullable: false,
+        columnKey: "PRI",
+        defaultValue: "0",
+        comment: "主键",
+      },
+    ]);
+    expect(state.loadingColumns).toBe(false);
+
+    await useSessionStore.getState().toggleTableColumns("users");
+    await useSessionStore.getState().toggleTableColumns("users");
+    expect(
+      mockInvoke.mock.calls.filter(([command]) => command === "db_list_columns"),
+    ).toHaveLength(1);
+  });
+
+  it("PostgreSQL 加载列时携带当前 schema", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      activeConnection: sampleConnection("postgresql"),
+      selectedDb: "app",
+      selectedSchema: "audit",
+    });
+    routeInvoke({ db_list_columns: [] });
+
+    await useSessionStore.getState().toggleTableColumns("events");
+
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_columns", {
+      id: "c1",
+      database: "app",
+      schema: "audit",
+      table: "events",
+    });
+  });
+
+  it("收起表后忽略仍在返回的旧列请求", async () => {
+    let resolveColumns: (value: unknown) => void = () => {};
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_list_columns") {
+        return new Promise((resolve) => {
+          resolveColumns = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    useSessionStore.setState({
+      openId: "c1",
+      activeConnection: sampleConnection("mysql"),
+      selectedDb: "app",
+    });
+
+    const pending = useSessionStore.getState().toggleTableColumns("users");
+    await useSessionStore.getState().toggleTableColumns("users");
+    resolveColumns([
+      {
+        name: "id",
+        dataType: "bigint",
+        nullable: false,
+        columnKey: "PRI",
+        defaultValue: null,
+        comment: null,
+      },
+    ]);
+    await pending;
+
+    const state = useSessionStore.getState();
+    expect(state.expandedTable).toBeNull();
+    expect(state.tableColumns).toEqual([]);
+    expect(state.loadingColumns).toBe(false);
+  });
+
+  it("手动刷新会重新请求当前 database、table 与展开列", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      activeConnection: sampleConnection("mysql"),
+      selectedDb: "app",
+      expandedDb: "app",
+      tables: [
+        { name: "users", tableType: "BASE TABLE", rows: null, comment: null },
+      ],
+      expandedTable: "users",
+      tableColumns: [],
+    });
+    routeInvoke({
+      db_list_databases: [{ name: "app", isCurrent: true }],
+      db_list_tables: [
+        { name: "members", tableType: "BASE TABLE", rows: 2, comment: null },
+      ],
+      db_list_columns: [
+        {
+          name: "fresh_column",
+          dataType: "varchar(20)",
+          nullable: true,
+          columnKey: "",
+          defaultValue: null,
+          comment: null,
+        },
+      ],
+    });
+
+    await useSessionStore.getState().refreshMetadata();
+
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_databases", { id: "c1" });
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_tables", {
+      id: "c1",
+      database: "app",
+      schema: null,
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_columns", {
+      id: "c1",
+      database: "app",
+      schema: null,
+      table: "users",
+    });
+    const state = useSessionStore.getState();
+    expect(state.tables[0]?.name).toBe("members");
+    expect(state.tableColumns[0]?.name).toBe("fresh_column");
+    expect(state.refreshingMetadata).toBe(false);
+  });
+
+  it("成功执行 DDL 后清除当前连接的 metadata cache", async () => {
+    metadataCache.set(
+      {
+        connectionId: "c1",
+        driver: "mysql",
+        database: "app",
+        schema: null,
+        resource: "tables",
+      },
+      [{ name: "users" }],
+    );
+    useSessionStore.setState({ openId: "c1" });
+    routeInvoke({
+      db_query: { columns: ["affected_rows"], rows: [["0"]], truncated: false },
+    });
+
+    await useSessionStore
+      .getState()
+      .executeSql("ALTER TABLE users ADD COLUMN name varchar(20)", {
+        allowWrite: true,
+      });
+
+    expect(
+      metadataCache.get({
+        connectionId: "c1",
+        driver: "mysql",
+        database: "app",
+        schema: null,
+        resource: "tables",
+      }),
+    ).toBeUndefined();
   });
 
   it("收起树后当前 database 的表列表仍可加载完成", async () => {
