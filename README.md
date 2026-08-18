@@ -113,7 +113,7 @@ docs/                       # 项目文档
 ├── REQUIREMENTS.md         # 需求文档
 ├── PLAN.md                 # 开发计划（按周）
 ├── ARCHITECTURE.md         # 架构设计（数据流 / 状态机 / 错误模型）
-└── ROADMAP.md              # 路线图（v0.1 / v0.2 / v0.3+）
+└── ROADMAP.md              # 路线图（v0.1 / v0.2 / v0.3-v0.5+）
 
 CHANGELOG.md                # 变更日志
 justfile                    # 项目命令入口

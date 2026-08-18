@@ -10,7 +10,7 @@
 
 ### 本轮核对后的事实基线
 
-- Git：`main` / `origin/main` 均为 `7f566ae`，2026-08-18 已执行 `git fetch origin`，工作区在审计开始时干净。
+- Git：`main` / `origin/main` 均为 `354ec35`，工作区在本轮路线图调整开始时干净。
 - 版本：`package.json`、`Cargo.lock`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 一致为 `0.0.3`。
 - CI：最新 main run（`7f566ae`）于 2026-08-08 成功。
 - Release：`v0.0.3` workflow 成功；GitHub Release 已有 macOS arm64/x64 `.dmg` 和 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 与 `latest.json`。跨平台打包、签名产物上传和 manifest 生成已通过真实云端验证。
@@ -53,6 +53,8 @@
 
 - 代码是事实源：把 SSL/TLS 描述为“已接线、默认禁用、真实环境未验收”，不再写成完全未实现，也不宣称生产验证完成。
 - 把 `v0.0.3` 云端成功作为发布流水线基线；v0.1 RC 仍需下载、安装与真实业务链路验证。
+- Navicat 日常替代能力不新增突兀的 v2.0：剔除 v0.2 已规划的 SQL 历史、CSV/Excel 导出、column 树和多查询 tab 后，剩余能力按依赖拆到 v0.3（查询/浏览/事务）、v0.4（安全编辑/对象管理/导入）和 v0.5+（备份同步/权限/ER/BI/AI）。
+- 原“图形化编辑、ER、备份永久不做”边界已收窄：v0.4 只允许主键单表安全编辑与有 SQL 预览的对象操作；v0.5+ 可做 ER 和备份，但 JOIN/聚合结果写回、应用 RBAC 与独立监控平台仍不做。
 - `activeContext.md` 只保留当前状态；历史决策和已解决问题继续放 `progress.md`。
 - 不把 ignored 的 `docs/dogfooding-log.md` 初始记录改写成已完成；它仍准确表明真实 dogfooding 尚未开始。
 

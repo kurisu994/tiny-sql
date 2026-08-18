@@ -9,7 +9,9 @@
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
 | v0.1.0 | 🚧 开发中（Week 5 dogfooding） | 主体实现完成；原定 2026-08 月初发布已延期，待真实 3 跳 / MySQL 5.7 / 同事试用 / GIF / RC |
 | v0.2 | 规划 | PG driver + passphrase 加密 + TLS 验收/UX + Schema-aware 联想 |
-| v0.3+ | 规划 | 平台安装体验打磨 + crate 独立 publish + 多集群 diff |
+| v0.3 | 规划 | 保存/打开 SQL、index/constraint 树、对象搜索、服务端筛选分页、多结果与可靠事务 |
+| v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
+| v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
 
 CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级写法。CodeMirror、schema 树图标与数据库展开 / 收起已发布在 `0.0.3`；当前 `[Unreleased]` 记录 2026-07-13 的元数据 SQL、JOIN/LIMIT、并发查询和测试连接 host key 修复。
 
@@ -69,9 +71,10 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | `b5a2a3b` / `9c5f9fd` | fix: 修复 SQL 查询链路与测试连接 host key 校验 |
 | `f12fa45` | docs: 记录 P0 修复到 CHANGELOG 与活跃上下文 |
 | `0b13a76` | chore: 更新 Cargo.lock 依赖 |
-| `7f566ae` | docs: 同步文档与当前代码实现（HEAD / origin/main） |
+| `7f566ae` | docs: 同步文档与当前代码实现 |
+| `354ec35` | docs: 对齐代码与项目进度（HEAD / origin/main） |
 
-> 注：2026-08-18 已执行 `git fetch origin`；本地 `main` 与 `origin/main` 均为 `7f566ae`，没有领先/落后提交。发 RC 前仍需重新刷新一次远端与 tag 状态。
+> 注：本地 `main` 与 `origin/main` 均为 `354ec35`，没有领先/落后提交。发 RC 前仍需重新刷新一次远端与 tag 状态。
 
 ## 重大决策与架构变更记录
 
@@ -101,6 +104,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 - **2026-07-03 SQL 编辑器与 schema 树交互收口**：SQL 输入从裸 textarea 升级到 CodeMirror 6，提供 MySQL 高亮、行号、基础 database/table 补全、本地结构错误 gutter 和 `Cmd/Ctrl+Enter`；前端虽有 MySQL `line N` 解析逻辑，但后端只返回稳定 i18n key，服务端错误行标识尚未真正接通。schema 树改成数据库双击打开 / 切换、单击折叠已打开库，并通过独立 `expandedDb` 保留当前表和结果。
 - **2026-08-08 文档与代码全面对齐**：全量核对 README / REQUIREMENTS / ARCHITECTURE / PLAN / ROADMAP / memory-bank 与当前代码的偏差并同步。要点：(1) SQL 执行描述从「子查询包装」统一改为「顶层安全追加 LIMIT + 客户端截断兜底」（derived table 包装在多表 JOIN 重名列触发 1060，已弃用）；(2) 写操作二次确认从「黑名单正则」改为「首 token 白名单分类」（SELECT/WITH 读、SHOW/EXPLAIN/DESC/DESCRIBE 元数据免确认、其余一律需 allow_write），前后端同构；(3) 状态机收敛为 4 态（pending/connected/failed/lost），ARCHITECTURE 与代码及 FR-015 对齐，移除不存在的 connecting/reconnecting/latency_ms；(4) passphrase 流程改为 `connection_open(id, passphrase?)` 参数直传 + per-connection 会话缓存，无 `ssh_set_passphrase` command；(5) master key 从「内置固定 key」改为「首次随机生成落盘 master.key（0600）」；(6) keepalive 机制改为 russh 内置配置 + 每跳监控 task，非自建 interval 循环；(7) control pool 与主 pool 同一连接参数（非独立本地端口）；(8) 加密文件结构改为扁平 `Vec<StoredConnection>`（无 version 包装 / mysql 嵌套），schema 补充 ssl / advanced；(9) 明确标注 v0.1 已知 UI 缺口：列清单展示、列宽拖拽、重连按钮、语言下拉框均未实现，已登记到 ROADMAP v0.2（FR-110~112）与 ARCHITECTURE §10.3；(10) playwright E2E 推迟状态补齐到 PLAN / ARCHITECTURE，integration 命令修正为 `cargo test -p db-driver -- --include-ignored`。
 - **2026-08-18 进度与事实基线再对齐**：刷新 `origin` 并核对 GitHub Release / Actions。确认 `main == origin/main == 7f566ae`、当前应用版本为 `0.0.3`、最新 main CI 成功、v0.0.3 全平台 Release 与 `latest.json` 已成功；同时发现 MySQL TLS 已接线但未真实验收、passphrase 测试连接未覆盖、ChannelDropped / AcceptLoopDied 尚无运行时构造路径，并据此修正文档口径。
+- **2026-08-18 后续版本吸收 Navicat 能力缺口**：不新增 v2.0，也不重复 v0.2 已有的 SQL 历史、CSV/Excel 导出、column 树和多查询 tab；把其余能力按依赖拆入 v0.3（查询工作台、元数据检索、服务端筛选分页、可靠事务）、v0.4（主键单表安全编辑、Table/View 对象管理、CSV/SQL dump 导入）和 v0.5+（备份同步、用户权限、ER/BI/AI）。同时撤销“图形化编辑、ER、备份永久不做”的旧边界，保留单表主键定位、SQL 预览确认和不建设独立监控平台等安全约束。
 
 ## 已解决的阻碍
 
