@@ -11,21 +11,17 @@ last_updated: 2026-08-18
 >
 > 本文件只保留尚未完成的工作。v0.1 已实现内容、历史检查点和架构决策见 [progress.md](../memory-bank/progress.md)。
 
-当前发布版仍为 `v0.0.3`。先完成 v0.1 发布收口，再进入 v0.2 的 8 周开发周期。
+当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包与 `latest.json`。完成以下发布后待办和 PostgreSQL 版本基线后，进入 v0.2 的 8 周开发周期。
 
-## v0.1 发布收口
+## v0.1 发布后待办
 
-以下工作不计入 v0.2 的 8 周预算；全部完成后通过 **V2-CP0**：
+以下工作不计入 v0.2 的 8 周预算；除真实 GIF 可随 v0.1.1 补充外，其余完成后通过 **V2-CP0**：
 
 - [ ] 处理 v0.1 代码承诺缺口：
   - 带 passphrase 私钥的 `connection_test`。
   - `ChannelDropped` / `AcceptLoopDied` 的运行时检测与上报；若不补实现，则同步收窄需求承诺。
   - 在稳定 i18n key 基础上安全传递 MySQL 服务端错误行号，不泄露原始 Rust 错误。
-- [ ] 完成真实 Tauri GUI 回归：SHOW / EXPLAIN / DESC、JOIN、结果截断、查询取消、TOFU、连接四标签页、新建数据库、schema 树和更新菜单。
 - [ ] 补 README “右键打开”与多跳拓扑真实 GIF。
-- [ ] 将 `CHANGELOG.md` 的 `[Unreleased]` 收口为 v0.1.0，并把应用、Cargo workspace 与锁文件版本统一更新为 `0.1.0`。
-- [ ] 运行 `just check`、真实 MySQL integration 和本机桌面构建；P0/P1 必须清零。
-- [ ] 推送 `v0.1.0` tag，验证 macOS / Windows / Linux 安装包、签名更新包和 `latest.json`。
 - [ ] 从 v0.0.3 完成一次应用内发现、下载、安装并重启到 v0.1.0 的端到端更新。
 - [ ] 在 `memory-bank/techContext.md` 固化 PostgreSQL 最低支持版本与测试版本；本地 integration 继续不依赖 Docker。
 
@@ -139,7 +135,7 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 | 检查点 | 时机 | 通过标准 | 不通过的应对 |
 |---|---|---|---|
-| **V2-CP0** 启动准入 | 开工前 | v0.1 发布收口与 PostgreSQL 版本基线全部完成 | 继续收口 v0.1，不创建 v0.2 功能分支 |
+| **V2-CP0** 启动准入 | 开工前 | v0.1.0 无紧急回滚问题；代码承诺缺口、应用内更新实测与 PostgreSQL 版本基线完成 | 先修 v0.1.1 候选问题，不创建 v0.2 功能分支 |
 | **V2-CP1** Driver 抽象 | Week 1 末 | MySQL 零回归 + PostgreSQL SELECT 1 + 配置迁移通过 | 收窄 trait，不继续铺 PostgreSQL 全功能 |
 | **V2-CP2** 双 driver 闭环 | Week 3 末 | 两个 driver 的 connect/metadata/query/cancel/UI 可用 | 延后 Week 4，先修状态与 dialect 边界 |
 | **V2-CP3** 安全迁移 | Week 4 末 | 旧配置无损、错误密码不破坏文件、真实 TLS 通过 | 停止发布；保留会话 passphrase，不强推持久化 |

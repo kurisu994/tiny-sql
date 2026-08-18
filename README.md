@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：当前预览版为 v0.0.3，v0.1 dogfooding 门槛已由项目提交确认完成，但正式发布仍延期**。Week 1-4 的实现与静态验证已经落地；v0.0.3 也已通过 GitHub Actions 产出 macOS / Windows / Linux 安装包、签名更新包和 `latest.json`。截至 2026-08-18，仓库与远端仍没有 `v0.1.0-rc1` / `v0.1.0` tag，应用版本仍是 `0.0.3`，README 真实 GIF 与少量 v0.1 承诺缺口也尚未收口。完整范围与进度见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：v0.1.0 已于 2026-08-18 正式发布。** GitHub Actions 已产出 macOS Apple Silicon / Intel、Windows x64、Linux x64 安装包、签名更新包和四平台 `latest.json`。当前已知限制与后续计划见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -121,9 +121,9 @@ justfile                    # 项目命令入口
 
 ## 安装
 
-> v0.1 尚未正式发布。当前可从 [Releases](https://github.com/kurisu994/tiny-sql/releases) 下载 v0.0.3 预览版；Week 5 dogfooding 继续使用本地或 GitHub Release 产出的桌面安装包。
+> 从 [v0.1.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.1.0) 下载当前稳定版。
 
-v0.1 先提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`；Windows / Linux 产物先用于 dogfooding 与兼容验证。
+v0.1.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
 
 正式版会在 GitHub Release 中附带 `latest.json` 与签名更新包，应用内自动更新只跟随 GitHub 的 latest 正式版。`v*-rc*`、beta、alpha 预发布版本仍需手动下载验证。
 
@@ -139,9 +139,9 @@ xattr -cr /Applications/tiny-sql.app
 
 然后重新打开即可。
 
-## Week 5 dogfooding
+## v0.1 验收范围
 
-dogfooding 目标是确认 v0.1 能不能真实承担日常多跳 MySQL 查询，而不只是通过静态测试。
+以下场景用于持续回归 v0.1 的日常多跳 MySQL 查询能力。
 
 ### 必验场景
 

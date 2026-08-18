@@ -7,13 +7,13 @@
 | 版本 | 状态 | 说明 |
 |---|---|---|
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
-| v0.1.0 | 🚧 发布收口中 | CP-3/4/5/6 与试用已由 `4f54f02` 标记完成；待 GIF、v0.1 承诺缺口、RC / 正式 tag |
+| v0.1.0 | ✅ 正式版已发布 | 2026-08-18 全平台 Release 成功，含安装包、签名更新产物与四平台 `latest.json` |
 | v0.2 | 规划 | 8 周约 98h：PG driver + passphrase 加密 + TLS + schema intelligence + 查询工作台 + RTT/重连 |
 | v0.3 | 规划 | 保存/打开 SQL、index/constraint 树、对象搜索、服务端筛选分页、多结果与可靠事务 |
 | v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
 | v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
 
-CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级写法。CodeMirror、schema 树图标与数据库展开 / 收起已发布在 `0.0.3`；当前 `[Unreleased]` 记录 2026-07-13 的元数据 SQL、JOIN/LIMIT、并发查询和测试连接 host key 修复。
+CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 保持为空。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 
 ## 开发阶段完成度（5-6 周计划）
 
@@ -23,7 +23,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | Week 2 | 测试基础设施 + `MySqlDriver` struct + 加密 store + 连接管理 UI | ✅ 静态验证完成（playwright E2E 推迟；CP-2 工时未记录） |
 | Week 3 | 多跳 SSH + keepalive + 错误模型三变体 + TOFU + 表浏览 | ✅ 实现完成，真实环境状态由 CP-4 验收覆盖 |
 | Week 4 | SQL 执行（顶层安全追加 LIMIT + KILL QUERY）+ 拓扑图 + 全平台 Release | ✅ 代码、云端流水线与 CP-4 已完成 |
-| Week 5 | dogfooding + 修 bug + README/GIF + tag v0.1.0 | 🚧 Dogfooding/CP 已由用户标记完成；GIF 与 tag 尚缺 |
+| Week 5 | dogfooding + 修 bug + README/GIF + tag v0.1.0 | ✅ 正式版已发布；真实 GIF 作为发布后文档改进 |
 | Week 6 / 7 | 缓冲 / launch（V2EX + 掘金） | ✅ 用户提交 `4f54f02` 标记完成 |
 
 ## Git 提交历史
@@ -75,8 +75,11 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 | `354ec35` | docs: 对齐代码与项目进度 |
 | `a1c7fef` | docs(roadmap): 规划后续管理能力 |
 | `4f54f02` | docs(PLAN): 更新任务状态以反映当前进度（HEAD / origin/main） |
+| `365b51f` | docs(plan): 精简开发计划待办 |
+| `fff24ed` | fix(release): 使用中文发布提交信息 |
+| `624b108` | release: 发布 v0.1.0（`v0.1.0` tag） |
 
-> 注：2026-08-18 本地 `main` 与 `origin/main` 均为 `4f54f02`；刷新远端 tag 后最高仍为 `v0.0.3`。发 RC 前仍需重新复核版本文件、tag 与工作区状态。
+> 注：`v0.1.0` tag 固定指向 `624b108`；后续发布状态文档提交只推进 `main`，不移动已发布 tag。
 
 ## 重大决策与架构变更记录
 
@@ -111,6 +114,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 - **2026-08-18 v0.2 启动前置收窄**：用户确认 §2.2 vertical slice 全部通过；v0.2 前增加不计入 8 周的 Phase 0，只补发 v0.1.0、验收安装/更新链路并固化 PostgreSQL 版本基线。发布后的稳定时长与社区反馈只影响 P2 排序，不再阻塞 Week 1。
 - **2026-08-18 PLAN 转为纯待办文档**：`docs/PLAN.md` 从 633 行历史型计划精简为约 170 行，只保留 v0.1 发布收口和 v0.2 未完成任务；已实现周计划、旧检查点、评审落地表继续保存在本文件的历史记录中。
 - **2026-08-18 v0.1 状态冲突收口**：用户提交 `4f54f02` 将 CP-3/4/5/6、试用与 launch 标记完成，项目记忆据此接受外部验收状态；但刷新远端 tag 后最高仍为 `v0.0.3`、版本文件仍为 `0.0.3` 且仓库无 GIF，因此 tag/GIF/正式发布继续按未完成记录。
+- **2026-08-18 v0.1.0 正式发布**：本地 `just check`、4 个真实 MySQL integration test 和 Tauri 生产构建通过；`624b108` 统一版本并切出 CHANGELOG 0.1.0，`v0.1.0` tag 触发 Release run `32110227419`。macOS arm64/x64、Windows x64、Linux x64 与发布 job 全绿，Release 安装包、签名更新产物和四平台 `latest.json` 均已验证。发布后仍保留应用内升级端到端实测、README 真实 GIF 与三个已知能力缺口。
 
 ## 已解决的阻碍
 
@@ -130,15 +134,15 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 - **CP-4 / GUI dogfooding**：用户提交 `4f54f02` 已标记完成；真实记录在 ignored `docs/dogfooding-log.md`，本轮未读取其中环境细节。
 - **CP-2** Week 2/3 累计工时未正式记录；该历史检查点不再进入当前待办计划。
 - **CP-3** MySQL 5.7 兼容已由用户提交 `4f54f02` 标记完成；不进入 CI 的策略不变。
-- **RC 产物验证**：跨平台 Release workflow 已由 v0.0.3 真实验证；`v0.1.0-rc1` / `v0.1.0` tag 仍未创建，RC 下载后的真实安装与业务链路仍待验证。
+- **v0.1.0 产物验证**：全平台 Release workflow、安装包、签名更新产物和四平台 `latest.json` 已验证；从 v0.0.3 应用内安装并重启到 v0.1.0 仍待实测。
 - **发布脚本暂存范围**：`just version` 已会同步 `Cargo.lock` 本地 package 版本，`just release` 已收窄到版本/CHANGELOG/Cargo.lock 相关文件；正式发版前仍必须确认工作区没有无关改动。
 - **自动更新 GitHub Secrets**：release workflow 依赖 `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。本地按 Redis 项目方式把真实私钥写入 ignored `.env`，`just build` 会加载；直接 `pnpm tauri build` 不经 justfile 注入 `.env`，仍需手动 export，且无密码私钥要显式保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`。
-- **连接 tab 表单 GUI 验证**：常规 / SSH / SSL / 高级标签页、SSL 证书路径输入、高级设置 checkbox + 数字输入以及保存/测试连接手感仍待真实 Tauri GUI 点验；本轮自动浏览器工具没有可用实例，仅完成静态与构建验证。
+- **连接 tab 表单 GUI 验证**：常规 / SSH / SSL / 高级标签页、新建数据库、schema 树和更新菜单已由用户确认完成验收；环境细节不写入公开仓库。
 - **R-001** Tauri+workspace 摩擦：已规避（CP-1 通过）。
 - **R-002** caching_sha2 握手：MySQL 5.7 兼容已由用户提交 `4f54f02` 标记验证完成。
 - **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task。
-- **R-updater-release** 云端全平台 artifact 与正式版 `latest.json` 已由 v0.0.3 验证；剩余风险是从旧正式版发现新版本、下载、安装并重启的应用内端到端流程。
-- **R-ssh-runtime-errors** `ChannelDropped` / `AcceptLoopDied` 只有公共错误定义与 key 测试，当前运行路径只上报 keepalive `lost`；需在 v0.1 前补代码或收窄 P0 承诺。
+- **R-updater-release** 云端全平台 artifact 与正式版 `latest.json` 已由 v0.1.0 验证；剩余风险是从旧正式版发现新版本、下载、安装并重启的应用内端到端流程。
+- **R-ssh-runtime-errors** `ChannelDropped` / `AcceptLoopDied` 只有公共错误定义与 key 测试，当前运行路径只上报 keepalive `lost`；作为 v0.1.1 / v0.2 候选补代码或收窄承诺。
 - **R-passphrase-test** `connection_test` 不接收 passphrase，带口令私钥只能在正式打开连接时验证完整链路。
 - **R-query-error-contract** 前端 server-line gutter 需要 MySQL 行号，但后端只返回稳定 i18n key；需用结构化安全字段补行号，不能直接泄露原始 Rust/sqlx 错误。
 

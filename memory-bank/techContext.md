@@ -71,7 +71,7 @@
 - 单 job，**macOS arm64**，Node 24 + pnpm + Rust stable（含 clippy）。
 - 步骤：`pnpm install --frozen-lockfile` → `pnpm build` → `pnpm test` → `cargo fmt --all --check` → `cargo clippy --workspace -- -D warnings` → `cargo test --workspace`。
 - **CI 不跑 integration**（无 MySQL 服务器）；MySQL 5.7 已在 dogfooding 期完成验证，后续正式版前保留人工回归。
-- 最新 main CI（`7f566ae`）于 2026-08-08 成功；`v0.0.3` Release workflow 于 2026-07-03 成功并上传全平台安装包、签名产物与 `latest.json`。
+- `v0.1.0` Release workflow run `32110227419` 于 2026-08-18 成功并上传全平台安装包、签名产物与四平台 `latest.json`；tag 指向 `624b108`。
 
 ## 关键配置事实
 

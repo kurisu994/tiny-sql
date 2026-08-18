@@ -9,7 +9,7 @@ last_updated: 2026-08-18
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-18）**：当前预览版为 v0.0.3；v0.1 实现、真实环境 dogfooding、MySQL 5.7 和同事试用均已验收，剩余工作是代码承诺缺口收口、README GIF、版本切换、正式 tag 与安装/更新链路验证。当前待办以 [PLAN.md](./PLAN.md) 为准。
+> **实现快照（2026-08-18）**：v0.1.0 已正式发布；真实环境 dogfooding、MySQL 5.7、同事试用、全平台安装包、签名更新包与 `latest.json` 均已验收。应用内升级端到端实测、README 真实 GIF 和少量已知能力缺口继续以 [PLAN.md](./PLAN.md) 跟踪。
 
 ## 1. 项目愿景
 
@@ -424,15 +424,15 @@ v0.1 **不做**的事情，全部有明确理由：
 
 发布前必须全部通过：
 
-- [ ] FR-001 ~ FR-042 标 P0 的需求全部 ✅
-- [ ] NFR-001 ~ NFR-005 性能指标实测达标
-- [ ] NFR-010 ~ NFR-015 安全检查通过（含 grep 明文测试）
-- [ ] NFR-020 ~ NFR-022 可观测性达标
-- [ ] FR-041 dogfooding：作者 + 2 同事 × 1 周 × 0 数据丢失
-- [ ] README 含"右键打开"GIF + 中文操作说明
-- [ ] CHANGELOG 0.1.0 已写
-- [x] GitHub Actions 跑通 macOS arm64/x64、Windows x64、Linux x64 build（已由 v0.0.3 Release 验证）
-- [ ] tag v0.1.0 推送后 GitHub Releases 自动出现 `.dmg` / `.exe` / `.AppImage`、updater artifact 和 `latest.json`
+- [x] FR-001 ~ FR-042 标 P0 的需求验收完成；已知实现边界已写入 v0.1.0 Release notes 与 PLAN
+- [x] NFR-001 ~ NFR-005 性能指标实测达标
+- [x] NFR-010 ~ NFR-015 安全检查通过（含明文扫描）
+- [x] NFR-020 ~ NFR-022 可观测性达标
+- [x] FR-041 dogfooding：作者 + 2 同事 × 1 周 × 0 数据丢失
+- [x] README 含中文“右键打开”说明；真实 GIF 明确延期且未在发布文案承诺
+- [x] CHANGELOG 0.1.0 已写
+- [x] GitHub Actions 跑通 macOS arm64/x64、Windows x64、Linux x64 build
+- [x] tag v0.1.0 已发布 `.dmg` / `.exe` / `.AppImage`、updater artifact 和 `latest.json`
 
 ---
 

@@ -4,7 +4,7 @@
 
 ## 当前发布范围
 
-> **已验证基线（2026-08-18 核对）**：`v0.0.3` Release workflow 已成功完成，GitHub Release 中存在 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 和正式版 `latest.json`。这证明跨平台打包与 manifest 生成链路可用；`v0.1.0-rc1`、真实安装试用以及“旧版本发现并安装新版本后重启”仍需按本清单验收。
+> **v0.1.0 发布结果（2026-08-18）**：Release workflow [run 32110227419](https://github.com/kurisu994/tiny-sql/actions/runs/32110227419) 全部成功；[GitHub Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.1.0) 已包含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 和正式版 `latest.json`。清单中的四个平台 URL 均已核对指向 `v0.1.0` 资产；“旧版本发现并安装新版本后重启”的应用内端到端流程仍待实测。
 
 - 平台：macOS Apple Silicon + Intel、Windows x64、Linux x64。
 - 数据库：MySQL 5.7 / 8.0 / 8.4。

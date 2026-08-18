@@ -24,7 +24,7 @@
 
 - **范围**：MySQL only（5.7 + 8.0）+ 3 跳 SSH + 拓扑图 + macOS arm64/x64、Windows x64、Linux x64 打包 + zh-CN only + 正式版自动更新；v0.1 无 Apple Developer 代码签名 / notarization。
 - **预算**：5-6 周 × 12-13 小时/周 = 60-75 小时。
-- **交付物**：GitHub Releases 上的 `.dmg` / `.exe` / `.AppImage`、Tauri updater artifact / `.sig` 与正式版 `latest.json`；`v*` tag 触发 Release workflow 自动构建上传。当前 v0.0.3 已验证全平台产物链路，目标正式版仍是 v0.1.0。
+- **交付物**：GitHub Releases 上的 `.dmg` / `.exe` / `.AppImage`、Tauri updater artifact / `.sig` 与正式版 `latest.json`；`v*` tag 触发 Release workflow 自动构建上传。v0.1.0 已于 2026-08-18 完成全平台正式发布。
 - **发布门槛**：作者 + 2 同事 dogfooding ≥ 1 周，0 数据丢失、0 不可恢复 crash。
 
 ## 关键产品决策
