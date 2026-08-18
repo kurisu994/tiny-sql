@@ -122,7 +122,9 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 - **2026-08-18 连接 driver 类型与无损迁移（V2-T1.2）**：新增跨 Rust/TypeScript 的 `mysql` / `postgresql` 稳定类型，旧 `connections.enc` 缺字段时在内存中默认 MySQL，启动读取不重写密文；未知 driver 或反序列化失败直接返回错误并保留原文件。新建、编辑与复制连接会携带 driver；PostgreSQL 尚未接入时明确拒绝，避免误走 MySQL 发送凭据。7 个真实加密存储测试、前端针对性测试与 TypeScript 检查通过。
 - **2026-08-18 PostgreSQL vertical slice 代码与 MySQL 回归（V2-T1.3/T1.4）**：启用锁文件已有的 `sqlx-postgres 0.8.6`（MIT OR Apache-2.0），实现显式直连、`SELECT 1::BIGINT`、close 与稳定连接错误 key；显式参数不读取 `~/.pgpass`。新增独立 PostgreSQL integration 门禁，缺少 URL 时明确失败而非假绿。MySQL 18 个单测与 5 个真实 integration 通过，新增长查询取消回归；该节点尚无 PostgreSQL 实测，随后已在 Week 2 后端闭环中补齐。
 - **2026-08-18 v0.2 Week 1/2 后端闭环**：真实 PostgreSQL `SELECT 1` 已通过，V2-T1.3 完成；公共 metadata 契约新增 `MetadataScope` 与独立 schema 层，PostgreSQL 完成四层 metadata、方言化 query/动态解码、DML `RETURNING` 与独立 control pool `pg_cancel_backend`。真实门禁 MySQL 5/5、PostgreSQL 4/4 全绿；对称回归发现并修复 MySQL JSON 误显示 `<unsupported>`。PostgreSQL 主实现按架构约定拆到 `crates/db-driver/src/postgres.rs`，AppState/UI 接线进入 Week 3。
-- **2026-08-18 v0.2 Week 3 多 driver 应用接线**：`OpenConnection` 改为 `ActiveDriver::{MySql, PostgreSql}` 并统一转发 `Driver` 契约；connection/metadata/query commands 按 driver 泛化，新增 schema command 与可选 schema scope。连接表单可选数据库类型，PostgreSQL 使用 database → schema → table 树和双引号预览 SQL；自动门禁 `db-driver` 25 项、`app_lib` 15 项、前端 39 项以及真实 integration 9/9 全绿。真实 Tauri 直连/1 跳 SSH 与切换/取消不串线仍留 V2-T3.4，PostgreSQL 当前只展开连接所在 database，证书路径尚未接线。
+- **2026-08-18 v0.2 Week 3 多 driver 应用接线**：`OpenConnection` 改为 `ActiveDriver::{MySql, PostgreSql}` 并统一转发 `Driver` 契约；connection/metadata/query commands 按 driver 泛化，新增 schema command 与可选 schema scope。连接表单可选数据库类型，PostgreSQL 使用 database → schema → table 树和双引号预览 SQL；自动门禁与真实 integration 9/9 全绿，Tauri 调试包已验证 MySQL 直连、元数据树与 `SELECT 1`。PostgreSQL 直连、双 driver 切换/取消及各自 1 跳 SSH 仍留 V2-T3.4；PostgreSQL 当前只展开连接所在 database，证书路径尚未接线。
+- **2026-08-18 带口令私钥测试连接缺口关闭**：`connection_test` 新增瞬时 `passphrase?` 参数，连接表单只在存在 privateKey hop 时显示“仅测试”密码框；该值不进入 `ConnectionInput`、加密文件或正式连接会话缓存。后端运行时 hop 转换和前端 IPC 调用链均有回归测试，V2-CP1 剩余 `ChannelDropped` / `AcceptLoopDied` 运行检测与安全 SQL 行号两项缺口。
+- **2026-08-18 V2-CP1 历史代码承诺全部关闭**：`TunnelHandler::disconnected` 与 keepalive fallback 区分首跳 `tunnel_lost` / 嵌套跳 `channel_dropped` 并原子去重，accept worker 由独立 monitor 捕获 panic/意外退出；正常 drop 先置 shutdown 防误报。`db_query` 改用 `{ key, line? }` 安全错误载荷，后端只解析 MySQL 正整数行号，原始数据库错误和 SQL 片段不跨 IPC。加上已完成的瞬时 passphrase 测试连接，V2-CP1 通过。
 
 ## 已解决的阻碍
 
@@ -150,8 +152,8 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 - **R-002** caching_sha2 握手：MySQL 5.7 兼容已由用户提交 `4f54f02` 标记验证完成。
 - **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task。
 - **R-updater-release** 已关闭：云端全平台 artifact、正式版 `latest.json` 及 v0.0.3 → v0.1.0 应用内发现、下载、安装、重启全链路均已验证。
-- **R-ssh-runtime-errors** `ChannelDropped` / `AcceptLoopDied` 只有公共错误定义与 key 测试，当前运行路径只上报 keepalive `lost`；作为 v0.1.1 / v0.2 候选补代码或收窄承诺。
+- **R-ssh-runtime-errors 已关闭**：首跳掉线、嵌套 channel 断开与 accept worker 异常均有运行路径、去重和正常关闭抑制测试。
 - **R-passphrase-test** `connection_test` 不接收 passphrase，带口令私钥只能在正式打开连接时验证完整链路。
-- **R-query-error-contract** 前端 server-line gutter 需要 MySQL 行号，但后端只返回稳定 i18n key；需用结构化安全字段补行号，不能直接泄露原始 Rust/sqlx 错误。
+- **R-query-error-contract 已关闭**：前端仅接收稳定 key 与可选正整数行号，原始 Rust/sqlx/MySQL 错误不跨 IPC。
 
 相关：[[activeContext]] · [[projectbrief]]

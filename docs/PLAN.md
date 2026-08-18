@@ -11,16 +11,7 @@ last_updated: 2026-08-18
 >
 > 本文件只保留尚未完成的工作。v0.1 已实现内容、历史检查点和架构决策见 [progress.md](../memory-bank/progress.md)。
 
-当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包、`latest.json` 及从 v0.0.3 到 v0.1.0 的应用内更新闭环。PostgreSQL 版本基线已固化，v0.2 Week 1 已开工。
-
-## v0.1 发布后待办
-
-以下代码承诺缺口不计入 v0.2 的 8 周预算，可与 Week 1 并行，但必须在 **V2-CP1** 前处理完成或同步收窄需求承诺：
-
-- [ ] 处理 v0.1 代码承诺缺口：
-  - 带 passphrase 私钥的 `connection_test`。
-  - `ChannelDropped` / `AcceptLoopDied` 的运行时检测与上报；若不补实现，则同步收窄需求承诺。
-  - 在稳定 i18n key 基础上安全传递 MySQL 服务端错误行号，不泄露原始 Rust 错误。
+当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包、`latest.json` 及从 v0.0.3 到 v0.1.0 的应用内更新闭环。PostgreSQL 版本基线已固化，v0.2 Week 1-3 自动化开发门禁已完成，真实 Tauri 应用验收仍待 V2-T3.4。
 
 ## v0.2 开发计划
 
@@ -62,7 +53,7 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 - [x] **V2-T1.3 [3h]** PostgreSQL 最窄链路已通过真实数据库验证：`PostgresDriver` 支持显式直连、`SELECT 1::BIGINT`、关闭主/control pool 与稳定 `error.driver.connect_failed`；显式连接不读取 `~/.pgpass`，SSH 仍由上层复用通用 TCP 隧道。
 - [x] **V2-T1.4 [2h]** MySQL 18 个单测与 5 个真实 integration 全绿，覆盖连接、metadata、NULL/数值解码以及 `SELECT SLEEP(10)` 取消；SQL guard / LIMIT 单测和独立 control pool 取消行为均无回归。
 
-完成条件：MySQL 现有测试全绿；PostgreSQL `SELECT 1` 通过；旧 `connections.enc` 无损读取。技术主链已满足；三项 v0.1 代码承诺缺口尚未处理/收窄，因此 **V2-CP1** 管理检查点仍不标记通过。
+完成条件：MySQL 现有测试全绿；PostgreSQL `SELECT 1` 通过；旧 `connections.enc` 无损读取。技术主链与三项 v0.1 代码承诺缺口均已关闭，**V2-CP1** 已通过；真实 Tauri 双 driver 验收仍由 V2-T3.4 / CP2 管理。
 
 ### Week 2：PostgreSQL 后端闭环（13h）
 
@@ -78,9 +69,9 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 - [x] **V2-T3.1 [4h]** `AppState` 活跃连接注册表已改为 `ActiveDriver::{MySql, PostgreSql}` 多 driver 容器并实现统一 `Driver` 转发；`OpenConnection` 继续按 driver → tunnel 字段顺序绑定和关闭生命周期。
 - [x] **V2-T3.2 [3h]** connection test/open/close 与 metadata/query commands 已按 driver 泛化，原 command 名和错误 key 保持稳定；新增 `db_list_schemas` 与可选 schema 入参，MySQL 专属 CREATE DATABASE 对 PostgreSQL 返回明确不支持。
 - [x] **V2-T3.3 [3h]** 连接表单已增加 MySQL/PostgreSQL 选择，切换时带出 3306/root 或 5432/postgres 默认值；连接列表标识 driver，PostgreSQL 树按 database → schema → table 展示并使用双引号生成预览 SQL。PostgreSQL 证书路径尚未接线，表单明确提示使用 driver 默认 TLS 策略。
-- [ ] **V2-T3.4 [2h]** 双 driver 后端真实 integration 9/9、AppState/command/frontend 单测和 `just check` 已通过；仍需在 Tauri 应用中验证 MySQL/PostgreSQL 直连、1 跳 SSH、连接切换与取消不串线，3 跳 PostgreSQL留到 Week 8。
+- [ ] **V2-T3.4 [2h]** 双 driver 后端真实 integration 9/9、AppState/command/frontend 单测和 `just check` 已通过；Tauri 调试包已验证 MySQL 直连、元数据树与 `SELECT 1`，仍需验证 PostgreSQL 直连、双 driver 切换/取消不串线及各自 1 跳 SSH，3 跳 PostgreSQL 留到 Week 8。
 
-完成条件：同一应用能保存并分别打开 MySQL/PostgreSQL；关闭、切换和取消不会串 driver；通过 **V2-CP2**。当前代码与自动门禁已满足，缺少真实 Tauri 直连/1 跳验证，因此 T3.4/CP2 保持未完成。
+完成条件：同一应用能保存并分别打开 MySQL/PostgreSQL；关闭、切换和取消不会串 driver；通过 **V2-CP2**。当前代码与自动门禁已满足，MySQL 直连已实测，剩余 PostgreSQL、切换/取消与 1 跳 SSH 验证未完成，因此 T3.4/CP2 保持未完成。
 
 ### Week 4：凭据安全与 TLS（13h）
 

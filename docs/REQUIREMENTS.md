@@ -93,7 +93,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-002 [P0] 连接测试**
 
 - 创建/编辑对话框上有"测试连接"按钮，点击立刻尝试建立完整链路（SSH 隧道 + MySQL 握手 + `SELECT 1`），成功显示绿色对勾，失败显示具体错误（i18n key 翻译后的中文）。
-- **当前实现缺口**：`connection_test` 不接收 passphrase，也不读取正式连接的会话缓存；无口令私钥可以测试，带口令私钥只能在 `connection_open` 的弹窗流程验证。v0.1 发布前需补齐或收窄本条“完整链路”承诺。
+- 带口令私钥时，SSH 页提供“私钥 passphrase（仅测试）”输入；`connection_test` 只把它用于本次握手，不写入连接配置，也不进入正式连接的会话缓存。
 - **验收标准**：
   - 配置正确 → 5s 内显示成功。
   - SSH 第 2 跳故意填错端口 → 30s 内显示"第 2 跳连接失败"。
@@ -109,7 +109,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-010 [P0] 配置 N 跳 SSH 隧道**
 
 - UI 上"SSH 跳板"区块是动态数组，用户可以"+"添加 hop、删除 hop，并用上移 / 下移按钮调整顺序。
-- 单条持久化 hop 含：host / port（默认 22） / username / auth_type（password / privateKey） / password? / private_key_path?；passphrase 不属于 hop 配置，由 `connection_open` 参数传入并按 connection_id 缓存在本会话内存。
+- 单条持久化 hop 含：host / port（默认 22） / username / auth_type（password / privateKey） / password? / private_key_path?；passphrase 不属于 hop 配置。正式打开由 `connection_open` 参数传入并按 connection_id 缓存在本会话内存，测试连接则作为瞬时参数使用后丢弃。
 - v0.1 测试到 3 跳；理论上无硬上限（性能限制留待 v0.2 评估）。
 - **验收标准**：
   - 配置 1 跳能连。
@@ -119,6 +119,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 **FR-011 [P0] 私钥 passphrase 处理**
 
 - 私钥带 passphrase 时，首次连接弹窗让用户输入；输入后**仅本会话内存缓存**，进程退出即丢。
+- 创建/编辑表单测试连接时可输入一次性 passphrase；该值不复用正式连接缓存，也不落盘。
 - v0.1 **不持久化** passphrase；v0.2 才加加密 passphrase 存储。
 - **验收标准**：
   - passphrase 错误 → 显示"私钥 passphrase 错误"。
@@ -150,7 +151,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - 隧道建立后给每一跳 russh session 配置 `keepalive_interval=60s`、`keepalive_max=2`；russh 在第 3 次未响应时结束 session。每跳另有轻量监控 task 探测 session 是否已退出。
 - **连续 3 次未响应（≈180s）才判定断开**——避免弱网抖动 / 企业 bastion ratelimit 误报。监控 task 发现 session 已退出时 emit `ssh:hop-status` event，payload 含 `connection_id / hop_index / status: "lost" / reason`，前端拓扑节点变红。
 - `SshTunnelError` 新增三个 mid-session 变体（各有独立 i18n key）：`TunnelLost { hop_index, reason }`（keepalive 超时）/ `ChannelDropped { hop_index }`（对端主动关 channel，可能跳板重启）/ `AcceptLoopDied { hop_index }`（accept loop panic，代码 bug 需上报）。
-- **当前实现状态**：三个公共错误变体与 i18n key 已定义；运行路径目前只通过 `HopStatus::Lost` 上报 keepalive 断开，没有主动构造 `ChannelDropped` / `AcceptLoopDied`。后两类检测是 v0.1 P0 承诺缺口。
+- **当前实现状态**：首跳 session 断开上报 `TunnelLost`，嵌套跳 transport channel 断开上报 `ChannelDropped`，本地 accept worker panic / 意外退出上报 `AcceptLoopDied`；正常关闭通过 shutdown 标记抑制误报，同一跳断链只上报一次。
 - keepalive 间隔（60s）与失败阈值（3 次）v0.1 是常量，v0.2 做成可配置。
 - **验收标准**：
   - 隧道连接稳定时 → 不 emit lost 事件。
@@ -197,7 +198,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **验收标准**：
   - `SELECT * FROM t_order LIMIT 100` → 显示 100 行。
   - `SELECT * FROM huge_table`（500w 行表，无 LIMIT）→ 显示 10w 行 + 截断提示。
-  - 语法错 → 当前显示稳定 i18n 文案「SQL 执行失败」；后端不会向前端透传原始 sqlx/MySQL 错误，因此服务端 `line N` 行标识尚未生效，需作为后续错误契约改造处理。
+  - 语法错 → 显示稳定 i18n 文案「SQL 执行失败」；若 MySQL 返回 `line N`，后端只提取正整数行号并通过 `{ key, line }` 结构化载荷传递，原始 sqlx/MySQL 错误与 SQL 片段不进入 IPC。
 
 **FR-023 [P0] SQL 取消**
 

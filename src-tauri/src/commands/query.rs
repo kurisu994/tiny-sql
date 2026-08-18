@@ -4,14 +4,41 @@
 //! 不长持注册表锁），再调 db-driver。连接未打开返回 `error.connection.not_open`。
 
 use db_driver::{
-    ColumnMeta, DatabaseMeta, Driver, DriverKind, MetadataScope, QueryOptions, RowSet, SchemaMeta,
-    TableMeta, QUERY_RESULT_LIMIT,
+    ColumnMeta, DatabaseMeta, Driver, DriverError, DriverKind, MetadataScope, QueryOptions, RowSet,
+    SchemaMeta, TableMeta, QUERY_RESULT_LIMIT,
 };
+use serde::Serialize;
 use tauri::State;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::state::{ActiveDriver, AppState};
+
+/// 查询命令返回给前端的安全错误载荷，只包含稳定 key 与可选行号。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryCommandError {
+    key: String,
+    line: Option<u32>,
+}
+
+impl QueryCommandError {
+    fn from_key(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            line: None,
+        }
+    }
+}
+
+impl From<DriverError> for QueryCommandError {
+    fn from(error: DriverError) -> Self {
+        Self {
+            key: error.i18n_key().to_string(),
+            line: error.sql_line(),
+        }
+    }
+}
 
 /// 从注册表取出指定连接的 driver 句柄（克隆，brief lock）。
 async fn driver_of(state: &State<'_, AppState>, id: &str) -> Result<ActiveDriver, String> {
@@ -122,8 +149,10 @@ pub async fn db_query(
     query_id: Option<String>,
     row_limit: Option<u32>,
     allow_write: Option<bool>,
-) -> Result<RowSet, String> {
-    let driver = driver_of(&state, &id).await?;
+) -> Result<RowSet, QueryCommandError> {
+    let driver = driver_of(&state, &id)
+        .await
+        .map_err(QueryCommandError::from_key)?;
     let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let token = CancellationToken::new();
     state
@@ -142,7 +171,7 @@ pub async fn db_query(
         token,
     )
     .await
-    .map_err(|e| e.i18n_key().to_string());
+    .map_err(QueryCommandError::from);
 
     state.queries.lock().await.remove(&query_id);
     result
@@ -185,5 +214,17 @@ mod tests {
         let error = metadata_scope(DriverKind::PostgreSql, "app".to_string(), None)
             .expect_err("PostgreSQL 表查询必须显式指定 schema");
         assert_eq!(error, "error.driver.schema_required");
+    }
+
+    #[test]
+    fn query_command_error_exposes_only_key_and_line() {
+        let error = QueryCommandError::from(DriverError::QueryFailed(
+            "You have an error near 'secret_table' at line 12".to_string(),
+        ));
+        let value = serde_json::to_value(error).unwrap();
+
+        assert_eq!(value["key"], "error.driver.query_failed");
+        assert_eq!(value["line"], 12);
+        assert!(!value.to_string().contains("secret_table"));
     }
 }

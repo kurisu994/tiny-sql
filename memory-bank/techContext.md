@@ -100,7 +100,7 @@
 
 ## 当前 command（src-tauri 实际）
 
-- 连接：`connection_create/list/update/delete/test`（CRUD + 瞬时测试）、`connection_open/close`（按 driver 建立持久连接，存 `ActiveDriver` 注册表）。
+- 连接：`connection_create/list/update/delete`（CRUD）、`connection_test(input, passphrase?)`（一次性完整链路测试，passphrase 不缓存）、`connection_open/close`（按 driver 建立持久连接，存 `ActiveDriver` 注册表）。
 - 数据浏览：`db_list_databases/db_list_schemas/db_list_tables/db_list_columns/db_query/db_query_cancel/db_create_database`（基于已打开连接；table/column 接受可选 schema，CREATE DATABASE 当前仅 MySQL 支持）。
 - TOFU：`ssh_tofu_decision(connectionId, hopIndex, accept)`。
 - 事件（后端 emit → 前端 listen）：`ssh:tofu-request`（指纹确认）、`ssh:hop-status`（keepalive 断开）。

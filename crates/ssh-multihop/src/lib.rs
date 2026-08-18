@@ -16,18 +16,21 @@
 //! russh 0.54 的多跳实现移植自 redis-desktop-client 的 `ssh_tunnel.rs`，
 //! 剥离了 Tauri/known_hosts 耦合。
 
-use russh::client::{self, AuthResult, Config, Handle, Handler};
+use russh::client::{self, AuthResult, Config, DisconnectReason, Handle, Handler};
 use russh::keys::{load_secret_key, ssh_key, PrivateKeyWithHashAlg};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as TokioMutex;
-use tokio::task::JoinHandle;
+use tokio::task::{AbortHandle, JoinHandle};
 
 /// SSH 隧道空闲超时（russh 心跳与断连判定的兜底）。
 /// 注意：russh 在收到任意数据 / 发送 keepalive 时都会重置该计时器，
@@ -152,7 +155,7 @@ impl SshTunnelError {
     }
 }
 
-/// 运行期某跳的状态变化（目前仅 keepalive 断开）。
+/// 运行期某跳的状态变化（keepalive、嵌套 channel 或 accept loop 故障）。
 #[derive(Debug, Clone)]
 pub struct HopStatusEvent {
     pub hop_index: usize,
@@ -210,6 +213,55 @@ pub struct TunnelContext {
     pub verifier: Option<HostKeyVerifier>,
 }
 
+/// 整条隧道共享的运行期上报状态。
+#[derive(Clone)]
+struct RuntimeReportContext {
+    status_cb: Option<HopStatusCallback>,
+    shutdown: Arc<AtomicBool>,
+    enabled: Arc<AtomicBool>,
+}
+
+/// 单跳运行期故障上报器；共享上下文之外只额外保存 hop 与去重标记。
+#[derive(Clone)]
+struct SessionRuntimeReporter {
+    hop_index: usize,
+    context: RuntimeReportContext,
+    emitted: Arc<AtomicBool>,
+}
+
+impl SessionRuntimeReporter {
+    fn new(hop_index: usize, context: RuntimeReportContext) -> Self {
+        Self {
+            hop_index,
+            context,
+            emitted: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn report_loss(&self) {
+        if self.context.shutdown.load(Ordering::Acquire)
+            || !self.context.enabled.load(Ordering::Acquire)
+            || self.emitted.swap(true, Ordering::AcqRel)
+        {
+            return;
+        }
+
+        let reason = if self.hop_index == 0 {
+            "error.ssh.tunnel_lost"
+        } else {
+            "error.ssh.channel_dropped"
+        };
+        log::warn!("SSH 第 {} 跳运行期断开：{reason}", self.hop_index);
+        if let Some(cb) = &self.context.status_cb {
+            cb(HopStatusEvent {
+                hop_index: self.hop_index,
+                status: HopStatus::Lost,
+                reason: Some(reason.to_string()),
+            });
+        }
+    }
+}
+
 /// `Handle` 含 `UnboundedReceiver` 不是 Sync，跨任务共享需走 Mutex
 type SharedSession = Arc<TokioMutex<Handle<TunnelHandler>>>;
 
@@ -223,6 +275,7 @@ struct TunnelHandler {
     port: u16,
     verifier: Option<HostKeyVerifier>,
     reject_slot: Arc<std::sync::Mutex<Option<SshTunnelError>>>,
+    runtime_reporter: SessionRuntimeReporter,
 }
 
 impl Handler for TunnelHandler {
@@ -264,17 +317,36 @@ impl Handler for TunnelHandler {
             }
         }
     }
+
+    fn disconnected(
+        &mut self,
+        reason: DisconnectReason<Self::Error>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.runtime_reporter.report_loss();
+
+        async move {
+            match reason {
+                DisconnectReason::ReceivedDisconnect(_) => Ok(()),
+                DisconnectReason::Error(error) => Err(error),
+            }
+        }
+    }
 }
 
 /// SSH 隧道句柄 —— drop 时关闭本地 listener、所有 keepalive 监控 task 与跳板 session
 pub struct SshTunnel {
     local_addr: SocketAddr,
-    accept_task: JoinHandle<()>,
+    /// 本地 accept worker 的中止句柄；worker 的 JoinHandle 由 monitor 持有。
+    accept_abort: AbortHandle,
+    /// 观察 accept worker 是否 panic / 意外退出，并上报 `AcceptLoopDied`。
+    accept_monitor: JoinHandle<()>,
     /// 每跳一个 keepalive 监控 task，drop 时一起 abort，防 leak
     keepalive_tasks: Vec<JoinHandle<()>>,
     /// 持有所有跳板 session 引用直到 drop；中间跳板若提前 drop，
     /// 派生在其上的下一跳 channel stream 会失活，因此必须整链保活
     _sessions: Vec<SharedSession>,
+    /// 正常关闭标记，避免 drop 期间把主动终止误报为运行期故障。
+    shutdown: Arc<AtomicBool>,
 }
 
 impl SshTunnel {
@@ -286,7 +358,9 @@ impl SshTunnel {
 
 impl Drop for SshTunnel {
     fn drop(&mut self) {
-        self.accept_task.abort();
+        self.shutdown.store(true, Ordering::Release);
+        self.accept_abort.abort();
+        self.accept_monitor.abort();
         for task in &self.keepalive_tasks {
             task.abort();
         }
@@ -322,6 +396,13 @@ pub async fn open(
     });
 
     let mut sessions: Vec<SharedSession> = Vec::with_capacity(hops.len());
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let runtime_context = RuntimeReportContext {
+        status_cb: ctx.status_cb.clone(),
+        shutdown: shutdown.clone(),
+        enabled: Arc::new(AtomicBool::new(false)),
+    };
+    let mut runtime_reporters = Vec::with_capacity(hops.len());
 
     // 第 1 跳：直接 TCP 连接到 SSH 主机
     let first = &hops[0];
@@ -331,8 +412,18 @@ pub async fn open(
             hop_index: 0,
             reason: e.to_string(),
         })?;
-    let current = connect_and_auth(config.clone(), tcp, first, 0, &ctx.verifier).await?;
+    let first_reporter = SessionRuntimeReporter::new(0, runtime_context.clone());
+    let current = connect_and_auth(
+        config.clone(),
+        tcp,
+        first,
+        0,
+        &ctx.verifier,
+        first_reporter.clone(),
+    )
+    .await?;
     sessions.push(Arc::new(TokioMutex::new(current)));
+    runtime_reporters.push(first_reporter);
 
     // 第 2..N 跳：在前一跳 session 上开 direct-tcpip 到下一跳 SSH 端口，
     // 把 channel stream 作为下一跳 session 的 transport（等效 OpenSSH ProxyJump）
@@ -354,19 +445,18 @@ pub async fn open(
                 })?
         };
         let stream = channel.into_stream();
-        let current =
-            connect_and_auth(config.clone(), stream, next_hop, hop_index, &ctx.verifier).await?;
-        sessions.push(Arc::new(TokioMutex::new(current)));
-    }
-
-    // 每跳起一个 keepalive 监控 task：探测 session 是否已断，断开经回调上报
-    let mut keepalive_tasks = Vec::with_capacity(sessions.len());
-    for (hop_index, session) in sessions.iter().enumerate() {
-        keepalive_tasks.push(spawn_keepalive_monitor(
+        let runtime_reporter = SessionRuntimeReporter::new(hop_index, runtime_context.clone());
+        let current = connect_and_auth(
+            config.clone(),
+            stream,
+            next_hop,
             hop_index,
-            session.clone(),
-            ctx.status_cb.clone(),
-        ));
+            &ctx.verifier,
+            runtime_reporter.clone(),
+        )
+        .await?;
+        sessions.push(Arc::new(TokioMutex::new(current)));
+        runtime_reporters.push(runtime_reporter);
     }
 
     // 本地随机端口监听
@@ -376,6 +466,18 @@ pub async fn open(
     let local_addr = listener
         .local_addr()
         .map_err(|_| SshTunnelError::LocalListenFailed)?;
+
+    // 链路和本地 listener 均准备完成后才开启运行期上报，避免握手失败被重复当成掉线。
+    runtime_context.enabled.store(true, Ordering::Release);
+
+    // 每跳起一个 keepalive 监控 task：探测 session 是否已断，断开经回调上报。
+    let mut keepalive_tasks = Vec::with_capacity(sessions.len());
+    for (session, runtime_reporter) in sessions.iter().zip(runtime_reporters.iter()) {
+        keepalive_tasks.push(spawn_keepalive_monitor(
+            session.clone(),
+            runtime_reporter.clone(),
+        ));
+    }
 
     let last_session = sessions.last().expect("已建立至少一个 session").clone();
     let sessions_for_task = sessions.clone();
@@ -420,13 +522,48 @@ pub async fn open(
             });
         }
     });
+    let (accept_abort, accept_monitor) =
+        spawn_accept_monitor(accept_task, sessions.len() - 1, runtime_context);
 
     Ok(SshTunnel {
         local_addr,
-        accept_task,
+        accept_abort,
+        accept_monitor,
         keepalive_tasks,
         _sessions: sessions,
+        shutdown,
     })
+}
+
+/// 监听 accept worker 的非预期退出；正常 drop 会先设置 `shutdown`，不会误报。
+fn spawn_accept_monitor(
+    accept_task: JoinHandle<()>,
+    hop_index: usize,
+    runtime_context: RuntimeReportContext,
+) -> (AbortHandle, JoinHandle<()>) {
+    let accept_abort = accept_task.abort_handle();
+    let monitor = tokio::spawn(async move {
+        let result = accept_task.await;
+        if runtime_context.shutdown.load(Ordering::Acquire) {
+            return;
+        }
+
+        let unexpectedly_stopped = match result {
+            Ok(()) => true,
+            Err(error) => !error.is_cancelled(),
+        };
+        if unexpectedly_stopped {
+            log::error!("SSH 隧道本地 accept loop 意外退出（出口跳 {hop_index}）");
+            if let Some(cb) = &runtime_context.status_cb {
+                cb(HopStatusEvent {
+                    hop_index,
+                    status: HopStatus::Lost,
+                    reason: Some("error.ssh.accept_loop_died".to_string()),
+                });
+            }
+        }
+    });
+    (accept_abort, monitor)
 }
 
 /// 为一跳 session 起 keepalive 监控：周期性轻量探测 session 是否仍存活。
@@ -436,9 +573,8 @@ pub async fn open(
 /// `send_keepalive(false)` 在 session 任务已结束时立即返回 `Err`，且持锁极短，
 /// 不会阻塞末跳 accept loop 开 channel。
 fn spawn_keepalive_monitor(
-    hop_index: usize,
     session: SharedSession,
-    status_cb: Option<HopStatusCallback>,
+    runtime_reporter: SessionRuntimeReporter,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -448,14 +584,7 @@ fn spawn_keepalive_monitor(
                 guard.send_keepalive(false).await.is_err()
             };
             if dead {
-                log::warn!("SSH 第 {hop_index} 跳 keepalive 失败，判定隧道已断");
-                if let Some(cb) = &status_cb {
-                    cb(HopStatusEvent {
-                        hop_index,
-                        status: HopStatus::Lost,
-                        reason: Some("error.ssh.tunnel_lost".to_string()),
-                    });
-                }
+                runtime_reporter.report_loss();
                 break;
             }
         }
@@ -472,6 +601,7 @@ async fn connect_and_auth<S>(
     hop: &SshHop,
     hop_index: usize,
     verifier: &Option<HostKeyVerifier>,
+    runtime_reporter: SessionRuntimeReporter,
 ) -> Result<Handle<TunnelHandler>, SshTunnelError>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -483,6 +613,7 @@ where
         port: hop.port,
         verifier: verifier.clone(),
         reject_slot: reject_slot.clone(),
+        runtime_reporter,
     };
     let mut session = match client::connect_stream(config, stream, handler).await {
         Ok(h) => h,
@@ -645,6 +776,61 @@ mod tests {
         assert_eq!(
             expand_home_path("/tmp/id_rsa"),
             Some(PathBuf::from("/tmp/id_rsa"))
+        );
+    }
+
+    #[test]
+    fn runtime_loss_reports_nested_channel_once() {
+        let events = Arc::new(std::sync::Mutex::new(Vec::<HopStatusEvent>::new()));
+        let captured = events.clone();
+        let callback: HopStatusCallback = Arc::new(move |event| {
+            captured.lock().unwrap().push(event);
+        });
+        let runtime_context = RuntimeReportContext {
+            status_cb: Some(callback),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            enabled: Arc::new(AtomicBool::new(true)),
+        };
+        let reporter = SessionRuntimeReporter::new(1, runtime_context);
+
+        reporter.report_loss();
+        reporter.report_loss();
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].hop_index, 1);
+        assert_eq!(events[0].status, HopStatus::Lost);
+        assert_eq!(
+            events[0].reason.as_deref(),
+            Some("error.ssh.channel_dropped")
+        );
+    }
+
+    #[tokio::test]
+    async fn accept_loop_panic_reports_runtime_failure() {
+        let events = Arc::new(std::sync::Mutex::new(Vec::<HopStatusEvent>::new()));
+        let captured = events.clone();
+        let callback: HopStatusCallback = Arc::new(move |event| {
+            captured.lock().unwrap().push(event);
+        });
+        let runtime_context = RuntimeReportContext {
+            status_cb: Some(callback),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            enabled: Arc::new(AtomicBool::new(true)),
+        };
+        let accept_task = tokio::spawn(async {
+            panic!("模拟 accept loop panic");
+        });
+
+        let (_abort, monitor) = spawn_accept_monitor(accept_task, 2, runtime_context);
+        monitor.await.unwrap();
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].hop_index, 2);
+        assert_eq!(
+            events[0].reason.as_deref(),
+            Some("error.ssh.accept_loop_died")
         );
     }
 }

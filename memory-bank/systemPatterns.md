@@ -72,10 +72,13 @@ tiny-sql/
 - `Driver` 使用装箱 Future 保持对象安全，不引入 `async-trait`；取消令牌作为 query 契约的一部分，由具体 driver 映射为原生取消机制。
 - metadata 通过 `MetadataScope { database, schema }` 显式表达层级；MySQL schema 与 database 同义，PostgreSQL schema 是独立层级且不能在同一连接上跨 database 查询。
 - `DriverError` 的 `Display` 只输出稳定 i18n key；sqlx 原始错误只保留在后端结构化字段，Tauri command 不得返回 `to_string()` 原文。
+- `db_query` 是唯一返回结构化错误的 command：`{ key, line? }` 只允许稳定 i18n key 与正整数行号，禁止把 sqlx/MySQL 原文或 SQL 片段放入 IPC。
 - 连接配置的 `driver` 使用稳定值 `mysql` / `postgresql`；旧密文缺字段时只做内存默认迁移，不在启动读取时重写文件，显式保存才升级格式。迁移失败必须保持原密文不变。
+- `connection_test` 的 passphrase 是独立瞬时参数，只用于本次 SSH 私钥握手；不得写入 `ConnectionInput`、持久化配置或正式连接的会话缓存。
 - 与具体跳相关的 `SshTunnelError` 变体带 `hop_index: usize`；`NoHops` / `LocalListenFailed` 返回 `None`。Tauri command 用 `hop_index()` emit 拓扑状态，错误返回值只暴露稳定 i18n key。
 - 公共类型/函数加中文 doc comment。
 - 隧道 `Drop` 里 abort 所有 keepalive task 和 accept task，防 leak。
+- 运行期断链按首跳 `tunnel_lost`、嵌套跳 `channel_dropped`、accept worker `accept_loop_died` 分类；正常 drop 先置 shutdown，单跳用原子标记去重。
 
 **前端**
 

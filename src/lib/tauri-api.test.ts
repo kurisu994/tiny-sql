@@ -18,4 +18,16 @@ describe("translateError", () => {
   it("非字符串错误转字符串", () => {
     expect(translateError(new Error("boom"))).toContain("boom");
   });
+
+  it("结构化查询错误只翻译稳定 key 与安全行号", () => {
+    expect(
+      translateError({ key: "error.driver.query_failed", line: 7 }),
+    ).toBe("SQL 执行失败（第 7 行）");
+  });
+
+  it("忽略结构化错误中的非法行号", () => {
+    expect(
+      translateError({ key: "error.driver.query_failed", line: "secret" }),
+    ).toBe("SQL 执行失败");
+  });
 });

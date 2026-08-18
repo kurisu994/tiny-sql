@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**v0.1.0 已于 2026-08-18 正式发布，v0.2 Week 1/2 后端与 Week 3 多 driver 应用接线已完成。** PostgreSQL 已接入 `AppState`、Tauri commands、连接表单和 database → schema → table 浏览树；MySQL/PostgreSQL 真实 driver integration 共 9 项全绿。V2-T3.4 仍缺真实 Tauri 直连/1 跳 SSH 验收，三项 v0.1 代码承诺缺口也尚未处理/收窄，因此 V2-CP1/CP2 管理检查点保持未完成。
+**v0.1.0 已于 2026-08-18 正式发布，v0.2 Week 1/2 后端与 Week 3 多 driver 应用接线已完成。** PostgreSQL 已接入 `AppState`、Tauri commands、连接表单和 database → schema → table 浏览树；MySQL/PostgreSQL 真实 driver integration 共 9 项全绿。带口令私钥测试、SSH 三类运行故障上报和安全 SQL 行号三项历史代码承诺均已关闭，V2-CP1 已通过；Tauri 调试包已验证 MySQL 直连、元数据树与 `SELECT 1`，V2-T3.4 仍缺 PostgreSQL、切换/取消与 1 跳 SSH 验收，因此 CP2 保持未完成。
 
 ### 本轮核对后的事实基线
 
@@ -18,13 +18,13 @@
 - 自动更新：已在 `/Applications/tiny-sql.app` 从 v0.0.3 通过原生菜单 `Check for Updates...` 发现 v0.1.0，完成签名更新包下载、安装和重启；重启后 bundle 版本为 0.1.0，连接配置保留，更新菜单仍可用。
 - 手动检查更新反馈：应用菜单触发检查后，有更新继续打开下载弹窗；无更新改为弹窗提示“当前已是最新版本”，失败也显示结果。后台每日自动检查保持静默。
 - P0 SQL/SSH 修复：2026-07-13 已在真实 MySQL 上验证元数据语句、JOIN 重名列、顶层 LIMIT、截断止损和测试连接 host key 校验；当时 `just check` 与 4 个 integration test 通过。
-- v0.2 当前验证：`db-driver` 25 个单测、`app_lib` 15 个单测、前端 39 个测试及 workspace Clippy/TypeScript/Next.js build 均通过；5 个真实 MySQL integration 与 4 个真实 PostgreSQL integration 全绿。PostgreSQL 15/18 双端点仍留正式版兼容矩阵，当前单一本地实例不能替代。
+- v0.2 当前验证：`db-driver` 26 个单测、`ssh-multihop` 5 个单测、`app_lib` 18 个单测、前端 42 个测试及 workspace Clippy/TypeScript/Next.js build 均通过；5 个真实 MySQL integration 与 4 个真实 PostgreSQL integration 全绿。PostgreSQL 15/18 双端点仍留正式版兼容矩阵，当前单一本地实例不能替代。
 
 ## 已实现能力
 
 - 连接管理：CRUD、最近使用排序、复制、右键菜单、新建 / 编辑 Dialog、全局 AlertDialog 确认。
 - 连接配置：已持久化显式 `mysql` / `postgresql` driver；旧密文缺字段时默认 MySQL 且读取不重写，失败保留原文件。常规页已提供数据库类型选择器，切换时按未编辑默认值联动 3306/root 或 5432/postgres；PostgreSQL 暂用 driver 默认 TLS 策略并禁用尚未接线的证书路径页。
-- SSH：N 跳 russh 隧道、密码/私钥认证、per-connection passphrase 会话缓存、TOFU 与指纹变更硬拒绝；russh 内置 60s keepalive / 3 次阈值，监控 task 上报 `lost`。
+- SSH：N 跳 russh 隧道、密码/私钥认证、per-connection passphrase 会话缓存、TOFU 与指纹变更硬拒绝；测试连接支持一次性 passphrase 且不保存/缓存；russh 内置 60s keepalive / 3 次阈值，监控 task 上报 `lost`。
 - MySQL：database / table / column 后端查询、表前 1000 行、新建数据库、CodeMirror SQL 执行、10 万行硬上限、顶层安全追加 LIMIT、客户端截断 + `KILL QUERY` 止损、独立 control pool 取消。
 - 多 driver 基础：对象安全的 `Driver` 契约已覆盖 kind、ping、database/schema/table/column metadata、query/取消与 close；`MetadataScope` 显式区分 database/schema，MySQL 的 Tauri 生产调用面保持兼容。
 - PostgreSQL：独立 `postgres.rs` 已实现直连、四层 metadata、query/动态解码、DML `RETURNING`、10 万行上限与独立 control pool `pg_cancel_backend` 取消；`ActiveDriver`、通用 commands、连接表单和 schema 浏览树均已接线，真实 integration 全绿。
@@ -36,9 +36,9 @@
 
 - MySQL TLS 已接线 SSL 模式和证书路径，但真实 TLS / 双向证书环境尚未验收。
 - SSH keepalive 使用 russh 内置机制 + 轻量监控 task；运行期会统一上报 `lost`。
-- `SshTunnelError::ChannelDropped` / `AcceptLoopDied` 目前只定义并测试 i18n key，没有运行路径主动构造；运行期实际只通过 `HopStatus::Lost` 上报 keepalive 断开。
-- `connection_test` 不接收私钥 passphrase，也不使用会话缓存；带口令私钥的“测试连接”不能覆盖完整链路，正式 `connection_open` 才支持 passphrase 弹窗/缓存。
-- CodeMirror 有 `extractSqlErrorLine` 与 server-line gutter 接线，但 Tauri query command 只返回 `error.driver.query_failed`，不会透传 MySQL 原文；因此服务端 `line N` 标识当前实际不会出现。
+- SSH 运行期首跳 session、嵌套 transport channel 与 accept worker 故障均已接入 `lost` 事件；shutdown 与每跳原子标记分别抑制正常关闭误报和重复断链事件。
+- `connection_test` 已支持瞬时私钥 passphrase，但不会复用或写入正式连接的会话缓存；持久化 passphrase 仍留 Week 4 用户主密码方案。
+- Tauri query error 使用 `{ key, line? }` 安全载荷；db-driver 只从后端原始错误提取正整数行号，CodeMirror 继续从本地化文案标记 gutter，原始数据库错误与 SQL 片段不进入 IPC。
 - PostgreSQL 当前只展开连接实际所在的 database；浏览其他 database 需新建目标连接。证书路径尚未传给 PostgreSQL driver，真实 Tauri 直连/1 跳 SSH 仍待 V2-T3.4 验收。
 
 ## 活跃文件
@@ -69,6 +69,7 @@
 - metadata 契约使用显式 `database + optional schema`；PostgreSQL 不能在同一连接切换 database，跨库请求返回稳定 key。当前 UI 只展开连接所在 database，跨库浏览需新建对应连接，不做隐式重连。
 - PostgreSQL 取消使用独立 control pool 调 `pg_cancel_backend`；取消或无服务端 LIMIT 的客户端截断后关闭执行连接，避免协议残留回池。MySQL JSON 同步改用 sqlx `JsonValue`，真实测试不再返回 `<unsupported>`。
 - SQL guard 按方言处理 PostgreSQL `TABLE`/`VALUES`、`OFFSET`/`FETCH` 与 dollar-quoted body；数据修改 CTE 仍需写确认，DML `RETURNING` 确认后返回结果行。
+- V2-CP1 三项历史承诺均以代码关闭：测试连接 passphrase 仅作瞬时参数；SSH 运行期断链按首跳/channel/accept worker 分类并去重；查询错误 IPC 只含稳定 key 与可选正整数行号。
 - v0.2 开工前不重做 v0.1.0 发布验收；Phase 0 的应用内升级实测和 PostgreSQL 版本基线现已完成，只剩影响代码承诺的已知缺口。发布后的稳定时长和社区反馈只用于调整 P2 优先级。
 - PostgreSQL v0.2 正式支持 15-18，最低版本为 15；必测 `15.latest` 与当前最新稳定大版本 `18.latest`。14 及以下仅 best-effort 且不主动阻止连接；若 RC 前 PostgreSQL 19 正式发布，则补一次最新 GA 发布回归。
 - 更新检查反馈按触发来源区分：后台每日检查无更新或失败时保持静默；用户从应用菜单手动检查时必须显示“已是最新版本”或失败原因。
@@ -79,18 +80,17 @@
 
 ## 下一步（按优先级）
 
-1. 完成 V2-T3.4：在真实 Tauri 应用中验证 MySQL/PostgreSQL 直连、1 跳 SSH、连接切换与取消不串线，通过后关闭 V2-CP2。
-2. 处理/收窄三类 v0.1 代码承诺缺口，以正式关闭 V2-CP1 管理检查点。
-3. 进入 Week 4：补齐 passphrase 测试连接、凭据安全边界与双 driver TLS 验收。
+1. 完成 V2-T3.4：在真实 Tauri 应用中补验 PostgreSQL 直连、MySQL/PostgreSQL 各自 1 跳 SSH、连接切换与取消不串线，通过后关闭 V2-CP2。
+2. 确认 Week 4 安全方案：Argon2id v19（19 MiB / t=2 / p=1）派生 32 字节 key、AES-256-GCM v2 envelope、后端独立 secrets map 与可回滚原子迁移；确认后再改存储协议。
+3. 准备真实 MySQL TLS 正反例环境，验收 CA、hostname 与客户端证书路径。
 
 ## 阻塞 / 风险
 
-- **两类 SSH 承诺与运行实现不完全一致**：passphrase 测试连接、ChannelDropped / AcceptLoopDied 检测需决定是补代码还是降级 v0.1 需求。
-- **MySQL 服务端错误行标识未真正接通**：前端解析逻辑存在，但后端只返回稳定 key；需设计结构化错误 payload，不能直接泄露原始 Rust 错误。
 - **MySQL TLS 只完成接线**：真实 TLS/双向证书与错误 UX 未验收。
 - **高级设置部分仅持久化**：读取/写入超时、keepalive 间隔、压缩、自动连接不能描述成已生效。
 - **v0.2 范围约 98h**：必须执行 Week 6 降级规则，禁止为了完整 P2 挤压 driver、凭据和 TLS 安全门槛。
 - **PostgreSQL 版本矩阵未完成**：当前真实本地实例已通过后端契约，但 PostgreSQL 15.latest / 18.latest 双端点仍需在 RC 前分别回归。
 - **PostgreSQL 应用验收未完成**：自动门禁已覆盖 driver、AppState、commands 与前端状态，但真实 Tauri 直连/1 跳 SSH、切换和取消仍需人工验证。
+- **Week 4 安全存储方案待确认**：候选 `argon2 0.5.3` 已在锁文件且官方 MSRV 为 Rust 1.65；`zeroize 1.9.0` 虽已是传递依赖，但官方 MSRV 为 1.85，高于项目声明 1.77.2，直接依赖时拟精确约束到兼容的 1.8.x 并重新验证依赖树。
 
 相关：[[progress]] · [[systemPatterns]]

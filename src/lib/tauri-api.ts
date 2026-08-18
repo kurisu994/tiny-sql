@@ -120,8 +120,29 @@ export const ERROR_ZH: Record<string, string> = {
 
 /** 把后端返回的错误（可能是 i18n key）翻译成中文 */
 export function translateError(e: unknown): string {
-  const key = typeof e === "string" ? e : String(e);
-  return ERROR_ZH[key] ?? key;
+  const payload = parseCommandError(e);
+  const key = payload?.key ?? (typeof e === "string" ? e : String(e));
+  const message = ERROR_ZH[key] ?? key;
+  return payload?.line ? `${message}（第 ${payload.line} 行）` : message;
+}
+
+interface CommandErrorPayload {
+  key: string;
+  line: number | null;
+}
+
+function parseCommandError(value: unknown): CommandErrorPayload | null {
+  if (typeof value !== "object" || value === null || !("key" in value)) {
+    return null;
+  }
+  const key = Reflect.get(value, "key");
+  if (typeof key !== "string") return null;
+  const rawLine = Reflect.get(value, "line");
+  const line =
+    typeof rawLine === "number" && Number.isInteger(rawLine) && rawLine > 0
+      ? rawLine
+      : null;
+  return { key, line };
 }
 
 // === 应用更新 ===
@@ -205,7 +226,12 @@ export const connectionApi = {
   update: (connection: StoredConnection) =>
     invoke<void>("connection_update", { connection }),
   remove: (id: string) => invoke<void>("connection_delete", { id }),
-  test: (input: ConnectionInput) => invoke<void>("connection_test", { input }),
+  /** 测试连接；passphrase 仅用于本次 SSH 握手，不保存也不进入会话缓存。 */
+  test: (input: ConnectionInput, passphrase?: string) =>
+    invoke<void>("connection_test", {
+      input,
+      passphrase: passphrase ?? null,
+    }),
   /** 打开连接（建隧道 + 连接池）；passphrase 仅本次会话生效 */
   open: (id: string, passphrase?: string) =>
     invoke<void>("connection_open", { id, passphrase: passphrase ?? null }),

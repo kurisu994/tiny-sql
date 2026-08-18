@@ -112,6 +112,8 @@ export function ConnectionForm({
       : EMPTY,
   );
   const [test, setTest] = useState<TestState>({ kind: "idle" });
+  // 只用于当前表单的“测试连接”，不会进入 ConnectionInput 或持久化配置。
+  const [testPassphrase, setTestPassphrase] = useState("");
   const [saving, setSaving] = useState(false);
   const [driver, setDriver] = useState<DriverKind>(
     () => editing?.driver ?? "mysql",
@@ -157,7 +159,7 @@ export function ConnectionForm({
   async function onTest() {
     setTest({ kind: "testing" });
     try {
-      await connectionApi.test(toInput());
+      await connectionApi.test(toInput(), testPassphrase || undefined);
       setTest({ kind: "ok" });
     } catch (e) {
       setTest({ kind: "err", msg: translateError(e) });
@@ -258,7 +260,12 @@ export function ConnectionForm({
         </TabsContent>
 
         <TabsContent value="ssh">
-          <SshSection ssh={ssh} onChange={setSsh} />
+          <SshSection
+            ssh={ssh}
+            onChange={setSsh}
+            testPassphrase={testPassphrase}
+            onTestPassphraseChange={setTestPassphrase}
+          />
         </TabsContent>
 
         <TabsContent value="ssl">
@@ -573,9 +580,13 @@ const EMPTY_HOP: SshHopConfig = {
 function SshSection({
   ssh,
   onChange,
+  testPassphrase,
+  onTestPassphraseChange,
 }: {
   ssh: SshConfig;
   onChange: (ssh: SshConfig) => void;
+  testPassphrase: string;
+  onTestPassphraseChange: (passphrase: string) => void;
 }) {
   const setHop = (i: number, patch: Partial<SshHopConfig>) =>
     onChange({
@@ -635,6 +646,14 @@ function SshSection({
           <p className="text-xs text-neutral-500">
             私钥 passphrase 仅在连接时按需输入，不会保存。
           </p>
+          {ssh.hops.some((hop) => hop.authType === "privateKey") && (
+            <Field
+              label="私钥 passphrase（仅测试）"
+              type="password"
+              value={testPassphrase}
+              onChange={onTestPassphraseChange}
+            />
+          )}
         </div>
       )}
     </div>

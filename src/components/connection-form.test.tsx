@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
+import { invoke } from "@tauri-apps/api/core";
 import type { StoredConnection } from "@/lib/tauri-api";
 import { ConnectionForm } from "@/components/connection-form";
 
@@ -59,5 +60,31 @@ describe("ConnectionForm", () => {
     expect(screen.getByLabelText("端口")).toHaveValue(5432);
     expect(screen.getByLabelText("用户")).toHaveValue("postgres");
     expect(screen.getByText(/当前使用驱动默认 TLS 策略/)).toBeInTheDocument();
+  });
+
+  it("测试连接会转发仅用于本次握手的私钥 passphrase", async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    render(<ConnectionForm editing={null} onDone={() => {}} />);
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "SSH" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByLabelText("通过 SSH 跳板连接"));
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加跳板" }));
+    fireEvent.change(screen.getByLabelText("认证方式"), {
+      target: { value: "privateKey" },
+    });
+    fireEvent.change(screen.getByLabelText("私钥 passphrase（仅测试）"), {
+      target: { value: "test-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "connection_test",
+        expect.objectContaining({ passphrase: "test-secret" }),
+      ),
+    );
   });
 });

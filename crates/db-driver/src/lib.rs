@@ -70,6 +70,14 @@ pub enum DriverError {
 }
 
 impl DriverError {
+    /// 返回可安全暴露给前端的 SQL 行号；原始数据库错误文本始终留在后端。
+    pub fn sql_line(&self) -> Option<u32> {
+        match self {
+            Self::QueryFailed(detail) => extract_sql_error_line(detail),
+            _ => None,
+        }
+    }
+
     pub fn i18n_key(&self) -> &'static str {
         match self {
             Self::ConnectFailed(_) => "error.driver.connect_failed",
@@ -83,6 +91,18 @@ impl DriverError {
             Self::SchemaRequired => "error.driver.schema_required",
         }
     }
+}
+
+fn extract_sql_error_line(detail: &str) -> Option<u32> {
+    let lowercase = detail.to_ascii_lowercase();
+    [" at line ", " line "].into_iter().find_map(|marker| {
+        let start = lowercase.rfind(marker)? + marker.len();
+        let digits: String = lowercase[start..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        digits.parse::<u32>().ok().filter(|line| *line > 0)
+    })
 }
 
 /// SQL 执行选项。
@@ -1271,6 +1291,21 @@ mod tests {
                 database: "app".to_string(),
                 schema: Some("audit".to_string()),
             }
+        );
+    }
+
+    #[test]
+    fn query_error_extracts_only_positive_mysql_line_number() {
+        let error = DriverError::QueryFailed(
+            "You have an error in your SQL syntax near 'private_data' at line 23".to_string(),
+        );
+        assert_eq!(error.sql_line(), Some(23));
+        assert_eq!(error.i18n_key(), "error.driver.query_failed");
+        assert_eq!(error.to_string(), "error.driver.query_failed");
+
+        assert_eq!(
+            DriverError::QueryFailed("database failed".to_string()).sql_line(),
+            None
         );
     }
 

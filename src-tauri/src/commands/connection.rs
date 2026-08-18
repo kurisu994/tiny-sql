@@ -91,16 +91,17 @@ pub async fn connection_delete(state: State<'_, AppState>, id: String) -> Result
 }
 
 /// 测试连接：建立完整链路（可选 SSH 隧道 + 数据库握手 + SELECT 1）后立即销毁。
+/// `passphrase` 仅用于本次测试，不写入持久化文件或会话缓存。
 /// 成功返回 ()，失败返回 i18n key 由前端翻译（FR-002）。
 #[tauri::command]
 pub async fn connection_test(
     app: AppHandle,
     state: State<'_, AppState>,
     input: ConnectionInput,
+    passphrase: Option<String>,
 ) -> Result<(), String> {
     let hops: Vec<SshHop> = if input.ssh.enabled {
-        // 测试连接不带会话 passphrase 缓存，私钥 passphrase 测试留连接打开路径
-        build_runtime_hops(&input.ssh, None)?
+        build_runtime_hops(&input.ssh, passphrase.as_deref())?
     } else {
         Vec::new()
     };
@@ -437,4 +438,46 @@ fn build_verifier(
             }
         }) as std::pin::Pin<Box<dyn std::future::Future<Output = HostKeyDecision> + Send>>
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn private_key_ssh_config() -> SshConfig {
+        SshConfig {
+            enabled: true,
+            hops: vec![store::SshHop {
+                host: "bastion.example.com".to_string(),
+                port: 22,
+                username: "deploy".to_string(),
+                auth_type: "privateKey".to_string(),
+                password: None,
+                private_key_path: Some("~/.ssh/id_ed25519".to_string()),
+            }],
+        }
+    }
+
+    #[test]
+    fn test_connection_passphrase_is_forwarded_to_private_key_hop() {
+        let hops = build_runtime_hops(&private_key_ssh_config(), Some("test-secret")).unwrap();
+
+        match &hops[0].auth {
+            SshAuth::PrivateKey { path, passphrase } => {
+                assert_eq!(path, "~/.ssh/id_ed25519");
+                assert_eq!(passphrase.as_deref(), Some("test-secret"));
+            }
+            SshAuth::Password(_) => panic!("应构造私钥认证"),
+        }
+    }
+
+    #[test]
+    fn test_connection_without_passphrase_keeps_private_key_optional() {
+        let hops = build_runtime_hops(&private_key_ssh_config(), None).unwrap();
+
+        match &hops[0].auth {
+            SshAuth::PrivateKey { passphrase, .. } => assert!(passphrase.is_none()),
+            SshAuth::Password(_) => panic!("应构造私钥认证"),
+        }
+    }
 }

@@ -488,7 +488,7 @@ impl OpenConnection {
 | `connection_update` | `(connection)` | `()` | 同上 |
 | `connection_list` | - | `Vec<StoredConnection>` | 按最近使用倒序；Week 2 简化返回完整配置（含明文 password）供前端编辑回显，落盘已整体加密 |
 | `connection_delete` | `id` | `()` | 加密落盘后删 |
-| `connection_test` | `config` | `()` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；当前不接收 passphrase，带口令私钥测试是已知缺口 |
+| `connection_test` | `(config, passphrase?)` | `()` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；passphrase 只用于本次测试，不持久化或缓存 |
 | `connection_open` | `(id, passphrase?)` | `()` | 建立持久连接，注册到 AppState；幂等，成功刷新最近使用 |
 | `connection_close` | `id` | `()` | 关闭并清理 |
 | `db_create_database` | `(id, name, charset?, collation?)` | `()` | MySQL 专属创建 database；其他 driver 返回不支持 |
@@ -611,10 +611,10 @@ v0.1 每跳的生命周期简化为 **4 态**（FR-015），与 `ssh:hop-status`
 | `HostKeyMismatch { hop_index, host, port }` | `error.ssh.host_key_mismatch` | 已信任 host 公钥变更 | 硬拒绝，警告对话框 |
 | `HostKeyRejected { hop_index }` | `error.ssh.host_key_rejected` | 用户 TOFU 弹窗拒绝 / 120s 超时 | hop[i] 红边 |
 | **`TunnelLost { hop_index, reason }`** | `error.ssh.tunnel_lost` | keepalive 连续 3 次失败（**FR-014**） | hop[i] 闪烁红边 + toast |
-| **`ChannelDropped { hop_index }`** | `error.ssh.channel_dropped` | 某跳 channel 被对端主动关闭（可能跳板重启） | 公共契约已定义；当前运行路径未主动构造 |
-| **`AcceptLoopDied { hop_index }`** | `error.ssh.accept_loop_died` | 某跳 accept loop panic（代码 bug） | 公共契约已定义；当前运行路径未主动构造 |
+| **`ChannelDropped { hop_index }`** | `error.ssh.channel_dropped` | 嵌套跳 transport channel 被对端关闭（可能跳板重启） | `TunnelHandler::disconnected` + keepalive fallback 去重上报 |
+| **`AcceptLoopDied { hop_index }`** | `error.ssh.accept_loop_died` | 出口跳 accept worker panic / 意外退出 | 独立 monitor 等待 worker；正常 drop 先置 shutdown，不误报 |
 
-> 三个 mid-session 变体（TunnelLost / ChannelDropped / AcceptLoopDied）用于稳定覆盖三类 failure mode 的错误契约；当前实际运行上报只有 keepalive `HopStatus::Lost`，后两类尚未接入检测。codex review 曾建议合并为统一连接状态机，v0.1 先保留三个公共变体；发布前需补运行接线或收窄需求，后续若 i18n key 膨胀再在 v0.2 重构（见 [ROADMAP v0.2 待定项](./ROADMAP.md#v02-待定项codex-review-surface实施期决定)）。
+> 三个 mid-session 变体（TunnelLost / ChannelDropped / AcceptLoopDied）稳定覆盖三类 failure mode，并统一映射为前端 `lost` 状态，`reason` 保留具体 i18n key。每跳的原子标记负责断链去重，`SshTunnel::drop` 先设置 shutdown 再终止 worker/monitor，避免主动关闭触发红色故障态。
 
 **稳定 i18n key 契约**（NFR-041）：每个变体的 i18n key 是公开 API 的一部分。新增变体可以加新 key，但已有 key 不能改名。前端翻译表向后兼容。
 
