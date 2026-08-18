@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -47,5 +47,17 @@ describe("ConnectionForm", () => {
     render(<ConnectionForm editing={conn} onDone={() => {}} />);
     expect(screen.getByText(/编辑连接：prod-db/)).toBeInTheDocument();
     expect(screen.getByText("删除")).toBeInTheDocument();
+  });
+
+  it("切换 PostgreSQL 时更新默认端口与用户", () => {
+    render(<ConnectionForm editing={null} onDone={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText("数据库类型"), {
+      target: { value: "postgresql" },
+    });
+
+    expect(screen.getByLabelText("端口")).toHaveValue(5432);
+    expect(screen.getByLabelText("用户")).toHaveValue("postgres");
+    expect(screen.getByText(/当前使用驱动默认 TLS 策略/)).toBeInTheDocument();
   });
 });

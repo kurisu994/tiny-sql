@@ -59,28 +59,28 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 - [x] **V2-T1.1 [4h]** 从现有 `MySqlDriver` 调用面提取最小、对象安全的 `Driver` 契约；覆盖 ping、metadata、query、基于 `CancellationToken` 的 cancel、close，连接创建仍由具体 driver/factory 负责，未提前抽象 v0.3 对象编辑能力。MySQL 生产调用面已通过该契约接线，workspace 编译与 `db-driver` 单测通过。
 - [x] **V2-T1.2 [3h]** 连接配置已增加显式 `driver` 类型，稳定值为 `mysql` / `postgresql`；旧记录缺字段时只在内存中默认迁移为 MySQL，不在启动读取时重写密文，后续显式保存才落成新格式。未知 driver 迁移失败会保留原加密文件，Rust 加密存储测试与前端类型检查通过。
-- [ ] **V2-T1.3 [3h]** PostgreSQL 最窄代码链路已实现：`PostgresDriver` 支持显式直连、`SELECT 1::BIGINT`、关闭连接池与稳定 `error.driver.connect_failed`；SSH 仍由上层复用通用 TCP 隧道。`sqlx-postgres 0.8.6` 已编译，integration 门禁已建立，但本机尚未配置 `TINY_SQL_TEST_POSTGRES_URL`，真实 `SELECT 1` 通过前保持未完成。
+- [x] **V2-T1.3 [3h]** PostgreSQL 最窄链路已通过真实数据库验证：`PostgresDriver` 支持显式直连、`SELECT 1::BIGINT`、关闭主/control pool 与稳定 `error.driver.connect_failed`；显式连接不读取 `~/.pgpass`，SSH 仍由上层复用通用 TCP 隧道。
 - [x] **V2-T1.4 [2h]** MySQL 18 个单测与 5 个真实 integration 全绿，覆盖连接、metadata、NULL/数值解码以及 `SELECT SLEEP(10)` 取消；SQL guard / LIMIT 单测和独立 control pool 取消行为均无回归。
 
-完成条件：MySQL 现有测试全绿；PostgreSQL `SELECT 1` 通过；旧 `connections.enc` 无损读取；通过 **V2-CP1**。
+完成条件：MySQL 现有测试全绿；PostgreSQL `SELECT 1` 通过；旧 `connections.enc` 无损读取。技术主链已满足；三项 v0.1 代码承诺缺口尚未处理/收窄，因此 **V2-CP1** 管理检查点仍不标记通过。
 
 ### Week 2：PostgreSQL 后端闭环（13h）
 
-- [ ] **V2-T2.1 [5h]** 实现 PostgreSQL database/schema/table/column metadata，不把 MySQL database/schema 语义硬套到 PostgreSQL。
-- [ ] **V2-T2.2 [4h]** 实现 PostgreSQL query、结果解码、行数上限与取消；标识符引用、SQL dialect 和取消机制由 PostgreSQL driver 独立处理。
-- [ ] **V2-T2.3 [2h]** 增加 `TINY_SQL_TEST_POSTGRES_URL` integration 测试，连接用户本地数据库，不起 Docker。
-- [ ] **V2-T2.4 [2h]** 为 MySQL/PostgreSQL 共用错误定义稳定 i18n key，原始 driver 错误只进入脱敏日志或结构化安全字段。
+- [x] **V2-T2.1 [5h]** 公共 metadata 模型已增加显式 `MetadataScope { database, schema }` 与 `SchemaMeta`；PostgreSQL 分别查询 database/schema/table/column，并拒绝在同一连接上静默跨 database。MySQL 继续把 schema 映射为同名 database，生产调用行为不变。
+- [x] **V2-T2.2 [4h]** PostgreSQL 已实现 query、NULL/日期/数值/JSON/BYTEA 解码、方言感知行数上限、写确认、DML `RETURNING` 与独立 control pool `pg_cancel_backend` 取消；dollar-quoted body、数据修改 CTE、`TABLE`/`VALUES`、`OFFSET` 均有 guard 单测。
+- [x] **V2-T2.3 [2h]** `TINY_SQL_TEST_POSTGRES_URL` 真实 integration 已覆盖 ping、四层 metadata、SELECT/解码/截断/写确认、长查询取消及取消后 pool 恢复；4 项全绿，不起 Docker。MySQL 5 项 integration 同步扩展到同等级基本类型与写确认契约。
+- [x] **V2-T2.4 [2h]** MySQL/PostgreSQL 共用稳定 i18n key；`DriverError` 的 `Display` 只输出 key，原始 sqlx 错误保留在后端结构化字段，不经 Tauri IPC 暴露。新增 database 切换/schema 缺失 key，前端连接失败文案已泛化为多 driver。
 
-完成条件：两个 driver 均通过 ping、metadata、SELECT、写确认、取消及 NULL/日期/数值/JSON 基本解码。
+完成条件：两个 driver 均通过 ping、metadata、SELECT、写确认、取消及 NULL/日期/数值/JSON 基本解码。当前真实门禁为 MySQL 5/5、PostgreSQL 4/4 全绿；PostgreSQL 15/18 双端点版本矩阵仍留正式版兼容回归。
 
 ### Week 3：多 driver 应用接线（12h）
 
-- [ ] **V2-T3.1 [4h]** 将 `AppState` 活跃连接注册表改为多 driver 容器；隧道生命周期继续由 `OpenConnection` 持有。
-- [ ] **V2-T3.2 [3h]** 泛化 Tauri commands 与前端 API，保留稳定 command 名和错误 key。
-- [ ] **V2-T3.3 [3h]** 连接表单增加数据库类型和 PostgreSQL 参数；schema 树按 driver 语义展示 database/schema。
-- [ ] **V2-T3.4 [2h]** 验证 MySQL/PostgreSQL 直连、1 跳 SSH 和连接切换；3 跳 PostgreSQL 留到 Week 8。
+- [x] **V2-T3.1 [4h]** `AppState` 活跃连接注册表已改为 `ActiveDriver::{MySql, PostgreSql}` 多 driver 容器并实现统一 `Driver` 转发；`OpenConnection` 继续按 driver → tunnel 字段顺序绑定和关闭生命周期。
+- [x] **V2-T3.2 [3h]** connection test/open/close 与 metadata/query commands 已按 driver 泛化，原 command 名和错误 key 保持稳定；新增 `db_list_schemas` 与可选 schema 入参，MySQL 专属 CREATE DATABASE 对 PostgreSQL 返回明确不支持。
+- [x] **V2-T3.3 [3h]** 连接表单已增加 MySQL/PostgreSQL 选择，切换时带出 3306/root 或 5432/postgres 默认值；连接列表标识 driver，PostgreSQL 树按 database → schema → table 展示并使用双引号生成预览 SQL。PostgreSQL 证书路径尚未接线，表单明确提示使用 driver 默认 TLS 策略。
+- [ ] **V2-T3.4 [2h]** 双 driver 后端真实 integration 9/9、AppState/command/frontend 单测和 `just check` 已通过；仍需在 Tauri 应用中验证 MySQL/PostgreSQL 直连、1 跳 SSH、连接切换与取消不串线，3 跳 PostgreSQL留到 Week 8。
 
-完成条件：同一应用能保存并分别打开 MySQL/PostgreSQL；关闭、切换和取消不会串 driver；通过 **V2-CP2**。
+完成条件：同一应用能保存并分别打开 MySQL/PostgreSQL；关闭、切换和取消不会串 driver；通过 **V2-CP2**。当前代码与自动门禁已满足，缺少真实 Tauri 直连/1 跳验证，因此 T3.4/CP2 保持未完成。
 
 ### Week 4：凭据安全与 TLS（13h）
 

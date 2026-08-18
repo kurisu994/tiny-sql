@@ -8,6 +8,7 @@ import {
   translateError,
   type AdvancedConfig,
   type ConnectionInput,
+  type DriverKind,
   type SslConfig,
   type SslMode,
   type SshConfig,
@@ -41,6 +42,11 @@ const EMPTY: FormFields = {
   user: "root",
   password: "",
   database: "",
+};
+
+const DRIVER_DEFAULTS: Record<DriverKind, Pick<FormFields, "port" | "user">> = {
+  mysql: { port: 3306, user: "root" },
+  postgresql: { port: 5432, user: "postgres" },
 };
 
 const DEFAULT_SSH: SshConfig = { enabled: false, hops: [] };
@@ -107,6 +113,9 @@ export function ConnectionForm({
   );
   const [test, setTest] = useState<TestState>({ kind: "idle" });
   const [saving, setSaving] = useState(false);
+  const [driver, setDriver] = useState<DriverKind>(
+    () => editing?.driver ?? "mysql",
+  );
   const [ssh, setSsh] = useState<SshConfig>(
     () => editing?.ssh ?? DEFAULT_SSH,
   );
@@ -119,8 +128,7 @@ export function ConnectionForm({
 
   const toInput = (): ConnectionInput => ({
     name: form.name,
-    // 数据库类型选择器在 Week 3 接入；当前新建默认 MySQL，编辑时保留原类型。
-    driver: editing?.driver ?? "mysql",
+    driver,
     host: form.host,
     port: Number(form.port),
     user: form.user,
@@ -133,6 +141,18 @@ export function ConnectionForm({
 
   const set = <K extends keyof FormFields>(key: K, value: FormFields[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  const changeDriver = (next: DriverKind) => {
+    const previousDefaults = DRIVER_DEFAULTS[driver];
+    const nextDefaults = DRIVER_DEFAULTS[next];
+    setDriver(next);
+    setForm((current) => ({
+      ...current,
+      port: current.port === previousDefaults.port ? nextDefaults.port : current.port,
+      user: current.user === previousDefaults.user ? nextDefaults.user : current.user,
+    }));
+    setTest({ kind: "idle" });
+  };
 
   async function onTest() {
     setTest({ kind: "testing" });
@@ -186,19 +206,32 @@ export function ConnectionForm({
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="general">常规</TabsTrigger>
           <TabsTrigger value="ssh">SSH</TabsTrigger>
-          <TabsTrigger value="ssl">SSL</TabsTrigger>
+          <TabsTrigger value="ssl" disabled={driver === "postgresql"}>
+            SSL
+          </TabsTrigger>
           <TabsTrigger value="advanced">高级</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general">
           <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-neutral-600 dark:text-neutral-400">数据库类型</span>
+              <select
+                value={driver}
+                onChange={(event) => changeDriver(event.target.value as DriverKind)}
+                className="rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900"
+              >
+                <option value="mysql">MySQL</option>
+                <option value="postgresql">PostgreSQL</option>
+              </select>
+            </label>
             <Field
               label="连接名称"
               value={form.name}
               onChange={(v) => set("name", v)}
             />
             <Field
-              label="数据库（可空）"
+              label="默认数据库（可空）"
               value={form.database}
               onChange={(v) => set("database", v)}
             />
@@ -217,6 +250,11 @@ export function ConnectionForm({
               onChange={(v) => set("password", v)}
             />
           </div>
+          {driver === "postgresql" && (
+            <p className="mt-3 text-xs text-neutral-500">
+              PostgreSQL 默认端口为 5432；证书路径将在安全阶段接入，当前使用驱动默认 TLS 策略。
+            </p>
+          )}
         </TabsContent>
 
         <TabsContent value="ssh">

@@ -212,7 +212,7 @@ export default function Home() {
                           )}
                         </span>
                         <span className="truncate text-xs text-neutral-500">
-                          {c.host}:{c.port}
+                          {c.driver === "postgresql" ? "PostgreSQL" : "MySQL"} · {c.host}:{c.port}
                           {c.ssh.enabled ? ` · SSH×${c.ssh.hops.length}` : ""}
                         </span>
                       </button>
@@ -242,7 +242,7 @@ export default function Home() {
                         进入命令列界面
                       </ContextMenuItem>
                       <ContextMenuItem
-                        disabled={!isConnected}
+                        disabled={!isConnected || c.driver !== "mysql"}
                         onSelect={() => setDatabaseDialogConn(c)}
                       >
                         新建数据库

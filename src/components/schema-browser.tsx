@@ -5,7 +5,7 @@ import { Virtuoso } from "react-virtuoso";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
 import { TopologyGraph } from "@/components/topology-graph";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
-import type { RowSet, StoredConnection } from "@/lib/tauri-api";
+import type { RowSet, StoredConnection, TableMeta } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -21,6 +21,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     databases,
     expandedDb,
     selectedDb,
+    schemas,
+    expandedSchema,
+    selectedSchema,
     tables,
     selectedTable,
     rowSet,
@@ -33,6 +36,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     errorMsg,
     selectDb,
     toggleExpandedDb,
+    selectSchema,
+    toggleExpandedSchema,
     selectTable,
     setSqlText,
     executeSql,
@@ -45,7 +50,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     const sql = sqlText.trim();
     if (!sql) return;
     let allowWrite = false;
-    if (needsWriteConfirmation(sql)) {
+    if (needsWriteConfirmation(sql, connection.driver)) {
       allowWrite = await confirm({
         title: "确认写操作",
         message:
@@ -102,7 +107,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       )}
 
       <div className="flex min-h-0 flex-1">
-        {/* 左：db / table 树 */}
+        {/* 左：database / schema / table 树 */}
         <aside className="w-60 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
           {!connected && (
             <p className="px-3 py-3 text-xs text-neutral-500">
@@ -121,28 +126,55 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               >
                 <DatabaseTreeIcon active={selectedDb === db.name} />
                 <span className="min-w-0 truncate">{db.name}</span>
+                {connection.driver === "postgresql" && db.isCurrent && (
+                  <span className="ml-auto shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400">
+                    当前
+                  </span>
+                )}
               </button>
-              {expandedDb === db.name && (
+              {expandedDb === db.name && connection.driver === "mysql" && (
+                <TableTreeList
+                  tables={tables}
+                  loading={loadingData}
+                  selectedTable={selectedTable}
+                  onSelect={selectTable}
+                  paddingClass="pl-8"
+                />
+              )}
+              {expandedDb === db.name && connection.driver === "postgresql" && (
                 <ul className="pb-1">
-                  {tables.length === 0 && (
+                  {schemas.length === 0 && (
                     <li className="px-3 py-1 pl-7 text-xs text-neutral-400">
-                      {loadingData ? "加载中…" : "（无表）"}
+                      {loadingData ? "加载中…" : "（无 Schema）"}
                     </li>
                   )}
-                  {tables.map((t) => (
-                    <li key={t.name}>
+                  {schemas.map((schema) => (
+                    <li key={schema.name}>
                       <button
-                        onClick={() => selectTable(t.name)}
-                        title={t.comment ?? undefined}
-                        className={`flex w-full min-w-0 items-center gap-1.5 px-3 py-1 pl-8 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-                          selectedTable === t.name
-                            ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
-                            : "text-neutral-600 dark:text-neutral-400"
+                        onClick={() => toggleExpandedSchema(schema.name)}
+                        onDoubleClick={() => selectSchema(schema.name)}
+                        title={schema.name}
+                        className={`flex w-full min-w-0 items-center gap-1.5 px-3 py-1 pl-7 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
+                          selectedSchema === schema.name ? "font-medium" : ""
                         }`}
                       >
-                        <TableTreeIcon active={selectedTable === t.name} />
-                        <span className="min-w-0 truncate">{t.name}</span>
+                        <SchemaTreeIcon active={selectedSchema === schema.name} />
+                        <span className="min-w-0 truncate">{schema.name}</span>
+                        {schema.isDefault && (
+                          <span className="ml-auto shrink-0 text-[10px] text-neutral-400">
+                            默认
+                          </span>
+                        )}
                       </button>
+                      {expandedSchema === schema.name && (
+                        <TableTreeList
+                          tables={tables}
+                          loading={loadingData}
+                          selectedTable={selectedTable}
+                          onSelect={selectTable}
+                          paddingClass="pl-12"
+                        />
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -161,7 +193,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               disabled={!connected || queryRunning}
               queryErrorMsg={queryErrorMsg}
               databases={databases}
-              selectedDb={selectedDb}
+              selectedDb={
+                connection.driver === "postgresql" ? selectedSchema : selectedDb
+              }
               tables={tables}
             />
             <div className="mt-2 flex items-center gap-2">
@@ -208,12 +242,71 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           </div>
           {selectedTable && (
             <div className="border-t border-neutral-200 px-3 py-1.5 text-xs text-neutral-500 dark:border-neutral-800">
-              当前表：{selectedDb}.{selectedTable}
+              当前表：
+              {connection.driver === "postgresql"
+                ? `${selectedDb}.${selectedSchema}.${selectedTable}`
+                : `${selectedDb}.${selectedTable}`}
             </div>
           )}
         </section>
       </div>
     </div>
+  );
+}
+
+function TableTreeList({
+  tables,
+  loading,
+  selectedTable,
+  onSelect,
+  paddingClass,
+}: {
+  tables: TableMeta[];
+  loading: boolean;
+  selectedTable: string | null;
+  onSelect: (table: string) => Promise<void>;
+  paddingClass: string;
+}) {
+  return (
+    <ul className="pb-1">
+      {tables.length === 0 && (
+        <li className={cn("px-3 py-1 text-xs text-neutral-400", paddingClass)}>
+          {loading ? "加载中…" : "（无表）"}
+        </li>
+      )}
+      {tables.map((table) => (
+        <li key={table.name}>
+          <button
+            onClick={() => onSelect(table.name)}
+            title={table.comment ?? undefined}
+            className={cn(
+              "flex w-full min-w-0 items-center gap-1.5 px-3 py-1 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800",
+              paddingClass,
+              selectedTable === table.name
+                ? "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                : "text-neutral-600 dark:text-neutral-400",
+            )}
+          >
+            <TableTreeIcon active={selectedTable === table.name} />
+            <span className="min-w-0 truncate">{table.name}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SchemaTreeIcon({ active }: { active: boolean }) {
+  return (
+    <span
+      className={cn(
+        "h-3.5 w-3.5 shrink-0 rounded-sm border shadow-sm",
+        active
+          ? "border-violet-600 bg-violet-500"
+          : "border-violet-400/60 bg-violet-200 dark:bg-violet-800",
+      )}
+      aria-hidden="true"
+    />
   );
 }
 

@@ -103,7 +103,7 @@ tiny-sql v0.1.0-rc1 试用：
 - CP-3：MySQL 5.7 验证通过。
 - CP-4：真实 GUI dogfooding 准入通过。
 - CP-6：作者 + 2 同事试用 1 周，0 数据丢失，0 不可恢复 crash。
-- README 已包含右键打开说明；真实 GIF 若尚未录制，必须明确延期并不在发布文案里承诺。
+- README 已包含右键打开说明；发布不要求额外录制 GIF。
 - `CHANGELOG.md` 已从 `[Unreleased]` 切出 `0.1.0`。
 - GitHub Secrets 已配置 updater 私钥。
 - GitHub Release 中有 macOS Apple Silicon / Intel 两个 `.dmg`，Windows x64 `.exe`，Linux x64 `.AppImage`，并有对应 updater artifact / `.sig`。

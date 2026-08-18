@@ -13,13 +13,16 @@ import {
   type DatabaseMeta,
   type HopStatusPayload,
   type RowSet,
+  type SchemaMeta,
   type StoredConnection,
   type TableMeta,
 } from "@/lib/tauri-api";
 
-/** 反引号包裹标识符，内部反引号双写转义 */
-function quoteIdent(name: string): string {
-  return "`" + name.replace(/`/g, "``") + "`";
+/** 按 driver 方言引用标识符。 */
+function quoteIdent(name: string, driver: StoredConnection["driver"]): string {
+  return driver === "postgresql"
+    ? '"' + name.replace(/"/g, '""') + '"'
+    : "`" + name.replace(/`/g, "``") + "`";
 }
 
 type Status = "idle" | "connecting" | "connected" | "error";
@@ -71,6 +74,9 @@ interface SessionState {
   /** 左侧 schema 树当前展开的 database；只控制折叠视觉状态 */
   expandedDb: string | null;
   selectedDb: string | null;
+  schemas: SchemaMeta[];
+  expandedSchema: string | null;
+  selectedSchema: string | null;
   tables: TableMeta[];
   selectedTable: string | null;
   rowSet: RowSet | null;
@@ -93,6 +99,8 @@ interface SessionState {
   cancelPassphrase: () => void;
   selectDb: (db: string) => Promise<void>;
   toggleExpandedDb: (db: string) => void;
+  selectSchema: (schema: string) => Promise<void>;
+  toggleExpandedSchema: (schema: string) => void;
   createDatabase: (id: string, input: CreateDatabaseInput) => Promise<void>;
   selectTable: (table: string) => Promise<void>;
   setSqlText: (sql: string) => void;
@@ -114,6 +122,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   databases: [],
   expandedDb: null,
   selectedDb: null,
+  schemas: [],
+  expandedSchema: null,
+  selectedSchema: null,
   tables: [],
   selectedTable: null,
   rowSet: null,
@@ -144,6 +155,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         databases,
         expandedDb: null,
         selectedDb: null,
+        schemas: [],
+        expandedSchema: null,
+        selectedSchema: null,
         tables: [],
         selectedTable: null,
         rowSet: null,
@@ -183,6 +197,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       databases: [],
       expandedDb: null,
       selectedDb: null,
+      schemas: [],
+      expandedSchema: null,
+      selectedSchema: null,
       tables: [],
       selectedTable: null,
       rowSet: null,
@@ -203,7 +220,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   cancelPassphrase: () => set({ passphraseFor: null, status: "idle" }),
 
   selectDb: async (db) => {
-    const { openId, selectedDb } = get();
+    const { openId, selectedDb, activeConnection } = get();
     if (!openId) return;
     if (selectedDb === db) {
       set({ expandedDb: db });
@@ -212,13 +229,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({
       expandedDb: db,
       selectedDb: db,
+      schemas: [],
+      expandedSchema: null,
+      selectedSchema: null,
       tables: [],
       selectedTable: null,
       rowSet: null,
       loadingData: true,
     });
     try {
-      const tables = await dbApi.listTables(openId, db);
+      if (activeConnection?.driver === "postgresql") {
+        const schemas = await dbApi.listSchemas(openId, db);
+        if (get().selectedDb !== db) return;
+        set({ schemas, loadingData: false });
+        return;
+      }
+      const tables = await dbApi.listTables(openId, db, null);
       if (get().selectedDb !== db) return;
       set({ tables, loadingData: false });
     } catch (e) {
@@ -231,6 +257,39 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((s) => {
       if (s.selectedDb !== db) return s;
       return { expandedDb: s.expandedDb === db ? null : db };
+    }),
+
+  selectSchema: async (schema) => {
+    const { openId, selectedDb, selectedSchema } = get();
+    if (!openId || !selectedDb) return;
+    if (selectedSchema === schema) {
+      set({ expandedSchema: schema });
+      return;
+    }
+    set({
+      expandedSchema: schema,
+      selectedSchema: schema,
+      tables: [],
+      selectedTable: null,
+      rowSet: null,
+      loadingData: true,
+    });
+    try {
+      const tables = await dbApi.listTables(openId, selectedDb, schema);
+      if (get().selectedDb !== selectedDb || get().selectedSchema !== schema) return;
+      set({ tables, loadingData: false });
+    } catch (error) {
+      if (get().selectedDb !== selectedDb || get().selectedSchema !== schema) return;
+      set({ errorMsg: translateError(error), loadingData: false });
+    }
+  },
+
+  toggleExpandedSchema: (schema) =>
+    set((state) => {
+      if (state.selectedSchema !== schema) return state;
+      return {
+        expandedSchema: state.expandedSchema === schema ? null : schema,
+      };
     }),
 
   createDatabase: async (id, input) => {
@@ -257,6 +316,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         databases,
         expandedDb: name,
         selectedDb: name,
+        schemas: [],
+        expandedSchema: null,
+        selectedSchema: null,
         tables: [],
         selectedTable: null,
         rowSet: null,
@@ -269,9 +331,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   selectTable: async (table) => {
-    const { openId, selectedDb } = get();
+    const { openId, selectedDb, selectedSchema, activeConnection } = get();
     if (!openId || !selectedDb) return;
-    const sql = `SELECT * FROM ${quoteIdent(selectedDb)}.${quoteIdent(table)}`;
+    const driver = activeConnection?.driver ?? "mysql";
+    const namespace = driver === "postgresql" ? selectedSchema : selectedDb;
+    if (!namespace) return;
+    const sql = `SELECT * FROM ${quoteIdent(namespace, driver)}.${quoteIdent(table, driver)}`;
     const queryId = createQueryId();
     set({
       selectedTable: table,

@@ -289,7 +289,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md)。
 
-- **FR-100** PostgreSQL driver（v0.2 已从 v0.1 具体 `MySqlDriver` 调用面提取对象安全的最小 `Driver` 契约）
+- **FR-100** PostgreSQL driver（后端与 AppState/Tauri/UI 代码已接线，真实 driver integration 通过；Tauri 直连/1 跳 SSH 应用验收仍待 V2-T3.4）
 - **FR-102** 加密 passphrase 存储（用户主密码 derive key）
 - **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（基础模式/路径已接线）
 - **FR-104** Schema-aware 智能联想（点 user_id 列自动提示 JOIN 候选）
@@ -356,7 +356,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **NFR-041 SshTunnelError 稳定 i18n key**：每个错误变体的 i18n key 是公开 API 的一部分；后续版本只能加新 key、不能改已有 key（前端翻译表向后兼容）。
 
-**NFR-042 v0.1 具体 struct，v0.2 提取最小 trait**：v0.1 直接使用具体 `struct MySqlDriver`，避免单实现时期过早抽象；v0.2 V2-T1.1 已从真实 commands 调用面提取对象安全的最小 `Driver` 契约，只覆盖 ping、metadata、query/取消与 close。连接创建和方言专属对象操作不进入 trait，增加 PostgreSQL 实现后再根据双实现反馈收窄签名。
+**NFR-042 v0.1 具体 struct，v0.2 提取最小 trait**：v0.1 直接使用具体 `struct MySqlDriver`，避免单实现时期过早抽象；v0.2 已从真实 commands 调用面提取对象安全的最小 `Driver` 契约，只覆盖 kind、ping、metadata、query/取消与 close。双实现反馈已把 metadata 收敛为显式 database/schema scope，避免套用 MySQL 同义语义；连接创建和方言专属对象操作仍不进入 trait。
 
 ---
 

@@ -103,13 +103,16 @@ export const ERROR_ZH: Record<string, string> = {
   "error.ssh.tunnel_lost": "SSH 隧道已断开（keepalive 超时）",
   "error.ssh.channel_dropped": "SSH 通道被对端关闭，请重连",
   "error.ssh.accept_loop_died": "SSH 隧道内部错误，请上报",
-  "error.driver.connect_failed": "MySQL 连接失败",
+  "error.driver.connect_failed": "数据库连接失败",
   "error.driver.query_failed": "SQL 执行失败",
   "error.driver.invalid_sql": "SQL 不能为空或格式不合法",
   "error.driver.multiple_statements": "一次只能执行一条 SQL",
   "error.driver.write_requires_confirmation": "检测到写操作，需要二次确认",
   "error.driver.query_cancelled": "SQL 已取消",
   "error.driver.invalid_identifier": "数据库名称或字符集配置不合法",
+  "error.driver.database_switch_required": "需要先切换到目标 PostgreSQL 数据库",
+  "error.driver.schema_required": "请选择 PostgreSQL Schema",
+  "error.driver.operation_not_supported": "当前数据库类型不支持该操作",
   "error.driver.not_implemented": "该数据库类型尚未接入",
   "error.connection.not_found": "连接配置不存在",
   "error.connection.not_open": "连接尚未打开",
@@ -212,9 +215,16 @@ export const connectionApi = {
 
 // === 数据浏览（schema / 结果集）===
 
-/** database（= MySQL schema）元信息 */
+/** database 元信息；PostgreSQL 仅当前连接所在 database 可直接浏览 */
 export interface DatabaseMeta {
   name: string;
+  isCurrent: boolean;
+}
+
+/** schema 元信息；MySQL 返回与 database 同名项，PostgreSQL 为独立层级 */
+export interface SchemaMeta {
+  name: string;
+  isDefault: boolean;
 }
 
 /** 表元信息 */
@@ -259,6 +269,8 @@ export interface CreateDatabaseInput {
 export const dbApi = {
   listDatabases: (id: string) =>
     invoke<DatabaseMeta[]>("db_list_databases", { id }),
+  listSchemas: (id: string, database: string) =>
+    invoke<SchemaMeta[]>("db_list_schemas", { id, database }),
   createDatabase: (id: string, input: CreateDatabaseInput) =>
     invoke<void>("db_create_database", {
       id,
@@ -266,10 +278,18 @@ export const dbApi = {
       charset: input.charset?.trim() ? input.charset.trim() : null,
       collation: input.collation?.trim() ? input.collation.trim() : null,
     }),
-  listTables: (id: string, database: string) =>
-    invoke<TableMeta[]>("db_list_tables", { id, database }),
-  listColumns: (id: string, database: string, table: string) =>
-    invoke<ColumnMeta[]>("db_list_columns", { id, database, table }),
+  listTables: (id: string, database: string, schema?: string | null) =>
+    invoke<TableMeta[]>("db_list_tables", {
+      id,
+      database,
+      schema: schema ?? null,
+    }),
+  listColumns: (
+    id: string,
+    database: string,
+    schema: string | null,
+    table: string,
+  ) => invoke<ColumnMeta[]>("db_list_columns", { id, database, schema, table }),
   query: (id: string, sql: string, options: QueryOptions = {}) =>
     invoke<RowSet>("db_query", {
       id,

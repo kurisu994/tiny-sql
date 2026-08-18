@@ -22,6 +22,17 @@ describe("needsWriteConfirmation", () => {
     expect(needsWriteConfirmation("DESCRIBE t")).toBe(false);
   });
 
+  it("PostgreSQL 方言识别 TABLE/VALUES 与数据修改 CTE", () => {
+    expect(needsWriteConfirmation("TABLE pg_catalog.pg_type", "postgresql")).toBe(false);
+    expect(needsWriteConfirmation("VALUES (1), (2)", "postgresql")).toBe(false);
+    expect(
+      needsWriteConfirmation(
+        "WITH changed AS (DELETE FROM orders RETURNING id) SELECT * FROM changed",
+        "postgresql",
+      ),
+    ).toBe(true);
+  });
+
   it("忽略字符串、标识符和注释里的关键字", () => {
     expect(
       needsWriteConfirmation(

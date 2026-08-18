@@ -8,7 +8,7 @@
 |---|---|---|
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
 | v0.1.0 | ✅ 正式版已发布 | 2026-08-18 全平台 Release 成功，含安装包、签名更新产物与四平台 `latest.json` |
-| v0.2 | 🚧 开发中 | V2-T1.1/T1.2/T1.4 已完成；PG vertical slice 代码就绪、待真实环境验证，后续为 PG 闭环、passphrase/TLS、schema intelligence、查询工作台与 RTT/重连 |
+| v0.2 | 🚧 开发中 | Week 1/2 后端与 Week 3 多 driver 应用接线已完成；真实 Tauri 直连/1 跳验收后进入 passphrase/TLS、schema intelligence、查询工作台与 RTT/重连 |
 | v0.3 | 规划 | 保存/打开 SQL、index/constraint 树、对象搜索、服务端筛选分页、多结果与可靠事务 |
 | v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
 | v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
@@ -23,7 +23,7 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 | Week 2 | 测试基础设施 + `MySqlDriver` struct + 加密 store + 连接管理 UI | ✅ 静态验证完成（playwright E2E 推迟；CP-2 工时未记录） |
 | Week 3 | 多跳 SSH + keepalive + 错误模型三变体 + TOFU + 表浏览 | ✅ 实现完成，真实环境状态由 CP-4 验收覆盖 |
 | Week 4 | SQL 执行（顶层安全追加 LIMIT + KILL QUERY）+ 拓扑图 + 全平台 Release | ✅ 代码、云端流水线与 CP-4 已完成 |
-| Week 5 | dogfooding + 修 bug + README/GIF + tag v0.1.0 | ✅ 正式版已发布；真实 GIF 作为发布后文档改进 |
+| Week 5 | dogfooding + 修 bug + README + tag v0.1.0 | ✅ 正式版已发布；README 已提供文字说明，不要求 GIF |
 | Week 6 / 7 | 缓冲 / launch（V2EX + 掘金） | ✅ 用户提交 `4f54f02` 标记完成 |
 
 ## Git 提交历史
@@ -78,6 +78,7 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 | `365b51f` | docs(plan): 精简开发计划待办 |
 | `fff24ed` | fix(release): 使用中文发布提交信息 |
 | `624b108` | release: 发布 v0.1.0（`v0.1.0` tag） |
+| `2e8ed52` | feat(driver): 建立多数据库驱动基础（v0.2 Week 1） |
 
 > 注：`v0.1.0` tag 固定指向 `624b108`；后续发布状态文档提交只推进 `main`，不移动已发布 tag。
 
@@ -101,7 +102,7 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 - **2026-06-30 release workflow Linux manifest 修复**：正式版 tag workflow 在 `Generate updater manifest` 步骤失败，错误为 `missing updater artifact for linux-x86_64`；实际可用文件只有 `tiny-sql_0.0.1_amd64.AppImage` 与 `.sig`。根因是脚本误找 `*.AppImage.tar.gz`，已改为匹配 `.AppImage` 本体并读取同名 `.sig`。
 - **2026-06-30 release notes 自动化补齐**：publish job checkout 仓库后从 `CHANGELOG.md` 生成 GitHub Release notes；正式版取当前 tag 版本段，预发布 tag 找不到独立版本段时取 `[Unreleased]`。`v*-rc*` / beta / alpha tag 自动加 `--prerelease --latest=false`，正式版继续作为普通 Release。`just release` 也改为 RC 不切 CHANGELOG，避免 `v0.1.0` 正式版 notes 变空。
 - **2026-06-29 连接管理 UI 接入 shadcn/ui**：连接列表去掉行内「连接」按钮改 Navicat 式右键菜单（shadcn `ContextMenu`）；新建/编辑改 `Dialog` 弹窗；二次确认用 `AlertDialog` + 全局 `confirm-store` 替代 `window.confirm`。`shadcn init` 选 radix-nova / radix；暗色改回 `prefers-color-scheme` 跟随系统（不切 `.dark` class，现有 `dark:` 零迁移），并还原 system 中文字体栈（移除 init 引入的 Geist）。提交 `705ef8e` + `d91dd43`，`tsc` / `next build` 通过；后续 `03ee5be` 已把相关文档同步到 `origin/main`。
-- **2026-06-30 正式版发布准备复盘**：对照 `redis-desktop-client` 的 release-prep 经验后，tiny-sql v0.1 曾先按 macOS `.dmg` / 无 Apple Developer 代码签名收口；随后发布策略调整为全平台先行。正式版前必须先完成 `v0.1.0-rc1` 全平台产物验证、真实 3 跳 GUI dogfooding、MySQL 5.7 验证、作者 + 2 同事 1 周试用、README/GIF 与 `CHANGELOG.md` 切版。
+- **2026-06-30 正式版发布准备复盘**：对照 `redis-desktop-client` 的 release-prep 经验后，tiny-sql v0.1 曾先按 macOS `.dmg` / 无 Apple Developer 代码签名收口；随后发布策略调整为全平台先行。正式版前必须先完成 `v0.1.0-rc1` 全平台产物验证、真实 3 跳 GUI dogfooding、MySQL 5.7 验证、作者 + 2 同事 1 周试用、README 与 `CHANGELOG.md` 切版。
 - **2026-06-30 正式版自动更新接入**：提前把 `tauri-plugin-updater` / `tauri-plugin-process` 纳入 v0.1。Tauri config 启用 `bundle.createUpdaterArtifacts=true`，内置 updater 公钥和 GitHub latest `latest.json` endpoint；前端新增每日自动检查、手动检查、下载进度和安装后重启提示。Release workflow 使用 `TAURI_SIGNING_PRIVATE_KEY` 生成 `.app.tar.gz.sig`，正式版生成 `latest.json`，RC / beta / alpha 只作为手动下载预发布，不作为自动更新源。Tauri updater minisign 签名不等于 Apple Developer 代码签名，首次打开摩擦仍按 README 处理。
 - **2026-06-30 release 与 CI 触发分流**：`ci.yml` 在 `push.main` 下对 `CHANGELOG.md`、`Cargo.lock`、`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 设置 `paths-ignore`，让 `just release` 产生的 release-only 版本提交不重复触发 CI；PR 仍完整跑 CI。`just version` 定向刷新 `Cargo.lock` 中 `tiny-sql` 本地 package 版本，`just release` 暂存范围补入 `Cargo.lock`，tag push 继续触发 `release.yml` 全平台打包。
 - **2026-06-30 CHANGELOG 写法收敛**：按用户要求把 `CHANGELOG.md` 从模块/实现细节清单改为功能大项概览；后续发布说明应继续面向使用者，只写主要功能、体验变化、安全稳定性、发布准备和待验证事项。
@@ -113,13 +114,15 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 - **2026-08-18 v0.2 可执行计划落地**：`docs/PLAN.md` 新增 8 周 / 约 98h 计划，以 Driver/PG → 多 driver 应用 → passphrase/TLS → schema intelligence → 查询工作台 → RTT/重连 → 双 driver dogfooding/发布为依赖顺序；定义 V2-CP0~5、双数据库/隧道/安全/并发测试矩阵，并规定 P2 超时降级到 v0.2.1。
 - **2026-08-18 v0.2 启动前置收窄**：用户确认 §2.2 vertical slice 全部通过；v0.2 前增加不计入 8 周的 Phase 0，只补发 v0.1.0、验收安装/更新链路并固化 PostgreSQL 版本基线。发布后的稳定时长与社区反馈只影响 P2 排序，不再阻塞 Week 1。
 - **2026-08-18 PLAN 转为纯待办文档**：`docs/PLAN.md` 从 633 行历史型计划精简为约 170 行，只保留 v0.1 发布收口和 v0.2 未完成任务；已实现周计划、旧检查点、评审落地表继续保存在本文件的历史记录中。
-- **2026-08-18 v0.1 状态冲突收口**：用户提交 `4f54f02` 将 CP-3/4/5/6、试用与 launch 标记完成，项目记忆据此接受外部验收状态；但刷新远端 tag 后最高仍为 `v0.0.3`、版本文件仍为 `0.0.3` 且仓库无 GIF，因此 tag/GIF/正式发布继续按未完成记录。
-- **2026-08-18 v0.1.0 正式发布**：本地 `just check`、4 个真实 MySQL integration test 和 Tauri 生产构建通过；`624b108` 统一版本并切出 CHANGELOG 0.1.0，`v0.1.0` tag 触发 Release run `32110227419`。macOS arm64/x64、Windows x64、Linux x64 与发布 job 全绿，Release 安装包、签名更新产物和四平台 `latest.json` 均已验证。发布后仍保留应用内升级端到端实测、README 真实 GIF 与三个已知能力缺口。
+- **2026-08-18 v0.1 状态冲突收口**：用户提交 `4f54f02` 将 CP-3/4/5/6、试用与 launch 标记完成，项目记忆据此接受外部验收状态；但刷新远端 tag 后最高仍为 `v0.0.3`、版本文件仍为 `0.0.3`，因此 tag/正式发布当时继续按未完成记录。GIF 后续从交付要求中移除。
+- **2026-08-18 v0.1.0 正式发布**：本地 `just check`、4 个真实 MySQL integration test 和 Tauri 生产构建通过；`624b108` 统一版本并切出 CHANGELOG 0.1.0，`v0.1.0` tag 触发 Release run `32110227419`。macOS arm64/x64、Windows x64、Linux x64 与发布 job 全绿，Release 安装包、签名更新产物和四平台 `latest.json` 均已验证。发布后仍保留应用内升级端到端实测与三个已知能力缺口；GIF 不再要求。
 - **2026-08-18 PostgreSQL v0.2 版本基线固化**：正式支持 PostgreSQL 15-18，最低支持 15；日常 integration 必测 `15.latest` 与当前最新稳定大版本 `18.latest`，本地实例继续不依赖 Docker。14 及以下仅 best-effort 且不主动阻止连接；若 v0.2 RC 前 PostgreSQL 19 GA，则增加发布回归但不抬高最低版本。
 - **2026-08-18 自动更新端到端验收**：在 `/Applications/tiny-sql.app` 以 v0.0.3 打开原生应用菜单，确认 `Check for Updates...` 位于 About 后；手动发现 v0.1.0 后完成 6.8 MB 签名更新包下载、安装和重启。重启后 bundle 版本为 0.1.0，连接配置保留，更新菜单仍存在；`pnpm test` 34 项与 `just lint` 通过。
 - **2026-08-18 v0.2 正式开工（V2-T1.1）**：从 `MySqlDriver` 现有调用面提取对象安全的最小 `Driver` 契约，使用装箱 Future 避免新增 `async-trait` 依赖；契约只包含 ping、metadata、query/`CancellationToken` cancel 与 close，连接创建和 MySQL 专属 `CREATE DATABASE` 保留在具体实现。Tauri 的实际 metadata/query/连接关闭路径已通过契约调用；`db-driver` 17 个单测与 workspace 编译通过。
 - **2026-08-18 连接 driver 类型与无损迁移（V2-T1.2）**：新增跨 Rust/TypeScript 的 `mysql` / `postgresql` 稳定类型，旧 `connections.enc` 缺字段时在内存中默认 MySQL，启动读取不重写密文；未知 driver 或反序列化失败直接返回错误并保留原文件。新建、编辑与复制连接会携带 driver；PostgreSQL 尚未接入时明确拒绝，避免误走 MySQL 发送凭据。7 个真实加密存储测试、前端针对性测试与 TypeScript 检查通过。
-- **2026-08-18 PostgreSQL vertical slice 代码与 MySQL 回归（V2-T1.3/T1.4）**：启用锁文件已有的 `sqlx-postgres 0.8.6`（MIT OR Apache-2.0），实现显式直连、`SELECT 1::BIGINT`、close 与稳定连接错误 key；显式参数不读取 `~/.pgpass`。新增独立 PostgreSQL integration 门禁，缺少 URL 时明确失败而非假绿。MySQL 18 个单测与 5 个真实 integration 通过，新增长查询取消回归；本机未配置 PostgreSQL URL，因此 T1.3 仍待真实 SELECT 1 后完成。
+- **2026-08-18 PostgreSQL vertical slice 代码与 MySQL 回归（V2-T1.3/T1.4）**：启用锁文件已有的 `sqlx-postgres 0.8.6`（MIT OR Apache-2.0），实现显式直连、`SELECT 1::BIGINT`、close 与稳定连接错误 key；显式参数不读取 `~/.pgpass`。新增独立 PostgreSQL integration 门禁，缺少 URL 时明确失败而非假绿。MySQL 18 个单测与 5 个真实 integration 通过，新增长查询取消回归；该节点尚无 PostgreSQL 实测，随后已在 Week 2 后端闭环中补齐。
+- **2026-08-18 v0.2 Week 1/2 后端闭环**：真实 PostgreSQL `SELECT 1` 已通过，V2-T1.3 完成；公共 metadata 契约新增 `MetadataScope` 与独立 schema 层，PostgreSQL 完成四层 metadata、方言化 query/动态解码、DML `RETURNING` 与独立 control pool `pg_cancel_backend`。真实门禁 MySQL 5/5、PostgreSQL 4/4 全绿；对称回归发现并修复 MySQL JSON 误显示 `<unsupported>`。PostgreSQL 主实现按架构约定拆到 `crates/db-driver/src/postgres.rs`，AppState/UI 接线进入 Week 3。
+- **2026-08-18 v0.2 Week 3 多 driver 应用接线**：`OpenConnection` 改为 `ActiveDriver::{MySql, PostgreSql}` 并统一转发 `Driver` 契约；connection/metadata/query commands 按 driver 泛化，新增 schema command 与可选 schema scope。连接表单可选数据库类型，PostgreSQL 使用 database → schema → table 树和双引号预览 SQL；自动门禁 `db-driver` 25 项、`app_lib` 15 项、前端 39 项以及真实 integration 9/9 全绿。真实 Tauri 直连/1 跳 SSH 与切换/取消不串线仍留 V2-T3.4，PostgreSQL 当前只展开连接所在 database，证书路径尚未接线。
 
 ## 已解决的阻碍
 

@@ -5,7 +5,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use db_driver::{Driver, DriverKind, MySqlConnectSettings, MySqlTlsMode};
+use db_driver::{Driver, DriverKind, MySqlConnectSettings, MySqlTlsMode, PostgresConnectSettings};
 use serde::{Deserialize, Serialize};
 use ssh_multihop::{
     HopStatusCallback, HopStatusEvent, HostKeyDecision, HostKeyQuery, HostKeyVerifier, SshAuth,
@@ -14,7 +14,7 @@ use ssh_multihop::{
 use tauri::{AppHandle, Emitter, State};
 
 use crate::config::store::{self, AdvancedConfig, SshConfig, SslConfig, StoredConnection};
-use crate::state::{AppState, OpenConnection};
+use crate::state::{ActiveDriver, AppState, OpenConnection};
 
 /// 前端传入的连接配置（create / test 用，不含 id 与 last_used_at）
 #[derive(Debug, Deserialize)]
@@ -90,7 +90,7 @@ pub async fn connection_delete(state: State<'_, AppState>, id: String) -> Result
     state.store.lock().unwrap().delete(&id)
 }
 
-/// 测试连接：建立完整链路（可选 SSH 隧道 + MySQL 握手 + SELECT 1）后立即销毁。
+/// 测试连接：建立完整链路（可选 SSH 隧道 + 数据库握手 + SELECT 1）后立即销毁。
 /// 成功返回 ()，失败返回 i18n key 由前端翻译（FR-002）。
 #[tauri::command]
 pub async fn connection_test(
@@ -98,10 +98,6 @@ pub async fn connection_test(
     state: State<'_, AppState>,
     input: ConnectionInput,
 ) -> Result<(), String> {
-    if input.driver != DriverKind::MySql {
-        return Err("error.driver.not_implemented".to_string());
-    }
-
     let hops: Vec<SshHop> = if input.ssh.enabled {
         // 测试连接不带会话 passphrase 缓存，私钥 passphrase 测试留连接打开路径
         build_runtime_hops(&input.ssh, None)?
@@ -127,17 +123,17 @@ pub async fn connection_test(
         (addr.ip().to_string(), addr.port(), Some(tunnel))
     };
 
-    let settings = build_mysql_settings(&input.ssl, &input.advanced)?;
-    let driver = db_driver::MySqlDriver::connect_with_settings(
-        &host,
+    let driver = connect_database_driver(RuntimeDatabaseTarget {
+        kind: input.driver,
+        host: &host,
         port,
-        &input.user,
-        &input.password,
-        &input.database,
-        settings,
-    )
-    .await
-    .map_err(|e| e.i18n_key().to_string())?;
+        user: &input.user,
+        password: &input.password,
+        database: &input.database,
+        ssl: &input.ssl,
+        advanced: &input.advanced,
+    })
+    .await?;
     let result = Driver::ping(&driver).await;
     Driver::close(&driver).await;
     result.map_err(|e| e.i18n_key().to_string())?;
@@ -182,17 +178,68 @@ fn build_mysql_settings(
         .mode
         .parse::<MySqlTlsMode>()
         .map_err(|e| e.i18n_key().to_string())?;
-    let connect_timeout = advanced
-        .connect_timeout_enabled
-        .then(|| Duration::from_secs(advanced.connect_timeout_seconds.max(1)));
-
     Ok(MySqlConnectSettings {
         ssl_mode,
         ssl_ca_path: non_empty_owned(&ssl.ca_path),
         ssl_client_cert_path: non_empty_owned(&ssl.client_cert_path),
         ssl_client_key_path: non_empty_owned(&ssl.client_key_path),
-        connect_timeout,
+        connect_timeout: build_connect_timeout(advanced),
     })
+}
+
+fn build_postgres_settings(advanced: &AdvancedConfig) -> PostgresConnectSettings {
+    PostgresConnectSettings {
+        connect_timeout: build_connect_timeout(advanced),
+    }
+}
+
+fn build_connect_timeout(advanced: &AdvancedConfig) -> Option<Duration> {
+    advanced
+        .connect_timeout_enabled
+        .then(|| Duration::from_secs(advanced.connect_timeout_seconds.max(1)))
+}
+
+struct RuntimeDatabaseTarget<'a> {
+    kind: DriverKind,
+    host: &'a str,
+    port: u16,
+    user: &'a str,
+    password: &'a str,
+    database: &'a str,
+    ssl: &'a SslConfig,
+    advanced: &'a AdvancedConfig,
+}
+
+async fn connect_database_driver(
+    target: RuntimeDatabaseTarget<'_>,
+) -> Result<ActiveDriver, String> {
+    match target.kind {
+        DriverKind::MySql => {
+            let settings = build_mysql_settings(target.ssl, target.advanced)?;
+            db_driver::MySqlDriver::connect_with_settings(
+                target.host,
+                target.port,
+                target.user,
+                target.password,
+                target.database,
+                settings,
+            )
+            .await
+            .map(ActiveDriver::MySql)
+            .map_err(|error| error.i18n_key().to_string())
+        }
+        DriverKind::PostgreSql => db_driver::PostgresDriver::connect_with_settings(
+            target.host,
+            target.port,
+            target.user,
+            target.password,
+            target.database,
+            build_postgres_settings(target.advanced),
+        )
+        .await
+        .map(ActiveDriver::PostgreSql)
+        .map_err(|error| error.i18n_key().to_string()),
+    }
 }
 
 fn non_empty_owned(value: &str) -> Option<String> {
@@ -215,7 +262,7 @@ struct HopStatusPayload {
     reason: Option<String>,
 }
 
-/// 打开一条已保存的连接：建立（可选）SSH 隧道 + MySQL 连接池，存入活跃注册表。
+/// 打开一条已保存的连接：建立（可选）SSH 隧道 + 对应数据库连接池，存入注册表。
 ///
 /// `passphrase` 为本次提供的私钥口令（仅会话内存）；成功后缓存，下次打开同一连接
 /// 自动复用（FR-011：首次弹窗、本会话第二次静默）。已打开则幂等返回。
@@ -240,10 +287,6 @@ pub async fn connection_open(
             .find(|c| c.id == id)
             .ok_or("error.connection.not_found")?
     };
-
-    if conn.driver != DriverKind::MySql {
-        return Err("error.driver.not_implemented".to_string());
-    }
 
     // passphrase：本次传入优先，否则用会话缓存
     let effective_passphrase = passphrase
@@ -278,18 +321,18 @@ pub async fn connection_open(
         (conn.host.clone(), conn.port, None)
     };
 
-    let settings = build_mysql_settings(&conn.ssl, &conn.advanced)?;
-    let driver = db_driver::MySqlDriver::connect_with_settings(
-        &host,
+    let driver = connect_database_driver(RuntimeDatabaseTarget {
+        kind: conn.driver,
+        host: &host,
         port,
-        &conn.user,
-        &conn.password,
-        &conn.database,
-        settings,
-    )
-    .await
-    .map_err(|e| e.i18n_key().to_string())?;
-    // 立即 ping 确认握手成功（隧道桥接 + MySQL 认证）
+        user: &conn.user,
+        password: &conn.password,
+        database: &conn.database,
+        ssl: &conn.ssl,
+        advanced: &conn.advanced,
+    })
+    .await?;
+    // 立即 ping 确认握手成功（隧道桥接 + 数据库认证）
     Driver::ping(&driver)
         .await
         .map_err(|e| e.i18n_key().to_string())?;

@@ -81,6 +81,7 @@ pub fn run() {
             commands::connection::connection_open,
             commands::connection::connection_close,
             commands::query::db_list_databases,
+            commands::query::db_list_schemas,
             commands::query::db_create_database,
             commands::query::db_list_tables,
             commands::query::db_list_columns,

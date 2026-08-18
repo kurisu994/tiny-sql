@@ -59,7 +59,7 @@ describe("connection-store", () => {
   it("load 出错时把 i18n key 翻译进 error", async () => {
     mockInvoke.mockRejectedValueOnce("error.driver.connect_failed");
     await useConnectionStore.getState().load();
-    expect(useConnectionStore.getState().error).toBe("MySQL 连接失败");
+    expect(useConnectionStore.getState().error).toBe("数据库连接失败");
   });
 
   it("create 后重新拉取列表", async () => {

@@ -5,9 +5,42 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 import { invoke } from "@tauri-apps/api/core";
 
+import type { DriverKind, StoredConnection } from "@/lib/tauri-api";
 import { useSessionStore } from "@/stores/session-store";
 
 const mockInvoke = vi.mocked(invoke);
+
+function sampleConnection(driver: DriverKind): StoredConnection {
+  return {
+    id: "c1",
+    name: driver,
+    driver,
+    host: "127.0.0.1",
+    port: driver === "postgresql" ? 5432 : 3306,
+    user: "tester",
+    password: "",
+    database: "app",
+    ssh: { enabled: false, hops: [] },
+    ssl: {
+      mode: "disabled",
+      caPath: "",
+      clientCertPath: "",
+      clientKeyPath: "",
+    },
+    advanced: {
+      keepAliveEnabled: false,
+      keepAliveIntervalSeconds: 240,
+      connectTimeoutEnabled: true,
+      connectTimeoutSeconds: 30,
+      readTimeoutEnabled: false,
+      readTimeoutSeconds: 30,
+      writeTimeoutEnabled: true,
+      writeTimeoutSeconds: 30,
+      compressionEnabled: false,
+      autoConnect: false,
+    },
+  };
+}
 
 /** 按命令名分派 mock 返回值，避免依赖调用顺序 */
 function routeInvoke(map: Record<string, unknown>) {
@@ -27,6 +60,9 @@ beforeEach(() => {
     databases: [],
     expandedDb: null,
     selectedDb: null,
+    schemas: [],
+    expandedSchema: null,
+    selectedSchema: null,
     tables: [],
     selectedTable: null,
     rowSet: null,
@@ -44,7 +80,10 @@ describe("session-store", () => {
   it("open 成功后置 connected 并加载 databases", async () => {
     routeInvoke({
       connection_open: undefined,
-      db_list_databases: [{ name: "app" }, { name: "sys" }],
+      db_list_databases: [
+        { name: "app", isCurrent: true },
+        { name: "sys", isCurrent: false },
+      ],
     });
     await useSessionStore.getState().open("c1");
     const s = useSessionStore.getState();
@@ -178,6 +217,7 @@ describe("session-store", () => {
     expect(mockInvoke).toHaveBeenCalledWith("db_list_tables", {
       id: "c1",
       database: "billing",
+      schema: null,
     });
     expect(s.expandedDb).toBe("billing");
     expect(s.selectedDb).toBe("billing");
@@ -186,6 +226,46 @@ describe("session-store", () => {
     ]);
     expect(s.selectedTable).toBeNull();
     expect(s.rowSet).toBeNull();
+  });
+
+  it("PostgreSQL 按 database → schema → table 加载并使用双引号查询", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      activeConnection: sampleConnection("postgresql"),
+    });
+    routeInvoke({
+      db_list_schemas: [
+        { name: "public", isDefault: true },
+        { name: "audit", isDefault: false },
+      ],
+      db_list_tables: [
+        { name: "order\"items", tableType: "BASE TABLE", rows: null, comment: null },
+      ],
+      db_query: { columns: ["id"], rows: [["1"]], truncated: false },
+    });
+
+    await useSessionStore.getState().selectDb("app");
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_schemas", {
+      id: "c1",
+      database: "app",
+    });
+    expect(useSessionStore.getState().schemas).toHaveLength(2);
+
+    await useSessionStore.getState().selectSchema("audit");
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_tables", {
+      id: "c1",
+      database: "app",
+      schema: "audit",
+    });
+
+    await useSessionStore.getState().selectTable('order"items');
+    expect(mockInvoke).toHaveBeenCalledWith("db_query", {
+      id: "c1",
+      sql: 'SELECT * FROM "audit"."order""items"',
+      queryId: expect.any(String),
+      rowLimit: 1000,
+      allowWrite: false,
+    });
   });
 
   it("收起树后当前 database 的表列表仍可加载完成", async () => {
@@ -253,14 +333,17 @@ describe("session-store", () => {
     useSessionStore.setState({
       openId: "c1",
       status: "connected",
-      databases: [{ name: "app" }],
+      databases: [{ name: "app", isCurrent: true }],
       selectedDb: "app",
       tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
       rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
     });
     routeInvoke({
       db_create_database: undefined,
-      db_list_databases: [{ name: "app" }, { name: "new_db" }],
+      db_list_databases: [
+        { name: "app", isCurrent: true },
+        { name: "new_db", isCurrent: false },
+      ],
     });
 
     await useSessionStore.getState().createDatabase("c1", {
@@ -276,7 +359,10 @@ describe("session-store", () => {
       collation: null,
     });
     const s = useSessionStore.getState();
-    expect(s.databases).toEqual([{ name: "app" }, { name: "new_db" }]);
+    expect(s.databases).toEqual([
+      { name: "app", isCurrent: true },
+      { name: "new_db", isCurrent: false },
+    ]);
     expect(s.selectedDb).toBe("new_db");
     expect(s.tables).toEqual([]);
     expect(s.rowSet).toBeNull();

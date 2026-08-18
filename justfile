@@ -76,7 +76,7 @@ test-web:
 # 双 driver integration（需同时配置 MySQL/PostgreSQL 本地实例，见 .env.example）
 test-integration: test-mysql-integration test-postgres-integration
 
-# 仅回归 MySQL integration
+# 仅回归 MySQL integration；缺少 URL 时明确失败，避免假绿
 test-mysql-integration:
     cargo test -p db-driver --test integration -- --include-ignored
 

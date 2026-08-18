@@ -9,7 +9,8 @@
 //!
 //! Week 2 范围：connect / ping / list_databases / list_tables / list_columns / query。
 //! query 的防 OOM 由「顶层安全时追加 LIMIT + 客户端 10w 行截断」组成；
-//! 取消走独立 control connection 发 KILL QUERY。
+//! 取消走独立 control pool：MySQL 发 `KILL QUERY`，PostgreSQL 调
+//! `pg_cancel_backend`。
 
 use std::future::Future;
 use std::pin::Pin;
@@ -18,10 +19,13 @@ use std::time::Duration;
 
 use futures_util::TryStreamExt;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlRow, MySqlSslMode};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{Column, ConnectOptions, Executor, MySqlPool, PgPool, Row, TypeInfo, ValueRef};
+use sqlx::{Column, ConnectOptions, Executor, MySqlPool, Row, TypeInfo, ValueRef};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+
+mod postgres;
+
+pub use postgres::{PostgresConnectSettings, PostgresDriver};
 
 /// 表浏览默认服务端行数上限（FR-021）。
 pub const TABLE_PREVIEW_LIMIT: usize = 1_000;
@@ -45,9 +49,9 @@ pub enum DriverKind {
 /// driver 错误 —— 每个变体对应一个稳定的前端 i18n key（NFR-041：key 只能加不能改名）
 #[derive(Debug, thiserror::Error)]
 pub enum DriverError {
-    #[error("error.driver.connect_failed: {0}")]
+    #[error("error.driver.connect_failed")]
     ConnectFailed(String),
-    #[error("error.driver.query_failed: {0}")]
+    #[error("error.driver.query_failed")]
     QueryFailed(String),
     #[error("error.driver.invalid_sql")]
     InvalidSql,
@@ -59,6 +63,10 @@ pub enum DriverError {
     QueryCancelled,
     #[error("error.driver.invalid_identifier")]
     InvalidIdentifier,
+    #[error("error.driver.database_switch_required")]
+    DatabaseSwitchRequired,
+    #[error("error.driver.schema_required")]
+    SchemaRequired,
 }
 
 impl DriverError {
@@ -71,6 +79,8 @@ impl DriverError {
             Self::WriteRequiresConfirmation => "error.driver.write_requires_confirmation",
             Self::QueryCancelled => "error.driver.query_cancelled",
             Self::InvalidIdentifier => "error.driver.invalid_identifier",
+            Self::DatabaseSwitchRequired => "error.driver.database_switch_required",
+            Self::SchemaRequired => "error.driver.schema_required",
         }
     }
 }
@@ -106,11 +116,48 @@ impl QueryOptions {
     }
 }
 
-/// 单个 database（MySQL 里 schema 与 database 同义）
+/// 单个 database。PostgreSQL 只能直接浏览当前连接所在 database。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseMeta {
     pub name: String,
+    /// 是否为当前连接所在 database。
+    pub is_current: bool,
+}
+
+/// 单个 schema。MySQL 中 schema 与 database 同义，PostgreSQL 中是独立层级。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaMeta {
+    pub name: String,
+    /// 是否为当前连接的默认 schema。
+    pub is_default: bool,
+}
+
+/// metadata 查询作用域，显式区分 database 与可选 schema。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataScope {
+    pub database: String,
+    pub schema: Option<String>,
+}
+
+impl MetadataScope {
+    /// 构造 MySQL metadata 作用域；schema 与 database 同义，不重复保存。
+    pub fn mysql(database: impl Into<String>) -> Self {
+        Self {
+            database: database.into(),
+            schema: None,
+        }
+    }
+
+    /// 构造 PostgreSQL metadata 作用域。
+    pub fn postgresql(database: impl Into<String>, schema: impl Into<String>) -> Self {
+        Self {
+            database: database.into(),
+            schema: Some(schema.into()),
+        }
+    }
 }
 
 /// 单张表的元信息
@@ -167,19 +214,25 @@ pub type DriverCloseFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 /// 由具体 driver 映射为数据库原生取消机制。创建/编辑数据库对象等方言专属能力
 /// 不进入本契约。
 pub trait Driver: Send + Sync {
+    /// 返回 driver 的稳定类型。
+    fn kind(&self) -> DriverKind;
+
     /// 验证连接可用，成功返回数据库执行 `SELECT 1` 的结果。
     fn ping(&self) -> DriverFuture<'_, i64>;
 
     /// 列出当前连接可见的 database。
     fn list_databases(&self) -> DriverFuture<'_, Vec<DatabaseMeta>>;
 
-    /// 列出指定 database 下的表。
-    fn list_tables<'a>(&'a self, database: &'a str) -> DriverFuture<'a, Vec<TableMeta>>;
+    /// 列出指定 database 下的 schema。
+    fn list_schemas<'a>(&'a self, database: &'a str) -> DriverFuture<'a, Vec<SchemaMeta>>;
 
-    /// 列出指定 database/table 下的列。
+    /// 列出指定 metadata 作用域下的表。
+    fn list_tables<'a>(&'a self, scope: &'a MetadataScope) -> DriverFuture<'a, Vec<TableMeta>>;
+
+    /// 列出指定 metadata 作用域/table 下的列。
     fn list_columns<'a>(
         &'a self,
-        database: &'a str,
+        scope: &'a MetadataScope,
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ColumnMeta>>;
 
@@ -255,91 +308,6 @@ pub struct MySqlConnectSettings {
     pub ssl_client_cert_path: Option<String>,
     pub ssl_client_key_path: Option<String>,
     pub connect_timeout: Option<Duration>,
-}
-
-/// PostgreSQL 连接参数。TLS/证书配置在后续安全阶段统一补齐。
-#[derive(Debug, Clone, Default)]
-pub struct PostgresConnectSettings {
-    /// 建立连接池的整体超时；`None` 表示只使用 sqlx acquire timeout。
-    pub connect_timeout: Option<Duration>,
-}
-
-/// PostgreSQL driver 的最窄 vertical slice。
-///
-/// 当前只负责直连、`SELECT 1` 与关闭连接池；metadata/query/cancel 在 Week 2
-/// 完成后再实现完整 [`Driver`] 契约。SSH 仍由上层把目标映射为本地 TCP 端口。
-#[derive(Clone)]
-pub struct PostgresDriver {
-    pool: PgPool,
-}
-
-impl PostgresDriver {
-    /// 建立 PostgreSQL 连接池。`database` 为空时沿用服务端/账号默认数据库。
-    pub async fn connect(
-        host: &str,
-        port: u16,
-        username: &str,
-        password: &str,
-        database: &str,
-    ) -> Result<Self, DriverError> {
-        Self::connect_with_settings(
-            host,
-            port,
-            username,
-            password,
-            database,
-            PostgresConnectSettings::default(),
-        )
-        .await
-    }
-
-    /// 按指定连接参数建立 PostgreSQL 连接池。
-    pub async fn connect_with_settings(
-        host: &str,
-        port: u16,
-        username: &str,
-        password: &str,
-        database: &str,
-        settings: PostgresConnectSettings,
-    ) -> Result<Self, DriverError> {
-        // 显式连接配置不读取用户 ~/.pgpass，避免空密码时静默使用额外凭据。
-        let mut opts = PgConnectOptions::new_without_pgpass()
-            .host(host)
-            .port(port)
-            .username(username)
-            .password(password)
-            .application_name("tiny-sql")
-            .log_statements(log::LevelFilter::Off);
-        if !database.is_empty() {
-            opts = opts.database(database);
-        }
-
-        let pool = connect_postgres_pool(opts, settings.connect_timeout).await?;
-        Ok(Self { pool })
-    }
-
-    /// 用完整 PostgreSQL URL 建立连接池，供本地 integration 测试使用。
-    pub async fn connect_url(url: &str) -> Result<Self, DriverError> {
-        let opts: PgConnectOptions = url
-            .parse()
-            .map_err(|e: sqlx::Error| DriverError::ConnectFailed(e.to_string()))?;
-        let pool = connect_postgres_pool(opts.log_statements(log::LevelFilter::Off), None).await?;
-        Ok(Self { pool })
-    }
-
-    /// 跑一条 `SELECT 1`，用于 PostgreSQL vertical slice 与连接测试。
-    pub async fn ping(&self) -> Result<i64, DriverError> {
-        let row: (i64,) = sqlx::query_as("SELECT 1::BIGINT")
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
-        Ok(row.0)
-    }
-
-    /// 幂等关闭 PostgreSQL 连接池。
-    pub async fn close(&self) {
-        self.pool.close().await;
-    }
 }
 
 impl MySqlDriver {
@@ -431,16 +399,44 @@ impl MySqlDriver {
 
     /// 列出所有可见 database。
     pub async fn list_databases(&self) -> Result<Vec<DatabaseMeta>, DriverError> {
+        let current: Option<String> = sqlx::query_scalar("SELECT DATABASE()")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(query_failed)?;
         let rows = sqlx::query_as::<_, (String,)>(
             "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name",
         )
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        .map_err(query_failed)?;
         Ok(rows
             .into_iter()
-            .map(|(name,)| DatabaseMeta { name })
+            .map(|(name,)| DatabaseMeta {
+                is_current: current.as_deref() == Some(name.as_str()),
+                name,
+            })
             .collect())
+    }
+
+    /// 返回 MySQL database 对应的同名 schema。
+    pub async fn list_schemas(&self, database: &str) -> Result<Vec<SchemaMeta>, DriverError> {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS( \
+                 SELECT 1 FROM information_schema.schemata WHERE schema_name = ? \
+             )",
+        )
+        .bind(database)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(query_failed)?;
+        Ok(if exists {
+            vec![SchemaMeta {
+                name: database.to_string(),
+                is_default: true,
+            }]
+        } else {
+            Vec::new()
+        })
     }
 
     /// 创建 database。库名使用反引号安全转义；字符集 / 排序规则只允许 MySQL 标识符字符。
@@ -668,6 +664,10 @@ impl MySqlDriver {
 }
 
 impl Driver for MySqlDriver {
+    fn kind(&self) -> DriverKind {
+        DriverKind::MySql
+    }
+
     fn ping(&self) -> DriverFuture<'_, i64> {
         Box::pin(MySqlDriver::ping(self))
     }
@@ -676,16 +676,20 @@ impl Driver for MySqlDriver {
         Box::pin(MySqlDriver::list_databases(self))
     }
 
-    fn list_tables<'a>(&'a self, database: &'a str) -> DriverFuture<'a, Vec<TableMeta>> {
-        Box::pin(MySqlDriver::list_tables(self, database))
+    fn list_schemas<'a>(&'a self, database: &'a str) -> DriverFuture<'a, Vec<SchemaMeta>> {
+        Box::pin(MySqlDriver::list_schemas(self, database))
+    }
+
+    fn list_tables<'a>(&'a self, scope: &'a MetadataScope) -> DriverFuture<'a, Vec<TableMeta>> {
+        Box::pin(MySqlDriver::list_tables(self, &scope.database))
     }
 
     fn list_columns<'a>(
         &'a self,
-        database: &'a str,
+        scope: &'a MetadataScope,
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ColumnMeta>> {
-        Box::pin(MySqlDriver::list_columns(self, database, table))
+        Box::pin(MySqlDriver::list_columns(self, &scope.database, table))
     }
 
     fn query<'a>(
@@ -737,23 +741,8 @@ async fn connect_pool(
     }
 }
 
-async fn connect_postgres_pool(
-    opts: PgConnectOptions,
-    connect_timeout: Option<Duration>,
-) -> Result<PgPool, DriverError> {
-    let fut = PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(10))
-        .connect_with(opts);
-    match connect_timeout {
-        Some(duration) => timeout(duration, fut)
-            .await
-            .map_err(|_| DriverError::ConnectFailed("connection timeout".to_string()))?
-            .map_err(|e| DriverError::ConnectFailed(e.to_string())),
-        None => fut
-            .await
-            .map_err(|e| DriverError::ConnectFailed(e.to_string())),
-    }
+fn query_failed(error: sqlx::Error) -> DriverError {
+    DriverError::QueryFailed(error.to_string())
 }
 
 fn non_empty_path(value: Option<&str>) -> Option<&str> {
@@ -834,14 +823,39 @@ struct PreparedSql {
     kind: PreparedSqlKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FetchPolicy {
+    limit: usize,
+    server_capped: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SqlDialect {
+    MySql,
+    PostgreSql,
+}
+
 /// 分析并改写 SQL：
 /// - 拒绝空 SQL / 多语句；
-/// - SELECT / WITH 在顶层安全时追加 LIMIT（不做 derived table 包装——
+/// - 方言支持的读语句在顶层安全时追加 LIMIT（不做 derived table 包装——
 ///   `SELECT *` JOIN 的重名列在包装后会报 1060 Duplicate column name）；
-/// - SHOW / EXPLAIN / DESC 等元数据语句按读处理，返回结果集且无需写确认；
+/// - MySQL SHOW/EXPLAIN/DESC、PostgreSQL SHOW/EXPLAIN 按元数据读处理；
 /// - 其余语句仅在 `allow_write=true` 时执行，作为 best-effort 写操作二次确认。
 fn prepare_query_sql(sql: &str, options: QueryOptions) -> Result<PreparedSql, DriverError> {
-    let sanitized = strip_literals_and_comments(sql);
+    prepare_query_sql_for_dialect(sql, options, SqlDialect::MySql)
+}
+
+fn prepare_query_sql_for_dialect(
+    sql: &str,
+    options: QueryOptions,
+    dialect: SqlDialect,
+) -> Result<PreparedSql, DriverError> {
+    let sanitized = match dialect {
+        SqlDialect::MySql => strip_literals_and_comments(sql),
+        SqlDialect::PostgreSql => {
+            strip_literals_and_comments(&strip_postgres_dollar_quoted_literals(sql))
+        }
+    };
     let sanitized_stmt = trim_trailing_terminators(&sanitized);
     if sanitized_stmt.trim().is_empty() {
         return Err(DriverError::InvalidSql);
@@ -853,37 +867,50 @@ fn prepare_query_sql(sql: &str, options: QueryOptions) -> Result<PreparedSql, Dr
     let stmt = trim_trailing_terminators(sql);
     let tokens = sql_tokens(&sanitized_stmt);
     let first = tokens.first().map(String::as_str).unwrap_or_default();
+    let top_level = top_level_words(&sanitized_stmt);
+    let main_statement = if first == "WITH" {
+        top_level
+            .iter()
+            .skip(1)
+            .map(String::as_str)
+            .find(|token| {
+                matches!(
+                    *token,
+                    "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "TABLE" | "VALUES"
+                )
+            })
+            .unwrap_or_default()
+    } else {
+        first
+    };
     let limit = options.effective_limit();
 
-    match first {
-        "SELECT" | "WITH" => {
-            if can_append_limit(&sanitized_stmt) {
-                // 多取 1 行仅用于精确判断是否截断；返回给前端时会丢掉第 limit+1 行。
-                let fetch_limit = limit.saturating_add(1);
-                Ok(PreparedSql {
-                    // 换行追加，避免语句以行注释结尾时 LIMIT 被吞掉
-                    sql: format!("{stmt}\nLIMIT {fetch_limit}"),
-                    kind: PreparedSqlKind::Read {
-                        limit,
-                        server_capped: true,
-                    },
-                })
-            } else {
-                Ok(PreparedSql {
-                    sql: stmt,
-                    kind: PreparedSqlKind::Read {
-                        limit,
-                        server_capped: false,
-                    },
-                })
-            }
-        }
-        "SHOW" | "DESC" | "DESCRIBE" | "EXPLAIN" => {
-            // EXPLAIN ANALYZE 会真正执行被分析的语句：分析写语句时仍需二次确认
-            if first == "EXPLAIN" && explain_analyze_writes(&tokens) && !options.allow_write {
-                return Err(DriverError::WriteRequiresConfirmation);
-            }
-            // 元数据语句不支持追加 LIMIT，结果集本身很小，靠客户端截断兜底
+    let with_contains_write = first == "WITH"
+        && tokens
+            .iter()
+            .skip(1)
+            .any(|token| matches!(token.as_str(), "INSERT" | "UPDATE" | "DELETE" | "MERGE"));
+    let is_read = !with_contains_write
+        && (matches!(main_statement, "SELECT")
+            || (dialect == SqlDialect::PostgreSql && matches!(main_statement, "TABLE" | "VALUES")));
+    let is_metadata = match dialect {
+        SqlDialect::MySql => matches!(first, "SHOW" | "DESC" | "DESCRIBE" | "EXPLAIN"),
+        SqlDialect::PostgreSql => matches!(first, "SHOW" | "EXPLAIN"),
+    };
+
+    if is_read {
+        if can_append_limit(&sanitized_stmt, dialect) {
+            // 多取 1 行仅用于精确判断是否截断；返回给前端时会丢掉第 limit+1 行。
+            let fetch_limit = limit.saturating_add(1);
+            Ok(PreparedSql {
+                // 换行追加，避免语句以行注释结尾时 LIMIT 被吞掉
+                sql: format!("{stmt}\nLIMIT {fetch_limit}"),
+                kind: PreparedSqlKind::Read {
+                    limit,
+                    server_capped: true,
+                },
+            })
+        } else {
             Ok(PreparedSql {
                 sql: stmt,
                 kind: PreparedSqlKind::Read {
@@ -892,15 +919,27 @@ fn prepare_query_sql(sql: &str, options: QueryOptions) -> Result<PreparedSql, Dr
                 },
             })
         }
-        _ => {
-            if !options.allow_write {
-                return Err(DriverError::WriteRequiresConfirmation);
-            }
-            Ok(PreparedSql {
-                sql: stmt,
-                kind: PreparedSqlKind::Write,
-            })
+    } else if is_metadata {
+        // EXPLAIN ANALYZE 会真正执行被分析的语句：分析写语句时仍需二次确认
+        if first == "EXPLAIN" && explain_analyze_writes(&tokens) && !options.allow_write {
+            return Err(DriverError::WriteRequiresConfirmation);
         }
+        // 元数据语句不支持追加 LIMIT，结果集本身很小，靠客户端截断兜底
+        Ok(PreparedSql {
+            sql: stmt,
+            kind: PreparedSqlKind::Read {
+                limit,
+                server_capped: false,
+            },
+        })
+    } else {
+        if !options.allow_write {
+            return Err(DriverError::WriteRequiresConfirmation);
+        }
+        Ok(PreparedSql {
+            sql: stmt,
+            kind: PreparedSqlKind::Write,
+        })
     }
 }
 
@@ -919,10 +958,10 @@ fn explain_analyze_writes(tokens: &[String]) -> bool {
     !matches!(analyzed, "SELECT" | "WITH" | "TABLE")
 }
 
-/// 判断能否在语句末尾安全追加 `LIMIT n`：顶层（括号深度 0）已出现
-/// LIMIT / FOR / LOCK / INTO / PROCEDURE 时不追加，改由客户端截断兜底。
+/// 判断能否在语句末尾安全追加 `LIMIT n`：公共阻断词为 LIMIT/FOR/INTO，
+/// MySQL 另含 LOCK/PROCEDURE，PostgreSQL 另含 OFFSET/FETCH。
 /// 入参须是已抹掉字符串与注释的 sanitized SQL，避免字面量误判。
-fn can_append_limit(sanitized_stmt: &str) -> bool {
+fn can_append_limit(sanitized_stmt: &str, dialect: SqlDialect) -> bool {
     let mut depth = 0usize;
     let mut word = String::new();
     // 末尾补一个空格，确保最后一个 token 也会被检查
@@ -932,13 +971,16 @@ fn can_append_limit(sanitized_stmt: &str) -> bool {
             continue;
         }
         if !word.is_empty() {
-            if depth == 0
-                && matches!(
-                    word.to_ascii_uppercase().as_str(),
-                    "LIMIT" | "FOR" | "LOCK" | "INTO" | "PROCEDURE"
-                )
-            {
-                return false;
+            if depth == 0 {
+                let word = word.to_ascii_uppercase();
+                let common_blocker = matches!(word.as_str(), "LIMIT" | "FOR" | "INTO");
+                let dialect_blocker = match dialect {
+                    SqlDialect::MySql => matches!(word.as_str(), "LOCK" | "PROCEDURE"),
+                    SqlDialect::PostgreSql => matches!(word.as_str(), "OFFSET" | "FETCH"),
+                };
+                if common_blocker || dialect_blocker {
+                    return false;
+                }
             }
             word.clear();
         }
@@ -951,6 +993,30 @@ fn can_append_limit(sanitized_stmt: &str) -> bool {
     true
 }
 
+fn top_level_words(sanitized_stmt: &str) -> Vec<String> {
+    let mut depth = 0usize;
+    let mut word = String::new();
+    let mut words = Vec::new();
+    for ch in sanitized_stmt.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            word.push(ch);
+            continue;
+        }
+        if !word.is_empty() {
+            if depth == 0 {
+                words.push(word.to_ascii_uppercase());
+            }
+            word.clear();
+        }
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    words
+}
+
 fn trim_trailing_terminators(sql: &str) -> String {
     let mut end = sql.len();
     for (idx, ch) in sql.char_indices().rev() {
@@ -961,6 +1027,57 @@ fn trim_trailing_terminators(sql: &str) -> String {
         }
     }
     sql[..end].trim().to_string()
+}
+
+fn strip_postgres_dollar_quoted_literals(sql: &str) -> String {
+    let chars: Vec<char> = sql.chars().collect();
+    let mut output = String::with_capacity(sql.len());
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        if chars[index] != '$' {
+            output.push(chars[index]);
+            index += 1;
+            continue;
+        }
+
+        let tag_start = index + 1;
+        let mut delimiter_end = tag_start;
+        if delimiter_end < chars.len()
+            && (chars[delimiter_end].is_ascii_alphabetic() || chars[delimiter_end] == '_')
+        {
+            delimiter_end += 1;
+            while delimiter_end < chars.len()
+                && (chars[delimiter_end].is_ascii_alphanumeric() || chars[delimiter_end] == '_')
+            {
+                delimiter_end += 1;
+            }
+        }
+
+        if delimiter_end >= chars.len() || chars[delimiter_end] != '$' {
+            output.push('$');
+            index += 1;
+            continue;
+        }
+
+        let delimiter = &chars[index..=delimiter_end];
+        let content_start = delimiter_end + 1;
+        let closing_start = (content_start..chars.len()).find(|candidate| {
+            chars.get(*candidate..candidate.saturating_add(delimiter.len())) == Some(delimiter)
+        });
+        let Some(closing_start) = closing_start else {
+            output.push('$');
+            index += 1;
+            continue;
+        };
+        let quoted_end = closing_start + delimiter.len();
+        for character in &chars[index..quoted_end] {
+            output.push(if *character == '\n' { '\n' } else { ' ' });
+        }
+        index = quoted_end;
+    }
+
+    output
 }
 
 fn strip_literals_and_comments(sql: &str) -> String {
@@ -1073,8 +1190,10 @@ fn cell_to_string(row: &MySqlRow, idx: usize) -> Option<String> {
         "TIME" => try_decode::<chrono::NaiveTime>(row, idx),
         "DATETIME" | "TIMESTAMP" => try_decode::<chrono::NaiveDateTime>(row, idx),
         "YEAR" => try_decode::<u16>(row, idx).or_else(|| try_decode::<i64>(row, idx)),
-        "VARCHAR" | "CHAR" | "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "ENUM" | "SET"
-        | "JSON" => try_decode::<String>(row, idx),
+        "VARCHAR" | "CHAR" | "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "ENUM" | "SET" => {
+            try_decode::<String>(row, idx)
+        }
+        "JSON" => try_decode::<sqlx::types::JsonValue>(row, idx),
         "BINARY" | "VARBINARY" | "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB" | "BIT" => {
             decode_bytes(row, idx)
         }
@@ -1130,6 +1249,31 @@ mod tests {
         let _object_safe_check: fn(&dyn Driver) = accept_driver_object;
     }
 
+    #[test]
+    fn postgres_driver_implements_object_safe_driver_contract() {
+        fn assert_driver<T: Driver>() {}
+
+        assert_driver::<PostgresDriver>();
+    }
+
+    #[test]
+    fn metadata_scope_keeps_postgres_schema_distinct() {
+        assert_eq!(
+            MetadataScope::mysql("app"),
+            MetadataScope {
+                database: "app".to_string(),
+                schema: None,
+            }
+        );
+        assert_eq!(
+            MetadataScope::postgresql("app", "audit"),
+            MetadataScope {
+                database: "app".to_string(),
+                schema: Some("audit".to_string()),
+            }
+        );
+    }
+
     #[tokio::test]
     async fn postgres_invalid_url_uses_stable_connect_error_key() {
         let error = PostgresDriver::connect_url("not-a-postgres-url")
@@ -1137,6 +1281,7 @@ mod tests {
             .err()
             .expect("非法 URL 必须失败");
         assert_eq!(error.i18n_key(), "error.driver.connect_failed");
+        assert_eq!(error.to_string(), "error.driver.connect_failed");
     }
 
     #[test]
@@ -1195,6 +1340,99 @@ mod tests {
             }
         );
         assert!(prepared.sql.ends_with("LIMIT 21"));
+    }
+
+    #[test]
+    fn cte_write_still_requires_confirmation() {
+        let error = prepare_query_sql_for_dialect(
+            "WITH changed AS (SELECT 1) UPDATE orders SET status = 1",
+            QueryOptions::default(),
+            SqlDialect::PostgreSql,
+        )
+        .expect_err("CTE 外层写语句不能绕过确认");
+
+        assert!(matches!(error, DriverError::WriteRequiresConfirmation));
+
+        let error = prepare_query_sql_for_dialect(
+            "WITH changed AS (DELETE FROM orders RETURNING id) SELECT * FROM changed",
+            QueryOptions::default(),
+            SqlDialect::PostgreSql,
+        )
+        .expect_err("数据修改 CTE 不能伪装成外层 SELECT 绕过确认");
+        assert!(matches!(error, DriverError::WriteRequiresConfirmation));
+    }
+
+    #[test]
+    fn postgres_table_and_values_are_read_queries() {
+        for sql in ["TABLE pg_catalog.pg_type", "VALUES (1), (2)"] {
+            let prepared = prepare_query_sql_for_dialect(
+                sql,
+                QueryOptions {
+                    row_limit: 10,
+                    allow_write: false,
+                },
+                SqlDialect::PostgreSql,
+            )
+            .unwrap_or_else(|error| panic!("{sql} 应按 PostgreSQL 读查询处理: {error}"));
+            assert_eq!(
+                prepared.kind,
+                PreparedSqlKind::Read {
+                    limit: 10,
+                    server_capped: true,
+                }
+            );
+            assert!(prepared.sql.ends_with("LIMIT 11"));
+        }
+    }
+
+    #[test]
+    fn postgres_offset_keeps_original_clause_order() {
+        let prepared = prepare_query_sql_for_dialect(
+            "SELECT * FROM orders OFFSET 10",
+            QueryOptions::default(),
+            SqlDialect::PostgreSql,
+        )
+        .expect("PostgreSQL OFFSET 查询应通过");
+
+        assert_eq!(
+            prepared.kind,
+            PreparedSqlKind::Read {
+                limit: QUERY_RESULT_LIMIT,
+                server_capped: false,
+            }
+        );
+        assert_eq!(prepared.sql, "SELECT * FROM orders OFFSET 10");
+    }
+
+    #[test]
+    fn postgres_dollar_quoted_body_is_one_write_statement() {
+        let sql = "DO $body$ BEGIN RAISE NOTICE 'first;second'; END $body$;";
+        let error =
+            prepare_query_sql_for_dialect(sql, QueryOptions::default(), SqlDialect::PostgreSql)
+                .expect_err("DO 语句仍需写确认");
+        assert!(matches!(error, DriverError::WriteRequiresConfirmation));
+
+        let prepared = prepare_query_sql_for_dialect(
+            sql,
+            QueryOptions {
+                row_limit: 10,
+                allow_write: true,
+            },
+            SqlDialect::PostgreSql,
+        )
+        .expect("dollar-quoted body 内的分号不应误判为多语句");
+        assert_eq!(prepared.kind, PreparedSqlKind::Write);
+    }
+
+    #[test]
+    fn postgres_parameter_placeholder_is_not_dollar_quote() {
+        let prepared = prepare_query_sql_for_dialect(
+            "SELECT $1::BIGINT",
+            QueryOptions::default(),
+            SqlDialect::PostgreSql,
+        )
+        .expect("$1 参数占位符不应被当成 dollar quote");
+        assert!(matches!(prepared.kind, PreparedSqlKind::Read { .. }));
     }
 
     #[test]

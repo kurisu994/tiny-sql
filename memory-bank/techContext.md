@@ -30,7 +30,7 @@
 |---|---|---|
 | tokio | 1（features = full） | 异步运行时 |
 | russh | 0.54 | 纯 Rust 异步 SSH，多跳隧道 |
-| sqlx | 0.8.6（default-features=false, `mysql` + `postgres` + `runtime-tokio-rustls`） | MySQL/PostgreSQL driver；`sqlx-postgres` 为 MIT OR Apache-2.0 |
+| sqlx | 0.8.6（default-features=false, `mysql` + `postgres` + `runtime-tokio-rustls` + `chrono` + `bigdecimal` + `json`） | MySQL/PostgreSQL driver 与动态结果解码；`sqlx-postgres` 为 MIT OR Apache-2.0 |
 | tokio-util | 0.7 | `CancellationToken` 查询取消 |
 | thiserror | 2 | 错误派生 |
 | serde | 1（derive） | 序列化 |
@@ -71,10 +71,12 @@
 | `just lint` / `lint-rust` / `lint-web` | tsc + clippy / 仅 clippy / 仅 tsc |
 | `just fmt` / `fmt-check` | 格式化 / 仅检查 |
 | `just test` / `test-rust` | Rust workspace + 前端 Vitest / 仅 Rust workspace |
-| `just test-mysql-integration` / `test-postgres-integration` | 分别连接本地 MySQL / PostgreSQL；PostgreSQL 缺 URL 时明确失败 |
+| `just test-mysql-integration` / `test-postgres-integration` | 分别连接本地 MySQL / PostgreSQL；任一显式门禁缺 URL 时明确失败 |
 | `just test-integration` | 顺序执行两个 driver 的真实 integration |
 | `just version <ver>` | 同步 package.json / Cargo.toml / tauri.conf.json 版本号 |
 | `just release <tag>` | 更新版本 + CHANGELOG + commit + tag + push 触发云端构建 |
+
+2026-08-18 本地真实门禁：MySQL 5/5、PostgreSQL 4/4 全绿；覆盖 ping、metadata、NULL/日期/数值/JSON、写确认和原生取消。PostgreSQL 15/18 双端点仍属于正式发布兼容矩阵，不由单一本地实例替代。
 
 ## CI（.github/workflows/ci.yml）
 
@@ -98,8 +100,8 @@
 
 ## 当前 command（src-tauri 实际）
 
-- 连接：`connection_create/list/update/delete/test`（CRUD + 瞬时测试）、`connection_open/close`（持久连接，存 AppState 注册表）。
-- 数据浏览：`db_list_databases/db_list_tables/db_list_columns/db_query/db_query_cancel/db_create_database`（基于已打开连接）。
+- 连接：`connection_create/list/update/delete/test`（CRUD + 瞬时测试）、`connection_open/close`（按 driver 建立持久连接，存 `ActiveDriver` 注册表）。
+- 数据浏览：`db_list_databases/db_list_schemas/db_list_tables/db_list_columns/db_query/db_query_cancel/db_create_database`（基于已打开连接；table/column 接受可选 schema，CREATE DATABASE 当前仅 MySQL 支持）。
 - TOFU：`ssh_tofu_decision(connectionId, hopIndex, accept)`。
 - 事件（后端 emit → 前端 listen）：`ssh:tofu-request`（指纹确认）、`ssh:hop-status`（keepalive 断开）。
 
