@@ -4,7 +4,7 @@
 
 ## 当前发布范围
 
-> **v0.1.0 发布结果（2026-08-18）**：Release workflow [run 32110227419](https://github.com/kurisu994/tiny-sql/actions/runs/32110227419) 全部成功；[GitHub Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.1.0) 已包含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 和正式版 `latest.json`。清单中的四个平台 URL 均已核对指向 `v0.1.0` 资产；“旧版本发现并安装新版本后重启”的应用内端到端流程仍待实测。
+> **v0.1.0 发布结果（2026-08-18）**：Release workflow [run 32110227419](https://github.com/kurisu994/tiny-sql/actions/runs/32110227419) 全部成功；[GitHub Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.1.0) 已包含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 和正式版 `latest.json`。清单中的四个平台 URL 均已核对指向 `v0.1.0` 资产；从 v0.0.3 发现、下载、安装并重启到 v0.1.0 的应用内端到端流程也已实测。
 
 - 平台：macOS Apple Silicon + Intel、Windows x64、Linux x64。
 - 数据库：MySQL 5.7 / 8.0 / 8.4。
@@ -118,7 +118,7 @@ just release v0.1.0
 发布后检查：
 
 - GitHub Release 页面能下载 macOS `.dmg`、Windows `.exe`、Linux `.AppImage`。
-- GitHub Release 页面能下载 `latest.json`，应用内手动检查更新能发现正式版（从旧版本验证）。
+- GitHub Release 页面能下载 `latest.json`；已从 v0.0.3 通过应用菜单手动发现、下载、安装并重启到 v0.1.0。
 - Release notes 与 `CHANGELOG.md` 的 `0.1.0` 版本段一致。
 - 下载产物能在至少一台干净 Mac、Windows 或 Linux 机器上打开并连接测试库。
 - README 的下载链接、右键打开说明与当前 Release 一致。

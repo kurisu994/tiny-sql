@@ -9,7 +9,7 @@ last_updated: 2026-08-18
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-18）**：v0.1.0 已正式发布；真实环境 dogfooding、MySQL 5.7、同事试用、全平台安装包、签名更新包与 `latest.json` 均已验收。应用内升级端到端实测、README 真实 GIF 和少量已知能力缺口继续以 [PLAN.md](./PLAN.md) 跟踪。
+> **实现快照（2026-08-18）**：v0.1.0 已正式发布；真实环境 dogfooding、MySQL 5.7、同事试用、全平台安装包、签名更新包、`latest.json` 与从 v0.0.3 到 v0.1.0 的应用内升级均已验收。README 真实 GIF 和少量已知能力缺口继续以 [PLAN.md](./PLAN.md) 跟踪。
 
 ## 1. 项目愿景
 

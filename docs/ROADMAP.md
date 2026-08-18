@@ -44,13 +44,13 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 - macOS / Windows / Linux x64 打包 / zh-CN only / 无 Apple Developer 代码签名
 - 正式版自动更新（Tauri updater 签名包；RC 不作为更新源）
 
-`v0.1.0` 已于 2026-08-18 正式发布。Release workflow 四个平台构建全部成功，GitHub Release 已包含 macOS arm64/x64、Windows x64、Linux x64 安装包、签名更新包与四平台 `latest.json`。README 真实 GIF、应用内升级端到端实测和少量已知能力缺口作为发布后待办继续跟踪，不影响已发布版本事实。
+`v0.1.0` 已于 2026-08-18 正式发布。Release workflow 四个平台构建全部成功，GitHub Release 已包含 macOS arm64/x64、Windows x64、Linux x64 安装包、签名更新包与四平台 `latest.json`；从 v0.0.3 发现、下载、安装并重启到 v0.1.0 的应用内更新闭环也已实测。README 真实 GIF 和少量已知能力缺口作为发布后待办继续跟踪，不影响已发布版本事实。
 
 ---
 
 ## v0.2 — 首发后 2-3 个月
 
-启动条件：现有 dogfooding 与 v0.1.0 全平台发布验收不重做；先完成 [PLAN 的发布后待办](./PLAN.md#v01-发布后待办) 中影响代码承诺的事项、应用内升级端到端实测和 PostgreSQL 版本基线。真实 GIF 可随 v0.1.1 补充，不阻塞 v0.2 Week 1。
+启动条件：现有 dogfooding、v0.1.0 全平台发布验收与应用内升级闭环不重做；PostgreSQL 版本基线已固化，开工前只需完成 [PLAN 的发布后待办](./PLAN.md#v01-发布后待办) 中影响代码承诺的事项。真实 GIF 可随 v0.1.1 补充，不阻塞 v0.2 Week 1。
 
 详细任务、依赖、检查点与测试矩阵见 [v0.2 开发计划](./PLAN.md#v02-开发计划)。
 

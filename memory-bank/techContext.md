@@ -41,6 +41,15 @@
 > **AppState 注册表**实际用 `std`/`tokio` 的 `Mutex<HashMap>` 而非 `dashmap`（够用、少依赖）。
 > **规划未引入**：`sqlparser-rs`（拒多语句当前用自有 SQL 分析 / 分号状态机）。
 
+### PostgreSQL v0.2 版本基线
+
+- **正式支持范围**：PostgreSQL 15-18；最低支持大版本为 PostgreSQL 15。
+- **必测矩阵**：最低支持大版本 `15.latest` + 当前最新稳定大版本 `18.latest`，始终使用各自最新 minor；截至 2026-08-18 对应 15.18 / 18.4。
+- **中间版本**：PostgreSQL 16 / 17 属于正式支持范围，不要求每轮重复跑 integration；用最低版本与最新稳定版本的双端点回归覆盖公共协议、metadata、query 与 cancel 契约。
+- **旧版本策略**：PostgreSQL 14 及以下仅 best-effort 兼容，不纳入正式支持承诺，也不在连接阶段主动阻止。
+- **新版本策略**：开发版 / Beta 不进入基线；若 v0.2 RC 前 PostgreSQL 19 正式发布，则增加一次最新 GA 发布回归，但不改变 v0.2 的最低支持版本。
+- **测试环境**：通过 `TINY_SQL_TEST_POSTGRES_URL` 连接用户本地实例，不引入 Docker；CI 仍只跑无外部数据库的单元测试。
+
 ### 工具链版本
 
 | 项 | 值 | 来源 |
@@ -49,7 +58,7 @@
 | MSRV | 1.77.2 | `rust-version` |
 | Node | 见 `.nvmrc` | CI 用 Node 24 |
 | pnpm | 11+ | pnpm-workspace.yaml |
-| 应用版本 | 0.0.3 | package.json / Cargo.lock / src-tauri/Cargo.toml / tauri.conf.json |
+| 应用版本 | 0.1.0 | package.json / Cargo.lock / src-tauri/Cargo.toml / tauri.conf.json |
 
 ## 构建命令（justfile，`set dotenv-load`）
 

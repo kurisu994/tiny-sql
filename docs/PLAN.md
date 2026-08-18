@@ -11,7 +11,7 @@ last_updated: 2026-08-18
 >
 > 本文件只保留尚未完成的工作。v0.1 已实现内容、历史检查点和架构决策见 [progress.md](../memory-bank/progress.md)。
 
-当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包与 `latest.json`。完成以下发布后待办和 PostgreSQL 版本基线后，进入 v0.2 的 8 周开发周期。
+当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包、`latest.json` 及从 v0.0.3 到 v0.1.0 的应用内更新闭环。PostgreSQL 版本基线已固化；完成以下发布后待办后，进入 v0.2 的 8 周开发周期。
 
 ## v0.1 发布后待办
 
@@ -22,8 +22,6 @@ last_updated: 2026-08-18
   - `ChannelDropped` / `AcceptLoopDied` 的运行时检测与上报；若不补实现，则同步收窄需求承诺。
   - 在稳定 i18n key 基础上安全传递 MySQL 服务端错误行号，不泄露原始 Rust 错误。
 - [ ] 补 README “右键打开”与多跳拓扑真实 GIF。
-- [ ] 从 v0.0.3 完成一次应用内发现、下载、安装并重启到 v0.1.0 的端到端更新。
-- [ ] 在 `memory-bank/techContext.md` 固化 PostgreSQL 最低支持版本与测试版本；本地 integration 继续不依赖 Docker。
 
 ## v0.2 开发计划
 

@@ -115,6 +115,8 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 保持为空。v0.1.0 Rel
 - **2026-08-18 PLAN 转为纯待办文档**：`docs/PLAN.md` 从 633 行历史型计划精简为约 170 行，只保留 v0.1 发布收口和 v0.2 未完成任务；已实现周计划、旧检查点、评审落地表继续保存在本文件的历史记录中。
 - **2026-08-18 v0.1 状态冲突收口**：用户提交 `4f54f02` 将 CP-3/4/5/6、试用与 launch 标记完成，项目记忆据此接受外部验收状态；但刷新远端 tag 后最高仍为 `v0.0.3`、版本文件仍为 `0.0.3` 且仓库无 GIF，因此 tag/GIF/正式发布继续按未完成记录。
 - **2026-08-18 v0.1.0 正式发布**：本地 `just check`、4 个真实 MySQL integration test 和 Tauri 生产构建通过；`624b108` 统一版本并切出 CHANGELOG 0.1.0，`v0.1.0` tag 触发 Release run `32110227419`。macOS arm64/x64、Windows x64、Linux x64 与发布 job 全绿，Release 安装包、签名更新产物和四平台 `latest.json` 均已验证。发布后仍保留应用内升级端到端实测、README 真实 GIF 与三个已知能力缺口。
+- **2026-08-18 PostgreSQL v0.2 版本基线固化**：正式支持 PostgreSQL 15-18，最低支持 15；日常 integration 必测 `15.latest` 与当前最新稳定大版本 `18.latest`，本地实例继续不依赖 Docker。14 及以下仅 best-effort 且不主动阻止连接；若 v0.2 RC 前 PostgreSQL 19 GA，则增加发布回归但不抬高最低版本。
+- **2026-08-18 自动更新端到端验收**：在 `/Applications/tiny-sql.app` 以 v0.0.3 打开原生应用菜单，确认 `Check for Updates...` 位于 About 后；手动发现 v0.1.0 后完成 6.8 MB 签名更新包下载、安装和重启。重启后 bundle 版本为 0.1.0，连接配置保留，更新菜单仍存在；`pnpm test` 34 项与 `just lint` 通过。
 
 ## 已解决的阻碍
 
@@ -134,14 +136,14 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 保持为空。v0.1.0 Rel
 - **CP-4 / GUI dogfooding**：用户提交 `4f54f02` 已标记完成；真实记录在 ignored `docs/dogfooding-log.md`，本轮未读取其中环境细节。
 - **CP-2** Week 2/3 累计工时未正式记录；该历史检查点不再进入当前待办计划。
 - **CP-3** MySQL 5.7 兼容已由用户提交 `4f54f02` 标记完成；不进入 CI 的策略不变。
-- **v0.1.0 产物验证**：全平台 Release workflow、安装包、签名更新产物和四平台 `latest.json` 已验证；从 v0.0.3 应用内安装并重启到 v0.1.0 仍待实测。
+- **v0.1.0 产物验证**：全平台 Release workflow、安装包、签名更新产物和四平台 `latest.json` 已验证；从 v0.0.3 应用内发现、下载、安装并重启到 v0.1.0 也已实测。
 - **发布脚本暂存范围**：`just version` 已会同步 `Cargo.lock` 本地 package 版本，`just release` 已收窄到版本/CHANGELOG/Cargo.lock 相关文件；正式发版前仍必须确认工作区没有无关改动。
 - **自动更新 GitHub Secrets**：release workflow 依赖 `TAURI_SIGNING_PRIVATE_KEY`；无密码私钥时 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 可留空。本地按 Redis 项目方式把真实私钥写入 ignored `.env`，`just build` 会加载；直接 `pnpm tauri build` 不经 justfile 注入 `.env`，仍需手动 export，且无密码私钥要显式保留 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""`。
 - **连接 tab 表单 GUI 验证**：常规 / SSH / SSL / 高级标签页、新建数据库、schema 树和更新菜单已由用户确认完成验收；环境细节不写入公开仓库。
 - **R-001** Tauri+workspace 摩擦：已规避（CP-1 通过）。
 - **R-002** caching_sha2 握手：MySQL 5.7 兼容已由用户提交 `4f54f02` 标记验证完成。
 - **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task。
-- **R-updater-release** 云端全平台 artifact 与正式版 `latest.json` 已由 v0.1.0 验证；剩余风险是从旧正式版发现新版本、下载、安装并重启的应用内端到端流程。
+- **R-updater-release** 已关闭：云端全平台 artifact、正式版 `latest.json` 及 v0.0.3 → v0.1.0 应用内发现、下载、安装、重启全链路均已验证。
 - **R-ssh-runtime-errors** `ChannelDropped` / `AcceptLoopDied` 只有公共错误定义与 key 测试，当前运行路径只上报 keepalive `lost`；作为 v0.1.1 / v0.2 候选补代码或收窄承诺。
 - **R-passphrase-test** `connection_test` 不接收 passphrase，带口令私钥只能在正式打开连接时验证完整链路。
 - **R-query-error-contract** 前端 server-line gutter 需要 MySQL 行号，但后端只返回稳定 i18n key；需用结构化安全字段补行号，不能直接泄露原始 Rust/sqlx 错误。
