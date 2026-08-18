@@ -109,6 +109,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 - **2026-08-18 后续版本吸收 Navicat 能力缺口**：不新增 v2.0，也不重复 v0.2 已有的 SQL 历史、CSV/Excel 导出、column 树和多查询 tab；把其余能力按依赖拆入 v0.3（查询工作台、元数据检索、服务端筛选分页、可靠事务）、v0.4（主键单表安全编辑、Table/View 对象管理、CSV/SQL dump 导入）和 v0.5+（备份同步、用户权限、ER/BI/AI）。同时撤销“图形化编辑、ER、备份永久不做”的旧边界，保留单表主键定位、SQL 预览确认和不建设独立监控平台等安全约束。
 - **2026-08-18 v0.2 可执行计划落地**：`docs/PLAN.md` 新增 8 周 / 约 98h 计划，以 Driver/PG → 多 driver 应用 → passphrase/TLS → schema intelligence → 查询工作台 → RTT/重连 → 双 driver dogfooding/发布为依赖顺序；定义 V2-CP0~5、双数据库/隧道/安全/并发测试矩阵，并规定 P2 超时降级到 v0.2.1。
 - **2026-08-18 v0.2 启动前置收窄**：用户确认 §2.2 vertical slice 全部通过；v0.2 前增加不计入 8 周的 Phase 0，只补发 v0.1.0、验收安装/更新链路并固化 PostgreSQL 版本基线。发布后的稳定时长与社区反馈只影响 P2 排序，不再阻塞 Week 1。
+- **2026-08-18 PLAN 转为纯待办文档**：`docs/PLAN.md` 从 633 行历史型计划精简为约 170 行，只保留 v0.1 发布收口和 v0.2 未完成任务；已实现周计划、旧检查点、评审落地表继续保存在本文件的历史记录中。
 - **2026-08-18 v0.1 状态冲突收口**：用户提交 `4f54f02` 将 CP-3/4/5/6、试用与 launch 标记完成，项目记忆据此接受外部验收状态；但刷新远端 tag 后最高仍为 `v0.0.3`、版本文件仍为 `0.0.3` 且仓库无 GIF，因此 tag/GIF/正式发布继续按未完成记录。
 
 ## 已解决的阻碍
@@ -127,7 +128,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 ## 待验证 / 风险跟踪
 
 - **CP-4 / GUI dogfooding**：用户提交 `4f54f02` 已标记完成；真实记录在 ignored `docs/dogfooding-log.md`，本轮未读取其中环境细节。
-- **CP-2** Week 2/3 累计工时检查（PLAN §3.3）：未正式记录工时，下次同步补。
+- **CP-2** Week 2/3 累计工时未正式记录；该历史检查点不再进入当前待办计划。
 - **CP-3** MySQL 5.7 兼容已由用户提交 `4f54f02` 标记完成；不进入 CI 的策略不变。
 - **RC 产物验证**：跨平台 Release workflow 已由 v0.0.3 真实验证；`v0.1.0-rc1` / `v0.1.0` tag 仍未创建，RC 下载后的真实安装与业务链路仍待验证。
 - **发布脚本暂存范围**：`just version` 已会同步 `Cargo.lock` 本地 package 版本，`just release` 已收窄到版本/CHANGELOG/Cargo.lock 相关文件；正式发版前仍必须确认工作区没有无关改动。
@@ -135,7 +136,7 @@ CHANGELOG 当前保留 `[Unreleased]` 段，已改为面向使用者的高层级
 - **连接 tab 表单 GUI 验证**：常规 / SSH / SSL / 高级标签页、SSL 证书路径输入、高级设置 checkbox + 数字输入以及保存/测试连接手感仍待真实 Tauri GUI 点验；本轮自动浏览器工具没有可用实例，仅完成静态与构建验证。
 - **R-001** Tauri+workspace 摩擦：已规避（CP-1 通过）。
 - **R-002** caching_sha2 握手：MySQL 5.7 兼容已由用户提交 `4f54f02` 标记验证完成。
-- **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task（PLAN §4.3 风险）。
+- **R-keepalive** keepalive 在某些 server 不响应 / drop 后 task leak：60s+3 次阈值留缓冲；Drop 已 abort 全部 keepalive task。
 - **R-updater-release** 云端全平台 artifact 与正式版 `latest.json` 已由 v0.0.3 验证；剩余风险是从旧正式版发现新版本、下载、安装并重启的应用内端到端流程。
 - **R-ssh-runtime-errors** `ChannelDropped` / `AcceptLoopDied` 只有公共错误定义与 key 测试，当前运行路径只上报 keepalive `lost`；需在 v0.1 前补代码或收窄 P0 承诺。
 - **R-passphrase-test** `connection_test` 不接收 passphrase，带口令私钥只能在正式打开连接时验证完整链路。

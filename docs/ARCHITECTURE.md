@@ -119,7 +119,7 @@ src-tauri/src/
 └── ...
 ```
 
-功能等价。开源解耦弱一点（`ssh-multihop` 不能独立 publish）但保 ship。详见 [PLAN.md §2.1 T1.6](./PLAN.md#21-任务) 与 [PLAN.md §9.1 R-001](./PLAN.md#91-影响-ship-的风险红灯)。
+功能等价。开源解耦弱一点（`ssh-multihop` 不能独立 publish）但保 ship。该兜底已在 CP-1 验证后关闭，不再列入当前待办计划；历史记录见 [progress.md](../memory-bank/progress.md)。
 
 ---
 
@@ -1025,7 +1025,7 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
   ```
   - `just test-integration` 封装了同一命令。
 - 测试用例：单跳 + MySQL SELECT 1 / 顶层安全追加 LIMIT / KILL QUERY 后 processlist 消失 / 故意挂 SSH 端口验 hop_index 错误
-- **CI 不跑 integration**（无 MySQL 服务器）；MySQL 5.7 兼容验证推到 dogfooding 期找用 5.7 的同事验证
+- **CI 不跑 integration**（无 MySQL 服务器）；MySQL 5.7 已在 dogfooding 期完成验证，后续正式版前保留人工回归
 - 3 跳故障测试 + 嵌入式 russh-server 测试推到连接核心稳定后（Week 3），v0.1 Week 2 先 mock 或单跳
 
 ### 10.3 端到端测试

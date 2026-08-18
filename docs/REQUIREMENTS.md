@@ -9,7 +9,7 @@ last_updated: 2026-08-18
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-18）**：当前预览版为 v0.0.3，Week 1-4 代码已落地；v0.1 发布仍受真实 3 跳 GUI dogfooding、MySQL 5.7、作者与 2 位同事各试用 1 周、GIF 和最终 RC 验收约束。本文件以当前代码为事实源，未完成的真实环境验收仍保留为发布门槛。
+> **实现快照（2026-08-18）**：当前预览版为 v0.0.3；v0.1 实现、真实环境 dogfooding、MySQL 5.7 和同事试用均已验收，剩余工作是代码承诺缺口收口、README GIF、版本切换、正式 tag 与安装/更新链路验证。当前待办以 [PLAN.md](./PLAN.md) 为准。
 
 ## 1. 项目愿景
 
@@ -225,7 +225,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - 用 `sqlx 0.8` features=["mysql", "runtime-tokio-rustls", "chrono", "bigdecimal"] 实现（chrono / bigdecimal 用于结果集日期与 Decimal 解码）。连接默认 `ssl-mode=disabled`，但 v0.1 已允许用户显式选择 Preferred / Required / Verify CA / Verify Identity，并传入 CA、客户端证书与私钥路径；真实 TLS MySQL 环境尚未验收，留到 dogfooding / v0.2 打磨。
 - **验收标准**（不用 Docker，连用户本地 MySQL）：
   - 用户本地 MySQL 8.0 经 `TINY_SQL_TEST_MYSQL_URL` integration test → 能连、能查（caching_sha2_password 握手通过）。
-  - **MySQL 5.7 兼容验证推到 Week 5 dogfooding** 找用 5.7 的同事验证（CP-3），不进 CI 矩阵。
+  - **MySQL 5.7 兼容继续不进 CI 矩阵**；已在 dogfooding 期间完成验证，后续正式版前保留人工回归。
 
 **FR-026 [P1] 连接池策略**
 
@@ -302,7 +302,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-111** 结果表格列宽拖拽调整
 - **FR-112** schema 树列清单展示
 
-实施顺序、验收门槛与降级规则见 [PLAN §13](./PLAN.md#13-v02-开发计划)。
+实施顺序、验收门槛与降级规则见 [v0.2 开发计划](./PLAN.md#v02-开发计划)。
 
 ---
 
