@@ -156,7 +156,7 @@ release tag:
     if git diff --cached --quiet; then
         echo "⚠️ 暂无版本变更需要提交，跳过 Commit"
     else
-        git commit -m "🔖 release: $TAG"
+        git commit -m "🔖 release: 发布 $TAG"
     fi
 
     echo "4️⃣ 推送最新代码到当前远程分支..."
