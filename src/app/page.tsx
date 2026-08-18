@@ -8,6 +8,7 @@ import { ConnectionDialogs } from "@/components/connection-dialogs";
 import { ConnectionForm } from "@/components/connection-form";
 import { CreateDatabaseDialog } from "@/components/create-database-dialog";
 import { SchemaBrowser } from "@/components/schema-browser";
+import { UpdateCheckResultDialog } from "@/components/update-check-result-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import {
   ContextMenu,
@@ -52,6 +53,7 @@ export default function Home() {
     checkError,
     checkNotice,
     dismissUpdate,
+    dismissCheckResult,
   } = useUpdateChecker();
 
   useEffect(() => {
@@ -120,6 +122,11 @@ export default function Home() {
       <ConnectionDialogs />
       <ConfirmDialog />
       <UpdateDialog updateInfo={updateInfo} onDismiss={dismissUpdate} />
+      <UpdateCheckResultDialog
+        notice={checkNotice}
+        error={checkError}
+        onDismiss={dismissCheckResult}
+      />
       <CreateDatabaseDialog
         open={databaseDialogConn !== null}
         connection={databaseDialogConn}
@@ -169,18 +176,6 @@ export default function Home() {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {(checkError || checkNotice) && (
-            <p
-              className={cn(
-                "border-b px-3 py-2 text-xs",
-                checkError
-                  ? "border-destructive/20 text-destructive"
-                  : "border-neutral-100 text-neutral-500 dark:border-neutral-900",
-              )}
-            >
-              {checkError ? `检查更新失败：${checkError}` : checkNotice}
-            </p>
-          )}
           {loading && connections.length === 0 && (
             <p className="p-3 text-sm text-neutral-500">加载中…</p>
           )}

@@ -93,8 +93,9 @@ export function useUpdateChecker() {
     checkError,
     checkNotice,
     manualCheck: () => checkForUpdate(true),
-    dismissUpdate: () => {
-      setUpdateInfo(null);
+    dismissUpdate: () => setUpdateInfo(null),
+    dismissCheckResult: () => {
+      setCheckError(null);
       setCheckNotice(null);
     },
   };
