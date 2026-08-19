@@ -12,7 +12,11 @@ use tauri::State;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::config::history::HistoryEntry;
 use crate::state::{ActiveDriver, ActiveQuery, AppState};
+
+/// 历史记录中 SQL 文本的最大长度，防止超长语句撑爆加密历史文件。
+const HISTORY_SQL_MAX_CHARS: usize = 4000;
 
 /// 查询命令返回给前端的安全错误载荷，只包含稳定 key 与可选行号。
 #[derive(Debug, Serialize)]
@@ -141,6 +145,7 @@ pub async fn db_list_columns(
 ///
 /// `row_limit` 用于区分表浏览 1000 行与 SQL 编辑器 10w 行；后端会强制 clamp。
 /// `allow_write` 只表示前端已做二次确认，真正的多语句/写操作护栏仍在 db-driver。
+/// `schema` 仅用于 SQL 历史元信息（FR-106），PostgreSQL 前端传当前选中 schema。
 #[tauri::command]
 pub async fn db_query(
     state: State<'_, AppState>,
@@ -149,6 +154,7 @@ pub async fn db_query(
     query_id: Option<String>,
     row_limit: Option<u32>,
     allow_write: Option<bool>,
+    schema: Option<String>,
 ) -> Result<RowSet, QueryCommandError> {
     let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     // 与 close/reconnect 串行化“取 driver + 注册 token”：这样重连要么能看到并
@@ -163,7 +169,7 @@ pub async fn db_query(
         state.queries.lock().await.insert(
             query_id.clone(),
             ActiveQuery {
-                connection_id: id,
+                connection_id: id.clone(),
                 cancel_token: token.clone(),
             },
         );
@@ -183,7 +189,60 @@ pub async fn db_query(
     .map_err(QueryCommandError::from);
 
     state.queries.lock().await.remove(&query_id);
+    record_history(
+        &state,
+        &id,
+        &driver,
+        &sql,
+        schema.as_deref(),
+        result.is_ok(),
+    );
     result
+}
+
+/// 把一次执行写入 SQL 历史（FR-106）。历史落盘失败不影响查询结果本身。
+fn record_history(
+    state: &State<'_, AppState>,
+    connection_id: &str,
+    driver: &ActiveDriver,
+    sql: &str,
+    schema: Option<&str>,
+    success: bool,
+) {
+    let sql = sql.trim();
+    if sql.is_empty() {
+        return;
+    }
+    let (connection_name, database) = {
+        let store = state.store.lock().unwrap();
+        store
+            .load()
+            .ok()
+            .and_then(|conns| {
+                conns
+                    .into_iter()
+                    .find(|c| c.id == connection_id)
+                    .map(|c| (c.name, c.database))
+            })
+            .unwrap_or_default()
+    };
+    let mut sql_text = sql.to_string();
+    if sql_text.chars().count() > HISTORY_SQL_MAX_CHARS {
+        sql_text = sql_text.chars().take(HISTORY_SQL_MAX_CHARS).collect();
+    }
+    let entry = HistoryEntry {
+        id: Uuid::new_v4().to_string(),
+        connection_id: connection_id.to_string(),
+        connection_name,
+        driver: Driver::kind(driver).as_str().to_string(),
+        database,
+        schema: schema.filter(|s| !s.trim().is_empty()).map(str::to_string),
+        sql: sql_text,
+        executed_at: chrono::Utc::now().to_rfc3339(),
+        success,
+    };
+    // 锁定等状态下记录失败仅忽略，不向前端报错
+    let _ = state.history.record(entry);
 }
 
 /// 取消正在执行的 SQL。若 query 已完成，幂等成功。

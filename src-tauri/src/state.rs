@@ -12,6 +12,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
+use crate::config::history::HistoryStore;
 use crate::config::ssh_known_hosts::SshKnownHostsStore;
 use crate::config::store::ConnectionStore;
 use crate::security::SecurityManager;
@@ -150,6 +151,8 @@ pub struct AppState {
     pub passphrases: Mutex<HashMap<String, Zeroizing<String>>>,
     /// 用户主密码与派生 key 状态机（FR-102）。
     pub security: Arc<SecurityManager>,
+    /// SQL 历史加密存储（FR-106）。
+    pub history: HistoryStore,
 }
 
 impl AppState {
@@ -157,6 +160,7 @@ impl AppState {
         store: ConnectionStore,
         known_hosts: SshKnownHostsStore,
         security: Arc<SecurityManager>,
+        history: HistoryStore,
     ) -> Self {
         Self {
             store: Mutex::new(store),
@@ -167,6 +171,7 @@ impl AppState {
             tofu: Arc::new(SshTofuManager::default()),
             passphrases: Mutex::new(HashMap::new()),
             security,
+            history,
         }
     }
 

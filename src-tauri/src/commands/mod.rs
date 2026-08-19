@@ -3,6 +3,8 @@
 //! 错误统一返回稳定 i18n key 字符串，前端按 key 翻译（不泄露后端语言）。
 
 pub mod connection;
+pub mod export;
+pub mod history;
 pub mod query;
 pub mod security;
 pub mod ssh_tofu;

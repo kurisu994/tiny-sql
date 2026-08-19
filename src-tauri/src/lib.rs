@@ -66,9 +66,9 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            // 初始化主密码安全管理、连接配置加密存储与 SSH 信任库
-            // （security.json / master.key / connections.enc / known_hosts.json
-            // 都落在 app data 目录）
+            // 初始化主密码安全管理、连接配置加密存储、SQL 历史与 SSH 信任库
+            // （security.json / master.key / connections.enc / history.enc /
+            // known_hosts.json 都落在 app data 目录）
             let app_data_dir = app.path().app_data_dir()?;
             let security = std::sync::Arc::new(
                 security::SecurityManager::new(app_data_dir.clone())
@@ -76,8 +76,10 @@ pub fn run() {
             );
             let store = config::store::ConnectionStore::new(app_data_dir.clone(), security.clone())
                 .map_err(std::io::Error::other)?;
+            let history =
+                config::history::HistoryStore::new(app_data_dir.clone(), security.clone());
             let known_hosts = config::ssh_known_hosts::SshKnownHostsStore::new(app_data_dir);
-            app.manage(state::AppState::new(store, known_hosts, security));
+            app.manage(state::AppState::new(store, known_hosts, security, history));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -103,6 +105,9 @@ pub fn run() {
             commands::security::security_lock,
             commands::security::security_disable,
             commands::security::security_reset,
+            commands::history::history_list,
+            commands::history::history_clear,
+            commands::export::db_export_query,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
