@@ -521,7 +521,7 @@ impl OpenConnection {
 | `connection_list` | - | `Vec<StoredConnection>` | 按最近使用倒序；Week 2 简化返回完整配置（含明文 password）供前端编辑回显，落盘已整体加密 |
 | `connection_delete` | `id` | `()` | 加密落盘后删 |
 | `connection_test` | `(config, passphrase?)` | `()` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；passphrase 只用于本次测试，不持久化或缓存 |
-| `connection_open` | `(id, passphrase?)` | `session_id` | 建立持久连接，注册到 AppState；同 id 幂等返回当前 session，成功刷新最近使用 |
+| `connection_open` | `(id, passphrase?, remember_passphrase?)` | `session_id` | 建立持久连接并注册到 AppState；remember_passphrase 在主密码解锁时加密持久化 passphrase |
 | `connection_reconnect` | `(id, expected_session_id?, passphrase?)` | `session_id` | 仅在期望 session 仍为当前值时取消旧查询、关闭旧 pool/tunnel 并建立新 session |
 | `connection_close` | `(id, expected_session_id?)` | `()` | 仅关闭匹配 session；迟到关闭幂等忽略 |
 | `db_create_database` | `(id, name, charset?, collation?)` | `()` | MySQL 专属创建 database；其他 driver 返回不支持 |
@@ -529,8 +529,17 @@ impl OpenConnection {
 | `db_list_schemas` | `(id, database)` | `Vec<SchemaMeta>` | 列出 schema |
 | `db_list_tables` | `(id, database, schema?)` | `Vec<TableMeta>` | 列出 table |
 | `db_list_columns` | `(id, database, schema?, table)` | `Vec<ColumnMeta>` | 列出 column |
-| `db_query` | `(id, sql, query_id?, row_limit?, allow_write?)` | `RowSet` | 执行 SQL |
+| `db_query` | `(id, sql, query_id?, row_limit?, allow_write?, schema?)` | `RowSet` | 执行 SQL，结束时自动写入 SQL 历史（FR-106） |
 | `db_query_cancel` | `query_id` | `()` | 取消正在跑的 query |
+| `db_export_query` | `(id, sql, format, path)` | `ExportResult` | 重新执行只读 SQL 并流式写文件（CSV/XLSX，FR-107） |
+| `security_status` | - | `SecurityStatusPayload` | 查询主密码状态（disabled/locked/unlocked）与是否可持久化 passphrase |
+| `security_setup` | `password` | `()` | 设置主密码并把现有配置迁移到 v2 envelope（FR-102） |
+| `security_unlock` | `password` | `()` | 校验主密码并派生数据 key 驻留内存 |
+| `security_lock` | - | `()` | 清空内存派生 key，置为 Locked |
+| `security_disable` | `password` | `()` | 校验后迁回 v1 本地 key 加密并删除 secrets.enc |
+| `security_reset` | - | `()` | 忘记主密码重置：删除全部加密数据回到 Disabled |
+| `history_list` | - | `Vec<HistoryEntry>` | 列出最近 100 条 SQL 执行历史（FR-106） |
+| `history_clear` | - | `()` | 清空全部 SQL 历史 |
 | `ssh_tofu_decision` | `(connection_id, hop_index, accept)` | `()` | TOFU 弹窗回调 |
 
 ### 3.4 AppState
@@ -551,8 +560,12 @@ pub struct AppState {
     pub known_hosts: Arc<SshKnownHostsStore>,
     /// TOFU 决策 manager（前端弹窗响应回调通道）
     pub tofu: Arc<SshTofuManager>,
-    /// 会话内 passphrase 缓存（connection_id → passphrase）
-    pub passphrases: Mutex<HashMap<String, String>>,
+    /// 会话内 passphrase 缓存（connection_id → passphrase，Zeroizing 内存清零）
+    pub passphrases: Mutex<HashMap<String, Zeroizing<String>>>,
+    /// 用户主密码与派生 key 状态机（FR-102）
+    pub security: Arc<SecurityManager>,
+    /// SQL 历史加密存储（FR-106，history.enc）
+    pub history: HistoryStore,
 }
 ```
 
@@ -927,7 +940,7 @@ ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握�
 | `ssh:tofu-request` | `{connectionId, hopIndex, host, port, fingerprint}` | 后端遇到未知 host key | 弹 `SshTofuDialog` |
 | `ssh:hop-status` | `{connectionId, sessionId, hopIndex, status, reason?}`（status ∈ pending/connected/failed/lost） | 隧道每跳状态变化 | zustand 只接收当前 session 事件 → 拓扑节点重渲染 |
 | `ssh:hop-rtt` | `{connectionId, sessionId, hopIndex, state, rttMs}`（state ∈ measured/timeout/unavailable） | 每跳低频 SSH 协议探测完成 | zustand 只接收当前 session 事件 → 更新进入该跳的边指标，不改变节点状态 |
-| `query:result-chunk` | `{query_id, rows_partial, done: false}` | （v0.2 才用）流式结果 | v0.1 不用此 event，query 全量返回 |
+| `query:result-chunk` | `{query_id, rows_partial, done: false}` | （规划未用）流式结果 | v0.1/v0.2 query 均全量返回 RowSet；v0.2 文件导出采用后端流式写出（db_export_query），不经 IPC |
 | `app:log` | `{level, message, target}` | 后端日志同步（tauri-plugin-log） | DevTools console |
 | `app:check-update` | `{}` | macOS 应用菜单「Check for Updates...」 | 触发手动检查更新 |
 

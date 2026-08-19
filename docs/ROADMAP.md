@@ -2,7 +2,7 @@
 title: tiny-sql 路线图
 version: 0.1.0-draft-2
 status: draft
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # tiny-sql 路线图
@@ -56,20 +56,20 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 
 ### 功能
 
-| ID | 功能 | 优先级 | 工量预估 |
+| ID | 功能 | 优先级 | 状态 |
 |---|---|---|---|
-| **FR-100** | PostgreSQL driver | P0 | 1 周 |
-| **FR-102** | 加密 passphrase 存储（用户主密码 derive key） | P0 | 1 周 |
-| **FR-103** | MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（模式/证书路径已接线） | P1 | 0.5 周 |
-| **FR-104** | Schema-aware 智能联想（点 user_id 列自动 JOIN 候选） | P1 | 1.5 周 |
-| **FR-105** | 每跳累计 SSH 协议 RTT/超时显示（V2-T7.1 已实现，真实多跳待 RC 验收） | P1 | 0.5 周 |
-| **FR-110** | 隧道断开后的幂等「重连」按钮（V2-T7.2 已实现，真实断链待 RC 验收） | P1 | 0.3 周 |
-| **FR-111** | 结果表格列宽拖拽调整（v0.1 列宽固定） | P2 | 0.3 周 |
-| **FR-112** | schema 树列清单展示（`db_list_columns` 前端接线） | P1 | 0.5 周 |
-| **FR-106** | SQL 历史（最近 100 条） | P1 | 0.3 周 |
-| **FR-107** | 导出 CSV / Excel | P2 | 0.5 周 |
-| **FR-108** | 大表 LRU schema cache | P2 | 0.3 周 |
-| **FR-109** | 多 tab 同时执行 | P2 | 1 周 |
+| **FR-100** | PostgreSQL driver | P0 | ✅ 代码与 integration 完成，真实 Tauri 验收待 V2-T3.4 |
+| **FR-102** | 加密 passphrase 存储（用户主密码 Argon2id 派生 key） | P0 | ✅ 代码与测试完成，支持迁移回滚与锁定 |
+| **FR-103** | MySQL TLS 证书选择与错误诊断（模式/证书选择器/错误分类已接线） | P1 | 🚧 代码完成，真实 TLS 环境验收待 V2-T4.3 |
+| **FR-104** | Schema-aware 智能联想（双方言补全 + 启发式 JOIN + ON） | P1 | ✅ 已完成（Week 5） |
+| **FR-105** | 每跳累计 SSH 协议 RTT/超时显示 | P1 | ✅ 代码完成，真实多跳链路待 RC 验收 |
+| **FR-110** | 隧道断开后的幂等「重连」按钮 | P1 | ✅ 代码完成，真实断链待 RC 验收 |
+| **FR-111** | 结果表格列宽拖拽调整（localStorage 持久化 + 恢复默认） | P2 | ✅ 已完成（Week 6） |
+| **FR-112** | schema 树列清单展示（按需展开 + 完整元信息） | P1 | ✅ 已完成（Week 5） |
+| **FR-106** | SQL 历史（最近 100 条加密落盘 + 回填 + 清空） | P1 | ✅ 已完成（Week 6） |
+| **FR-107** | 导出 CSV / Excel（后端流式写文件 + 区分 NULL/空串） | P2 | ✅ 已完成（Week 6） |
+| **FR-108** | 大表 LRU schema cache（128 项、5 分钟 TTL 分区隔离） | P2 | ✅ 已完成（Week 5） |
+| **FR-109** | 多 tab 同时执行（独立 SQL/结果/query_id/取消/dirty） | P2 | ✅ 已完成（Week 6） |
 
 合计 P0+P1 约 5-6 周；含 P2 约 7 周。
 
@@ -80,18 +80,15 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 - keepalive 间隔 + 失败阈值可配置，FR-014 的 60s / 连续 3 次（180s）改为默认值
 - 评估 Apple Developer 代码签名 / notarization（$99/年），降低首次打开摩擦
 
-### v0.2 待定项（codex review surface，实施期决定）
+### v0.2 决策落地项（V2-T7.4）
 
-eng review 中 codex 提出但 v0.1 未重开，留 v0.2 视实施情况决定：
+- **KILL QUERY 四状态与 SSH 统一状态机**：V2-T7.4 决定**保留现有公共契约**，不引入额外公共状态。取消令牌 + session_id/query_id 双守卫已覆盖串线与并发场景，自动化门禁全绿；新增公共状态会扩大 IPC 契约面而无实际用户反馈依据。若真实 dogfooding 出现取消状态误报则触发重审。
 
-- **KILL QUERY 取消 UI 是否细化为 4 状态**（`cancel_requested / killed / already_finished / failed`）。v0.1 先 2 状态（requested / done），视 dogfooding 反馈决定。
-- **SshTunnelError 三变体是否重构为统一连接状态机**（`connecting / connected / degraded / reconnecting / lost / closed` + 内部 reason）。v0.1 用三个独立公共变体 + 各自 i18n key；若 dogfooding 发现 i18n key 膨胀，v0.2 重构为状态机。
+### 文档（已完成）
 
-### 文档
-
-- 英文 README（首发英文社区）
-- ARCHITECTURE.md 补 PG driver 章节
-- 加 CONTRIBUTING.md（接受社区 PR 的标准）
+- ✅ `README_EN.md`（英文版 README）
+- ✅ `CONTRIBUTING.md`（贡献指南）
+- ✅ `docs/ARCHITECTURE.md` 补多 driver 与双时代加密格式章节
 
 ---
 

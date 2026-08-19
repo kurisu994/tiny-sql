@@ -328,7 +328,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **NFR-010 数据落盘加密**：连接配置（含 SSH password）必须 AES-GCM 加密。明文 grep 必须返回 0 命中。
 
-**NFR-011 passphrase 不持久化**：v0.1 SSH 私钥 passphrase 仅会话内存，进程退出即丢；不写文件、不写 swap（best effort，无 mlock 保证）。
+**NFR-011 passphrase 存储安全**：未启用主密码时 SSH 私钥 passphrase 仅会话内存（Zeroizing 包装，进程退出即丢，不写文件）；v0.2 启用主密码并解锁后，用户可选择加密持久化到 `secrets.enc`（FR-102），删除连接同步清理。
 
 **NFR-012 known_hosts 隔离**：tiny-sql 的 SSH known_hosts 写到自有 store（`~/Library/Application Support/tiny-sql/known_hosts.json`），**不读、不写** `~/.ssh/known_hosts`。
 
@@ -360,7 +360,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **NFR-041 SshTunnelError 稳定 i18n key**：每个错误变体的 i18n key 是公开 API 的一部分；后续版本只能加新 key、不能改已有 key（前端翻译表向后兼容）。
 
-**NFR-042 v0.1 具体 struct，v0.2 提取最小 trait**：v0.1 直接使用具体 `struct MySqlDriver`，避免单实现时期过早抽象；v0.2 已从真实 commands 调用面提取对象安全的最小 `Driver` 契约，只覆盖 kind、ping、metadata、query/取消与 close。双实现反馈已把 metadata 收敛为显式 database/schema scope，避免套用 MySQL 同义语义；连接创建和方言专属对象操作仍不进入 trait。
+**NFR-042 Driver 契约与多数据库扩展**：v0.2 已从真实 commands 调用面提取对象安全的最小 `Driver` 契约，覆盖 kind、ping、metadata（显式 database/schema scope）、query/取消与 close；`MySqlDriver` 与 `PostgresDriver` 均实现该契约。连接创建与方言专属操作（如 MySQL `CREATE DATABASE`）留在具体实现，保持契约紧凑。
 
 ---
 

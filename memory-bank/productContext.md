@@ -70,8 +70,8 @@ hop[0] 仍绿 → 立刻判定是堡垒机问题
 |---|---|---|
 | 多级跳板 | 生产环境 4 层堡垒是常态（办公网 → VPC → DB 跳板 → MySQL） | 这是产品存在的根本动机 |
 | MySQL 版本 | 必须同时支持 5.7（`mysql_native_password`）和 8.0（`caching_sha2_password`） | 5.7 EOL 但国内仍大量在用 |
-| passphrase | 私钥 passphrase 仅会话内存，进程退出即丢，v0.1 不持久化 | 安全；v0.2 用主密码加密存储 |
-| 小库假设 | v0.1 ≤ 30 schema、≤ 200 表/schema，不做搜索/分页/cache | 控制 v0.1 复杂度 |
+| passphrase | 未启用主密码时仅会话内存（Zeroizing 包装）；v0.2 启用主密码并解锁后可加密持久化至 secrets.enc | 安全平衡（FR-102） |
+| 小库假设 | v0.1 不做 cache；v0.2 已实现 128 项、5 分钟 TTL 分区内存 LRU metadata cache（FR-108） | 兼顾响应性能与内存 |
 | 无 Apple Developer 代码签名 | v0.1 无苹果开发者证书，README 教 `xattr -cr`；Tauri updater 签名只校验更新包完整性 | 避免 $99/年阻塞首发 |
 
 ## 交互逻辑（具体规则）

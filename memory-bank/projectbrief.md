@@ -4,7 +4,7 @@
 
 ## 一句话
 
-**tiny-sql** 是一款**多级跳板机友好的 MySQL 桌面客户端**——把 SSH 跳板从「雾中一根管子」变成「可观测的路由器」。
+**tiny-sql** 是一款**多级跳板机友好的 MySQL / PostgreSQL 桌面客户端**——把 SSH 跳板从「雾中一根管子」变成「可观测的路由器」。
 
 ## 核心愿景
 
@@ -30,7 +30,7 @@
 ## 关键产品决策
 
 - **Approach B（Clean Workspace）**：独立 crate（`ssh-multihop` / `db-driver`），未来可独立 publish，仓库诞生即干净。
-- **v0.1 具体 struct，v0.2 才抽 trait**：避免单实现 trait 的过早抽象。
+- **对象安全 Driver 契约（v0.2 落地）**：从真实调用面提取最小对象安全契约，统一承载 MySQL 与 PostgreSQL，支持独立取消与 database/schema 隔离。
 - **best-effort 只读保护**：首 token 白名单二次确认，真正只读建议用 MySQL 只读账号。
 - **仅本地数据**：无遥测、无错误上报；自动更新只访问 GitHub Release 的正式版更新清单。
 

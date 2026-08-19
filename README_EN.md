@@ -2,7 +2,7 @@
 
 [简体中文](./README.md) · English
 
-> A bastion-host-friendly MySQL desktop client — turning the SSH jump chain from "a pipe in the fog" into an observable router.
+> A bastion-host-friendly MySQL / PostgreSQL desktop client — turning the SSH jump chain from "a pipe in the fog" into an observable router.
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
@@ -25,7 +25,7 @@ Built for personal use, usable by colleagues, and open source. Free of charge, n
 
 - N-hop SSH configuration and connection: password / private-key authentication, per-session passphrase caching, TOFU host key verification, and hard rejection on fingerprint changes.
 - MySQL SSL/TLS configuration: disabled by default; you can explicitly choose Preferred / Required / Verify CA / Verify Identity and provide CA, client certificate, and private key paths. Acceptance against a real TLS server is not complete yet.
-- MySQL data browsing: list databases / tables, click a table to browse its first 1000 rows. (The `db_list_columns` backend is implemented; the column-list UI is deferred to v0.2.)
+- MySQL data browsing: list databases / tables, click a table to browse its first 1000 rows.
 - SQL execution: a CodeMirror SQL editor with syntax highlighting, line numbers, basic schema/table completion, and quick execution. The backend rejects empty SQL / multiple statements, automatically appends `LIMIT` when a top-level `SELECT` / `WITH` is safe, and caps results at 100,000 rows.
 - SQL cancellation: records the MySQL `CONNECTION_ID()` at execution time and issues `KILL QUERY` through an independent control pool on cancel.
 - Topology status: a read-only topology graph from local machine → N hops → MySQL, supporting `pending` / `connected` / `failed` / `lost`.
@@ -53,7 +53,7 @@ See [CHANGELOG.md](./CHANGELOG.md) (`[Unreleased]`) for the full list.
 | SSH tunneling | russh 0.54 (N hops, pure Rust async) |
 | Database | sqlx 0.8 (MySQL; PostgreSQL added in v0.2) |
 
-> PostgreSQL, real-world MySQL TLS acceptance and certificate UX polish, SQL history, export, and schema-aware smart completion are all planned for v0.2 and beyond. See the [ROADMAP](./docs/ROADMAP.md) for details.
+> PostgreSQL, master-password encryption, SQL history, multiple query tabs, etc. are delivered in v0.2. See "Coming in v0.2" below and [ROADMAP](./docs/ROADMAP.md) for details.
 
 ## Development setup
 
@@ -171,11 +171,13 @@ Do not commit trial records to the public repository. The repo provides a [dogfo
 
 ## Documentation
 
+- [简体中文 README](./README.md)
+- [Contributing guide](./CONTRIBUTING.md)
 - [Requirements](./docs/REQUIREMENTS.md)
 - [Development plan](./docs/PLAN.md)
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Roadmap](./docs/ROADMAP.md)
-- [v0.1 release checklist](./docs/RELEASE_CHECKLIST.md)
+- [Release checklist](./docs/RELEASE_CHECKLIST.md)
 
 ## FAQ
 

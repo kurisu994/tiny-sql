@@ -1,6 +1,6 @@
 # tiny-sql
 
-> 多级跳板机友好的 MySQL 桌面客户端 —— 把 SSH 跳板从「雾中一根管子」变成「可观测的路由器」。
+> 多级跳板机友好的 MySQL / PostgreSQL 桌面客户端 —— 把 SSH 跳板从「雾中一根管子」变成「可观测的路由器」。
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 

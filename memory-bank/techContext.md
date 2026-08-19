@@ -19,6 +19,7 @@
 | class-variance-authority / clsx / tailwind-merge | ^0.7 / ^2.1 / ^3.6 | shadcn 组件 variant + `cn()` className 合并 |
 | tw-animate-css | ^1.4.0 | shadcn 弹窗 / 菜单动画 |
 | react-virtuoso | ^4.18.9 | 结果表格虚拟滚动 |
+| @tauri-apps/plugin-dialog | ^2.7.2 | 导出路径选择与证书文件浏览系统对话框 |
 | codemirror / @codemirror/* | codemirror ^6.0.2；lang-sql ^6.10.0；lint ^6.9.7；state ^6.7.0；view ^6.43.4 | SQL 编辑器、MySQL 高亮、基础 schema/table 补全和错误 gutter |
 
 > **已装**：`zustand` 5（状态）、`vitest` + `@testing-library/react`（前端单测）、`react-virtuoso`（虚拟滚动）、CodeMirror 6 SQL 编辑器、shadcn/ui 体系（`shadcn` CLI + `radix-ui` + `lucide-react` + `class-variance-authority` + `clsx` + `tailwind-merge` + `tw-animate-css`）。
@@ -36,7 +37,7 @@
 | serde | 1（derive） | 序列化 |
 | log | 0.4 | 日志 facade |
 
-`src-tauri` 额外：`tauri` 2、`tauri-plugin-log` 2、`tauri-plugin-updater` 2、`tauri-plugin-process` 2、`serde_json` 1、`aes-gcm` 0.10 + `base64` 0.22（加密 store）、`uuid` 1（连接 id）、`chrono` 0.4（最近使用时间戳）、`tauri-build` 2（build-dep）。
+`src-tauri` 额外：`tauri` 2、`tauri-plugin-log` 2、`tauri-plugin-updater` 2、`tauri-plugin-process` 2、`tauri-plugin-dialog` 2.7、`serde_json` 1、`aes-gcm` 0.10 + `base64` 0.22（加密 store）、`argon2` 0.5.3（主密码 KDF）、`zeroize` =1.8.1（密钥内存清零，精确约束保持 MSRV 1.77.2）、`rust_xlsxwriter` 0.83（constant_memory 流式 Excel 导出）、`uuid` 1（连接 id）、`chrono` 0.4（最近使用时间戳）、`tauri-build` 2（build-dep）。
 
 > **AppState 注册表**实际用 `std`/`tokio` 的 `Mutex<HashMap>` 而非 `dashmap`（够用、少依赖）。
 > **规划未引入**：`sqlparser-rs`（拒多语句当前用自有 SQL 分析 / 分号状态机）。
@@ -94,15 +95,17 @@
 | beforeDevCommand | `pnpm dev` |
 | pnpm build script 批准 | `pnpm-workspace.yaml` 的 `allowBuilds: sharp: true`（否则 pnpm 11 的 verify-deps-before-run 会 exit 1） |
 | 集成测试 env | `TINY_SQL_TEST_MYSQL_URL` / `TINY_SQL_TEST_POSTGRES_URL`（见 `.env.example`，`.env` 已忽略） |
-| 加密 store 路径 | `~/Library/Application Support/tiny-sql/{connections.enc, master.key}`（AES-GCM，整体加密） |
+| 加密 store 路径 | `~/Library/Application Support/tiny-sql/{connections.enc, master.key, security.json, secrets.enc, history.enc}`（AES-GCM / Argon2id，整体加密） |
 | 连接 driver 持久化值 | `mysql` / `postgresql`；旧记录缺字段默认 `mysql`，兼容读取不主动重写密文 |
 | known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
 
 ## 当前 command（src-tauri 实际）
 
-- 连接：`connection_create/list/update/delete`（CRUD）、`connection_test(input, passphrase?)`（一次性完整链路测试，passphrase 不缓存）、`connection_open/reconnect/close`（按 driver 管理持久连接；open/reconnect 返回 session_id，reconnect/close 可带 expected_session_id 防迟到操作）。
-- 数据浏览：`db_list_databases/db_list_schemas/db_list_tables/db_list_columns/db_query/db_query_cancel/db_create_database`（基于已打开连接；table/column 接受可选 schema，CREATE DATABASE 当前仅 MySQL 支持）。
+- 连接：`connection_create/list/update/delete`（CRUD）、`connection_test(input, passphrase?)`（一次性完整链路测试，passphrase 瞬时不缓存）、`connection_open(id, passphrase?, remember_passphrase?)`（建立持久连接；主密码解锁时支持持久化 passphrase）、`connection_reconnect(id, expected_session_id?, passphrase?)` / `connection_close(id, expected_session_id?)`。
+- 数据浏览与导出：`db_list_databases/db_list_schemas/db_list_tables/db_list_columns/db_create_database`、`db_query(id, sql, queryId?, rowLimit?, allowWrite?, schema?)`（执行并自动记历史）、`db_query_cancel(queryId)`、`db_export_query(id, sql, format, path)`（后端流式写 CSV/XLSX）。
+- 主密码安全（FR-102）：`security_status/security_setup(password)/security_unlock(password)/security_lock/security_disable(password)/security_reset`。
+- SQL 历史（FR-106）：`history_list/history_clear`。
 - TOFU：`ssh_tofu_decision(connectionId, hopIndex, accept)`。
-- 事件（后端 emit → 前端 listen）：`ssh:tofu-request`（指纹确认）、`ssh:hop-status`（连接四态）、`ssh:hop-rtt`（measured/timeout/unavailable 指标）；后两者均含 sessionId，前端过滤重连前的迟到事件。
+- 事件（后端 emit → 前端 listen）：`ssh:tofu-request`（指纹确认）、`ssh:hop-status`（连接四态）、`ssh:hop-rtt`（measured/timeout/unavailable 协议 RTT 指标）；均含 sessionId 过滤旧事件。
 
 相关：[[systemPatterns]] · [[progress]]
