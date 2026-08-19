@@ -17,7 +17,7 @@ tiny-sql 是一款**多级跳板机友好的 MySQL 桌面客户端**。
 
 主流 SQL 客户端（DBeaver、TablePlus、Navicat、DataGrip、Sequel Ace、Beekeeper Studio）把 SSH 隧道当作"雾中一根管子"——单跳、黑盒、出错无法定位哪一跳挂了。DBeaver 名义上支持 OpenSSH ProxyJump 多跳，但 UI 完全不暴露这层逻辑，调试体验等同于裸 `ssh -L`。
 
-tiny-sql 把跳板机从"雾中一根管子"变成**可观测的路由器**：每一跳都是 UI 上的一等公民节点，有独立的连接状态和错误归因。v0.1 给出"本地 → 跳板 1 → 跳板 2 → 跳板 3 → MySQL"的拓扑图视图；隧道任意一跳挂掉时高亮断点节点，180s 内向 UI 推送 lost 状态。每跳实时延迟读数尚未实现，留到 v0.2。
+tiny-sql 把跳板机从"雾中一根管子"变成**可观测的路由器**：每一跳都是 UI 上的一等公民节点，有独立的连接状态和错误归因。v0.1 给出"本地 → 跳板 1 → 跳板 2 → 跳板 3 → MySQL"的拓扑图视图；隧道任意一跳挂掉时高亮断点节点，180s 内向 UI 推送 lost 状态。v0.2 增加每跳 SSH 协议 RTT 与超时显示。
 
 这是即使 DBeaver 下个版本想追也追不上的理念差距：不是 feature 差距，是把 SSH 从"网络层"提升到"数据模型层"的差距。
 
@@ -148,15 +148,16 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **FR-014 [P0] SSH keepalive 与隧道断开感知**
 
-- 隧道建立后给每一跳 russh session 配置 `keepalive_interval=60s`、`keepalive_max=2`；russh 在第 3 次未响应时结束 session。每跳另有轻量监控 task 探测 session 是否已退出。
-- **连续 3 次未响应（≈180s）才判定断开**——避免弱网抖动 / 企业 bastion ratelimit 误报。监控 task 发现 session 已退出时 emit `ssh:hop-status` event，payload 含 `connection_id / hop_index / status: "lost" / reason`，前端拓扑节点变红。
+- 隧道建立后给每一跳 russh session 配置 keepalive；高级设置可控制启用状态、间隔和连续失败阈值，新建连接默认 `keepalive_interval=60s`、`keepalive_max=2`，即第 3 次未响应时结束 session。每跳另有轻量只读监控 task 探测 session 是否已退出。
+- 默认 **连续 3 次未响应（≈180s）才判定断开**——避免弱网抖动 / 企业 bastion ratelimit 误报。监控 task 发现 session 已退出时 emit `ssh:hop-status` event，payload 含 `connectionId / sessionId / hopIndex / status: "lost" / reason`；前端仅接收当前 session 的事件并把对应拓扑节点变红。
 - `SshTunnelError` 新增三个 mid-session 变体（各有独立 i18n key）：`TunnelLost { hop_index, reason }`（keepalive 超时）/ `ChannelDropped { hop_index }`（对端主动关 channel，可能跳板重启）/ `AcceptLoopDied { hop_index }`（accept loop panic，代码 bug 需上报）。
 - **当前实现状态**：首跳 session 断开上报 `TunnelLost`，嵌套跳 transport channel 断开上报 `ChannelDropped`，本地 accept worker panic / 意外退出上报 `AcceptLoopDied`；正常关闭通过 shutdown 标记抑制误报，同一跳断链只上报一次。
-- keepalive 间隔（60s）与失败阈值（3 次）v0.1 是常量，v0.2 做成可配置。
+- keepalive 间隔与失败阈值已在 v0.2 接入高级配置；旧记录缺少阈值时按 3 次兼容读取，关闭 keepalive 后不再发送心跳。
 - **验收标准**：
   - 隧道连接稳定时 → 不 emit lost 事件。
   - 手动 kill 第 2 跳 sshd → **180s 内** UI hop[1] 变红，弹 toast 提示"第 2 跳断开"。
   - 隧道断开后用户能重新连上：**v0.1 UI 无独立"重连"按钮**，需先点"断开"再重新打开连接回到 pending → connected 流程（已知缺口，推 v0.2）。
+  - **v0.2** 已提供显式「重连」，恢复前清理旧查询、pool 和 tunnel，并用 session_id 隔离旧事件。
 - **设计意图**：这是"把跳板机从雾中一根管子变成可观测路由器"叙事的核心，不是可选项。
 
 **FR-015 [P0] 拓扑图视图**
@@ -165,6 +166,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - 节点状态：`pending`（灰色）/ `connected`（绿色）/ `failed`（红色）/ `lost`（红色）。
 - 状态通过 tauri event `ssh:hop-status` 推送，payload schema 见 [ARCHITECTURE.md](./ARCHITECTURE.md#7-前后端事件契约)。
 - v0.1 节点状态简化为 4 态（pending / connected / failed / lost），**不**做"实时延迟动画"（推 v0.2）。
+- v0.2 通过独立 `ssh:hop-rtt` 事件显示 10s 低频采样；值是从本机累计到该 SSH session 的 global-request RTT，不是 ICMP，也不是可相减的单段链路延迟。2s 超时只更新指标，不把节点改成 failed/lost。
 - **验收标准**：
   - 连接进行中 → 节点按顺序从 pending → connected。
   - 第 2 跳失败 → hop[1] 红，hop[2..] 保持 pending。
@@ -233,9 +235,10 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - 1 个 tiny-sql 连接 = 1 个本地 listener 端口 = 1 个 `MySqlPool`（max_connections = 5）。
 - 隧道断开（FR-014）触发 pool drop，UI 显示连接已断开。
 - v0.1 **不做断线自动重连**——用户手动重连。**v0.1 UI 无"重连"按钮**：lost 后需先点"断开"再重新打开连接（已知缺口，推 v0.2）。
+- v0.2 已增加用户触发的幂等「重连」按钮，不做后台自动重试：重连前按 connection_id 取消旧查询，关闭旧 pool/tunnel，再建立带新 session_id 的连接；旧查询结果和旧 SSH 事件不得写回新会话。
 - **验收标准**：
   - 同时打开 5 个 tab 跑不同 SQL → 复用同一 pool，不报"too many connections"。
-  - 隧道挂了 → SQL 报错 + UI 显示连接已断开。**"重连"按钮暂未实现**，v0.2 补。
+  - 隧道挂了 → SQL 报错 + UI 显示连接已断开；点击「重连」后恢复 pending → connected，且旧查询 / 事件不污染新会话。
 
 **FR-027 [P1] MySQL SSL/TLS 连接配置**
 
@@ -294,12 +297,12 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-102** 加密 passphrase 存储（用户主密码 derive key）
 - **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（基础模式/路径已接线）
 - **FR-104** Schema-aware 智能联想：按 MySQL/PostgreSQL 方言补全当前命名空间的 table、column 和 alias；已加载列满足 `target_id → target.id`、反向关系或同名 key/id 时，在输入 `JOIN` 后提供带 ON 条件的候选片段。
-- **FR-105** 实时隧道延迟动画（每跳的 RTT 显示在边上）
+- **FR-105** 实时隧道延迟动画（v0.2 已实现累计 SSH 协议 RTT/超时显示；非 ICMP、非单段延迟）
 - **FR-106** SQL 历史
 - **FR-107** 导出 CSV / Excel
 - **FR-108** 大表 LRU schema cache：按 connection/driver/database/schema 分区，覆盖 schema/table/column metadata；提供手动刷新，重连、建库和成功 DDL 后必须失效，禁止跨连接或跨 driver 命中。
 - **FR-109** 多 tab 同时执行
-- **FR-110** 隧道断开后的重连按钮
+- **FR-110** 隧道断开后的重连按钮（v0.2 已实现用户触发的幂等恢复；不含自动重试）
 - **FR-111** 结果表格列宽拖拽调整
 - **FR-112** schema 树列清单展示
 
@@ -384,7 +387,7 @@ v0.1 **不做**的事情，全部有明确理由：
 - **多 tab 同时执行**：v0.1 单 tab，单 SQL。理由：复杂度 +30%，dogfooding 场景里作者本人 80% 时间只开一个查询。
 - **大表 LRU schema cache**：v0.1 假设小库（FR-020 注），每次开 schema 重查 `information_schema`。大库 cache 推 v0.2。
 - **MySQL TLS 生产级验收与诊断 UX**：v0.1 已接线 SSL 模式和证书路径，但真实 TLS/双向证书环境、证书选择器和错误诊断尚未完成，推 v0.2 打磨。
-- **断线自动重连**：v0.1 隧道断开后需先点「断开」再重新打开连接（FR-026），没有独立「重连」按钮。理由：自动重连策略（指数退避 / 最大次数 / 用户配置）是个独立设计，避免 v0.1 引入死锁。
+- **断线自动重连**：仍不做后台指数退避 / 自动重试。v0.2 的 FR-110 是用户显式触发的幂等重连，避免静默循环连接或锁死。
 
 ### 5.4 协同与团队范围之外
 

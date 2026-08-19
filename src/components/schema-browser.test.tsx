@@ -35,6 +35,7 @@ const connection: StoredConnection = {
   advanced: {
     keepAliveEnabled: false,
     keepAliveIntervalSeconds: 240,
+    keepAliveFailureThreshold: 3,
     connectTimeoutEnabled: true,
     connectTimeoutSeconds: 30,
     readTimeoutEnabled: false,
@@ -51,6 +52,7 @@ beforeEach(() => {
   metadataCache.clear();
   useSessionStore.setState({
     openId: "c1",
+    runtimeSessionId: "session-old",
     activeConnection: connection,
     status: "connected",
     databases: [{ name: "app", isCurrent: true }],
@@ -93,6 +95,8 @@ beforeEach(() => {
     errorMsg: null,
     queryErrorMsg: null,
     queryRunning: false,
+    hopStatuses: {},
+    lostHops: [],
   });
 });
 
@@ -138,5 +142,31 @@ describe("SchemaBrowser column tree", () => {
     await waitFor(() =>
       expect(screen.getByText("fresh_column")).toBeInTheDocument(),
     );
+  });
+
+  it("隧道断开提示可立即重连", async () => {
+    useSessionStore.setState({ lostHops: [0] });
+    vi.mocked(invoke).mockImplementation((command: string) => {
+      const result: Record<string, unknown> = {
+        connection_reconnect: "session-new",
+        db_list_databases: [{ name: "app", isCurrent: true }],
+      };
+      return Promise.resolve(result[command]);
+    });
+    render(<SchemaBrowser connection={connection} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "立即重连" }));
+
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("connection_reconnect", {
+        id: "c1",
+        expectedSessionId: "session-old",
+        passphrase: null,
+      }),
+    );
+    await waitFor(() =>
+      expect(useSessionStore.getState().status).toBe("connected"),
+    );
+    expect(useSessionStore.getState().runtimeSessionId).toBe("session-new");
   });
 });

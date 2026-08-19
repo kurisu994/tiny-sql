@@ -16,8 +16,9 @@ const defaultSsl = {
   clientKeyPath: "",
 };
 const defaultAdvanced = {
-  keepAliveEnabled: false,
-  keepAliveIntervalSeconds: 240,
+  keepAliveEnabled: true,
+  keepAliveIntervalSeconds: 60,
+  keepAliveFailureThreshold: 3,
   connectTimeoutEnabled: true,
   connectTimeoutSeconds: 30,
   readTimeoutEnabled: false,

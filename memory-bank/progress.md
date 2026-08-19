@@ -128,6 +128,10 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 - **2026-08-18 V2-T5.1 column 树**：前端 session state 接入现有 `db_list_columns`，MySQL/PostgreSQL 表节点以独立控件按需展开，展示类型、nullable、key、default 与 comment；收起、切库或切 schema 后异步旧响应不会覆盖当前树。暂不缓存列元数据，分区 LRU、刷新和失效统一留 V2-T5.2；前端 46 项测试与 TypeScript 检查通过。
 - **2026-08-18 V2-T5.2 metadata cache**：新增纯内存 128 项 / 5 分钟 TTL LRU，key 包含 connection/driver/database/schema/resource/table；schema/table/column 加载均先查 cache。树顶部支持手动刷新，重连、关闭、建库及成功 DDL 会清理对应连接 cache；异步返回继续核对当前命名空间。前端 54 项测试、TypeScript 与 Next.js 生产构建通过。
 - **2026-08-18 V2-T5.3 schema-aware completion**：CodeMirror 按连接使用 MySQL/PostgreSQL dialect；对象树加载过的列按表累积到当前 session，原生 schema source 提供 column/alias completion。独立 completion 模块按真实列的 `target_id → target.id`、反向或同名 key/id 关系生成 JOIN + ON 候选，支持双方言引号和 schema-qualified table，不新增传递依赖。前端 59 项测试、TypeScript 与 Next.js 生产构建通过。
+- **2026-08-19 V2-T5.4 大 schema 与并发回归**：metadata 请求新增单调 epoch，database/schema/table 的 A→B→A 乱序返回均不能覆盖最新状态或 cache，关闭/DDL 也会使旧请求失效。性能门禁验证 5000 次 cache 写入仍限制为 128 项、2000 表/16000 列 SQL namespace 在 250ms 内构建；双方言补全隔离回归通过。前端测试增至 65 项，Week 5 完成。
+- **2026-08-19 V2-T7.3 keepalive 配置落地**：高级设置新增连续失败阈值，启用状态、间隔和阈值均接入 `ssh-multihop`；新建连接默认 60s / 3 次，旧记录缺阈值时兼容补 3，运行时对 0 值兜底为 1。监控 task 从主动 `send_keepalive` 改为只读 `Handle::is_closed()`，避免固定 20s 探测改变用户设置的真实发包间隔；`just check` 全绿，含前端 66 项、ssh-multihop 8 项、app_lib 21 项测试。
+- **2026-08-19 V2-T7.2 手动幂等重连**：顶部、断链 banner 与连接右键菜单新增重连入口；后端按 connection_id 独立串行生命周期操作，重连前取消该连接查询并先关闭 pool 后 drop tunnel。open/reconnect 返回新 session_id，expected_session_id 防迟到命令关闭新会话，SSH 事件和查询结果分别用 session_id/query_id 拒绝旧写回；`just check` 全绿，前端测试增至 71 项、app_lib 增至 24 项。
+- **2026-08-19 V2-T7.1 SSH RTT 代码闭环**：每跳 session actor 独占 russh Handle，10 秒低频调用 SSH global-request 探测累计 RTT，2 秒超时；等待 ping 时优先处理 direct-tcpip，指标不阻塞数据库新连接。`ssh:hop-rtt` 以 connection_id/session_id 隔离旧采样，拓扑明确显示 SSH 毫秒/超时/不可用且不改变节点四态；`just check` 全绿（db-driver 26、ssh-multihop 8、app_lib 25、前端 74），真实多跳链路仍留 RC 人工验收。
 
 ## 已解决的阻碍
 

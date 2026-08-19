@@ -88,10 +88,12 @@ impl Default for SslConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdvancedConfig {
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub keep_alive_enabled: bool,
     #[serde(default = "default_keep_alive_interval_seconds")]
     pub keep_alive_interval_seconds: u64,
+    #[serde(default = "default_keep_alive_failure_threshold")]
+    pub keep_alive_failure_threshold: u64,
     #[serde(default = "default_true")]
     pub connect_timeout_enabled: bool,
     #[serde(default = "default_timeout_seconds")]
@@ -113,8 +115,9 @@ pub struct AdvancedConfig {
 impl Default for AdvancedConfig {
     fn default() -> Self {
         Self {
-            keep_alive_enabled: false,
+            keep_alive_enabled: true,
             keep_alive_interval_seconds: default_keep_alive_interval_seconds(),
+            keep_alive_failure_threshold: default_keep_alive_failure_threshold(),
             connect_timeout_enabled: true,
             connect_timeout_seconds: default_timeout_seconds(),
             read_timeout_enabled: false,
@@ -155,7 +158,11 @@ fn default_timeout_seconds() -> u64 {
 }
 
 fn default_keep_alive_interval_seconds() -> u64 {
-    240
+    60
+}
+
+fn default_keep_alive_failure_threshold() -> u64 {
+    3
 }
 
 /// 连接存储管理器 —— 负责连接配置的加密读写
@@ -292,8 +299,31 @@ mod tests {
         assert_eq!(conn.ssl.mode, "disabled");
         assert!(conn.advanced.connect_timeout_enabled);
         assert_eq!(conn.advanced.connect_timeout_seconds, 30);
-        assert_eq!(conn.advanced.keep_alive_interval_seconds, 240);
+        assert!(conn.advanced.keep_alive_enabled);
+        assert_eq!(conn.advanced.keep_alive_interval_seconds, 60);
+        assert_eq!(conn.advanced.keep_alive_failure_threshold, 3);
         assert!(conn.advanced.write_timeout_enabled);
+    }
+
+    #[test]
+    fn legacy_advanced_config_gets_new_keepalive_threshold_default() {
+        let raw = r#"{
+            "keepAliveEnabled": false,
+            "keepAliveIntervalSeconds": 240,
+            "connectTimeoutEnabled": true,
+            "connectTimeoutSeconds": 30,
+            "readTimeoutEnabled": false,
+            "readTimeoutSeconds": 30,
+            "writeTimeoutEnabled": true,
+            "writeTimeoutSeconds": 30,
+            "compressionEnabled": false,
+            "autoConnect": false
+        }"#;
+        let advanced: AdvancedConfig = serde_json::from_str(raw).unwrap();
+
+        assert!(!advanced.keep_alive_enabled);
+        assert_eq!(advanced.keep_alive_interval_seconds, 240);
+        assert_eq!(advanced.keep_alive_failure_threshold, 3);
     }
 
     #[test]

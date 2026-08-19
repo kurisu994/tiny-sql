@@ -2,7 +2,7 @@
 title: tiny-sql 待办开发计划
 version: 0.2.0-draft-2
 status: draft
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # tiny-sql 待办开发计划
@@ -87,9 +87,9 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 - [x] **V2-T5.1 [3h]** 前端已接入 `db_list_columns`，MySQL/PostgreSQL 表节点均可按需展开列，并展示类型、nullable、key、default 与 comment；收起或切换命名空间后旧请求不会覆盖当前树（FR-112）。
 - [x] **V2-T5.2 [3h]** 已增加按 connection/driver/database/schema/resource/table 完整分区的内存 LRU metadata cache（128 项、5 分钟 TTL）；schema/table/column 加载均接入 cache，提供手动刷新，并在重连、建库和成功 DDL 后按连接失效（FR-108）。
 - [x] **V2-T5.3 [5h]** CodeMirror 已按连接选择 MySQL/PostgreSQL dialect；原生 schema source 使用当前命名空间已加载的列元数据补全 column 与 alias，自定义 source 按 `target_id → target.id`、反向关系或同名 key/id 列生成可直接应用的 JOIN + ON 片段（FR-104）。
-- [ ] **V2-T5.4 [2h]** 回归大 schema 性能和并发请求，旧请求不得覆盖新选中 schema。
+- [x] **V2-T5.4 [2h]** metadata 请求使用单调 epoch，消除 database/schema/table 快速 A→B→A 时的 ABA 覆盖；回归覆盖三层乱序响应、双方言补全隔离、5000 项 cache 写入保持 128 项上限，以及 2000 表/16000 列 namespace 在 250ms 预算内构建。
 
-完成条件：DDL/手动刷新后 cache 可失效；大 schema 不阻塞 UI；两个 driver 的补全结果不串库。
+完成条件：DDL/手动刷新后 cache 可失效；大 schema 不阻塞 UI；两个 driver 的补全结果不串库。当前 65 项前端测试、TypeScript 与 Next.js 生产构建已覆盖并通过，Week 5 完成。
 
 ### Week 6：查询工作台（13h）
 
@@ -103,9 +103,9 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### Week 7：SSH 可观测性与连接恢复（10h）
 
-- [ ] **V2-T7.1 [3h]** 定义 SSH RTT 测量对象与噪声边界，拓扑显示采样值和超时状态，不冒充 ICMP 延迟（FR-105）。
-- [ ] **V2-T7.2 [3h]** 增加重连按钮与幂等恢复；重连前清理旧 pool、tunnel、query 和状态订阅（FR-110）。
-- [ ] **V2-T7.3 [2h]** 将 keepalive 间隔和失败阈值接入高级配置，默认保持 60s / 3 次。
+- [x] **V2-T7.1 [3h]** 使用 SSH global-request 测量累计到每跳 session 的协议 RTT，10s 低频采样、2s 超时；session actor 在等待 ping 时优先处理 direct-tcpip，采样不进入连接关键路径，超时不改变连接状态。拓扑明确标注“SSH”且 tooltip 说明非 ICMP/非单段延迟（FR-105）。
+- [x] **V2-T7.2 [3h]** 已在顶部、断链提示和连接右键菜单增加手动重连；后端按 connection_id 串行 open/close/reconnect，重连前取消该连接查询并按顺序关闭旧 pool/tunnel，每次打开生成 session_id 过滤旧事件，query_id 守卫拒绝旧结果回写（FR-110）。
+- [x] **V2-T7.3 [2h]** 将 keepalive 间隔和失败阈值接入高级配置，默认保持 60s / 3 次；旧记录缺少阈值时补 3，关闭配置不发送心跳，监控 task 改用只读 session 状态避免干扰设置间隔。
 - [ ] **V2-T7.4 [2h]** 根据反馈决定是否实施 KILL QUERY 四状态与 SSH 统一状态机；证据不足时保留现有公共契约。
 
 完成条件：断开中间跳后能看到 lost 并成功重连；RTT 不阻塞连接主链路；配置重启后生效；无旧 task / event 泄漏。

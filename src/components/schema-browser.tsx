@@ -55,6 +55,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     setSqlText,
     executeSql,
     cancelQuery,
+    reconnect,
     close,
   } = useSessionStore();
   const confirm = useConfirmStore((s) => s.confirm);
@@ -101,12 +102,22 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         >
           {connected ? "已连接" : status === "error" ? "连接失败" : "连接中"}
         </span>
-        <button
-          onClick={close}
-          className="ml-auto rounded-md border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
-        >
-          断开
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => reconnect(connection)}
+            disabled={status === "connecting"}
+            className="rounded-md border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+          >
+            重连
+          </button>
+          <button
+            onClick={close}
+            disabled={status === "connecting"}
+            className="rounded-md border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+          >
+            断开
+          </button>
+        </div>
       </div>
 
       <TopologyGraph
@@ -116,8 +127,17 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       />
 
       {lostHops.length > 0 && (
-        <div className="border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
-          第 {lostHops.map((h) => h + 1).join("、")} 跳 SSH 隧道已断开，请重连。
+        <div className="flex items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-1.5 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          <span>
+            第 {lostHops.map((h) => h + 1).join("、")} 跳 SSH 隧道已断开，请重连。
+          </span>
+          <button
+            type="button"
+            onClick={() => reconnect(connection)}
+            className="ml-auto rounded border border-red-300 px-2 py-0.5 font-medium hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900"
+          >
+            立即重连
+          </button>
         </div>
       )}
       {errorMsg && (

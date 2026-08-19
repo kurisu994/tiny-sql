@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { EyeIcon, EyeOffIcon } from "@/components/icons";
 import {
@@ -59,8 +59,9 @@ const DEFAULT_SSL: SslConfig = {
 };
 
 const DEFAULT_ADVANCED: AdvancedConfig = {
-  keepAliveEnabled: false,
-  keepAliveIntervalSeconds: 240,
+  keepAliveEnabled: true,
+  keepAliveIntervalSeconds: 60,
+  keepAliveFailureThreshold: 3,
   connectTimeoutEnabled: true,
   connectTimeoutSeconds: 30,
   readTimeoutEnabled: false,
@@ -451,6 +452,12 @@ function AdvancedSection({
         onEnabledChange={(checked) => set("keepAliveEnabled", checked)}
         onValueChange={(value) => set("keepAliveIntervalSeconds", value)}
       />
+      <AdvancedNumberValue
+        label="连续失败阈值（次）"
+        enabled={advanced.keepAliveEnabled}
+        value={advanced.keepAliveFailureThreshold}
+        onValueChange={(value) => set("keepAliveFailureThreshold", value)}
+      />
       <AdvancedNumberOption
         label="连接超时（秒）"
         enabled={advanced.connectTimeoutEnabled}
@@ -499,23 +506,27 @@ function AdvancedNumberOption({
   onEnabledChange: (checked: boolean) => void;
   onValueChange: (value: number) => void;
 }) {
+  const checkboxId = useId();
   return (
-    <label className="grid grid-cols-[1rem_minmax(0,1fr)_8rem] items-center gap-3 text-sm">
+    <div className="grid grid-cols-[1rem_minmax(0,1fr)_8rem] items-center gap-3 text-sm">
       <input
+        id={checkboxId}
         type="checkbox"
         checked={enabled}
         onChange={(e) => onEnabledChange(e.target.checked)}
         className="size-4 accent-primary"
       />
-      <span
+      <label
+        htmlFor={checkboxId}
         className={cn(
           "font-medium",
           !enabled && "text-muted-foreground",
         )}
       >
         {label}
-      </span>
+      </label>
       <input
+        aria-label={label}
         type="number"
         min={1}
         value={value}
@@ -523,7 +534,7 @@ function AdvancedNumberOption({
         onChange={(e) => onValueChange(normalizePositiveInt(e.target.value, value))}
         className="h-8 rounded-md border border-neutral-300 px-2 text-right disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-600 dark:bg-neutral-900"
       />
-    </label>
+    </div>
   );
 }
 
@@ -553,6 +564,40 @@ function AdvancedToggle({
         {label}
       </span>
     </label>
+  );
+}
+
+function AdvancedNumberValue({
+  label,
+  enabled,
+  value,
+  onValueChange,
+}: {
+  label: string;
+  enabled: boolean;
+  value: number;
+  onValueChange: (value: number) => void;
+}) {
+  const inputId = useId();
+  return (
+    <div className="grid grid-cols-[1rem_minmax(0,1fr)_8rem] items-center gap-3 text-sm">
+      <span aria-hidden="true" />
+      <label
+        htmlFor={inputId}
+        className={cn("font-medium", !enabled && "text-muted-foreground")}
+      >
+        {label}
+      </label>
+      <input
+        id={inputId}
+        type="number"
+        min={1}
+        value={value}
+        disabled={!enabled}
+        onChange={(e) => onValueChange(normalizePositiveInt(e.target.value, value))}
+        className="h-8 rounded-md border border-neutral-300 px-2 text-right disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-600 dark:bg-neutral-900"
+      />
+    </div>
   );
 }
 

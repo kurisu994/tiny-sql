@@ -79,6 +79,7 @@ pub fn run() {
             commands::connection::connection_delete,
             commands::connection::connection_test,
             commands::connection::connection_open,
+            commands::connection::connection_reconnect,
             commands::connection::connection_close,
             commands::query::db_list_databases,
             commands::query::db_list_schemas,

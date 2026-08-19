@@ -46,6 +46,7 @@ export default function Home() {
   const openId = useSessionStore((s) => s.openId);
   const activeConnection = useSessionStore((s) => s.activeConnection);
   const openConnection = useSessionStore((s) => s.open);
+  const reconnectConnection = useSessionStore((s) => s.reconnect);
   const closeConnection = useSessionStore((s) => s.close);
   const confirm = useConfirmStore((s) => s.confirm);
   const {
@@ -84,7 +85,9 @@ export default function Home() {
 
   // 连接 / 进入命令列界面：已连接到该连接则不重连，控制台已在右侧
   function openSession(c: StoredConnection) {
-    if (openId !== c.id) openConnection(c.id, undefined, c);
+    if (sessionStatus !== "connecting" && openId !== c.id) {
+      openConnection(c.id, undefined, c);
+    }
   }
 
   // 复制连接：克隆配置另存为「副本」，由用户再改名
@@ -233,6 +236,12 @@ export default function Home() {
                         onSelect={() => closeConnection()}
                       >
                         断开连接
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        disabled={!isOpen || connecting}
+                        onSelect={() => reconnectConnection(c)}
+                      >
+                        重连
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem

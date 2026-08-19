@@ -3,18 +3,18 @@
 //! 负责纯本地连接 CRUD 与测试。connection_test 支持可选多跳 SSH，并把
 //! SSL / 高级连接参数转换给 db-driver。
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use db_driver::{Driver, DriverKind, MySqlConnectSettings, MySqlTlsMode, PostgresConnectSettings};
 use serde::{Deserialize, Serialize};
 use ssh_multihop::{
-    HopStatusCallback, HopStatusEvent, HostKeyDecision, HostKeyQuery, HostKeyVerifier, SshAuth,
-    SshHop, TunnelContext,
+    HopRttCallback, HopRttEvent, HopRttSample, HopStatusCallback, HopStatusEvent, HostKeyDecision,
+    HostKeyQuery, HostKeyVerifier, KeepaliveConfig, SshAuth, SshHop, TunnelContext,
 };
 use tauri::{AppHandle, Emitter, State};
 
 use crate::config::store::{self, AdvancedConfig, SshConfig, SslConfig, StoredConnection};
-use crate::state::{ActiveDriver, AppState, OpenConnection};
+use crate::state::{ActiveDriver, ActiveQuery, AppState, OpenConnection};
 
 /// 前端传入的连接配置（create / test 用，不含 id 与 last_used_at）
 #[derive(Debug, Deserialize)]
@@ -115,7 +115,9 @@ pub async fn connection_test(
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
         let ctx = TunnelContext {
             status_cb: None,
+            rtt_cb: None,
             verifier: Some(build_verifier(&app, &state, test_id)),
+            keepalive: build_tunnel_keepalive(&input.advanced),
         };
         let tunnel = ssh_multihop::open(&hops, &input.host, input.port, &ctx)
             .await
@@ -200,6 +202,20 @@ fn build_connect_timeout(advanced: &AdvancedConfig) -> Option<Duration> {
         .then(|| Duration::from_secs(advanced.connect_timeout_seconds.max(1)))
 }
 
+/// 把持久化高级设置转换成独立 SSH crate 的 keepalive 参数。
+fn build_tunnel_keepalive(advanced: &AdvancedConfig) -> KeepaliveConfig {
+    if !advanced.keep_alive_enabled {
+        return KeepaliveConfig::disabled();
+    }
+    let failure_threshold = usize::try_from(advanced.keep_alive_failure_threshold)
+        .unwrap_or(usize::MAX)
+        .max(1);
+    KeepaliveConfig::enabled(
+        Duration::from_secs(advanced.keep_alive_interval_seconds.max(1)),
+        failure_threshold,
+    )
+}
+
 struct RuntimeDatabaseTarget<'a> {
     kind: DriverKind,
     host: &'a str,
@@ -257,10 +273,24 @@ fn non_empty_owned(value: &str) -> Option<String> {
 #[serde(rename_all = "camelCase")]
 struct HopStatusPayload {
     connection_id: String,
+    /// 每次成功打开前生成的新代号，隔离重连前后同 connection_id 的迟到事件。
+    session_id: String,
     hop_index: usize,
     /// "pending" / "connected" / "failed" / "lost"
     status: String,
     reason: Option<String>,
+}
+
+/// SSH 协议 RTT 采样事件载荷；数值为累计到该 session 的 global-request RTT。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HopRttPayload {
+    connection_id: String,
+    session_id: String,
+    hop_index: usize,
+    /// "measured" / "timeout" / "unavailable"
+    state: String,
+    rtt_ms: Option<f64>,
 }
 
 /// 打开一条已保存的连接：建立（可选）SSH 隧道 + 对应数据库连接池，存入注册表。
@@ -273,11 +303,55 @@ pub async fn connection_open(
     state: State<'_, AppState>,
     id: String,
     passphrase: Option<String>,
-) -> Result<(), String> {
-    // 已打开则幂等
-    if state.connections.lock().await.contains_key(&id) {
-        return Ok(());
+) -> Result<String, String> {
+    let lifecycle = state.connection_lifecycle(&id);
+    let _lifecycle = lifecycle.lock().await;
+    if let Some(existing) = state.connections.lock().await.get(&id) {
+        return Ok(existing.session_id.clone());
     }
+    open_connection_locked(&app, &state, &id, passphrase).await
+}
+
+/// 手动重连：按连接取消旧查询，关闭旧 pool/tunnel，再建立一个新 session。
+///
+/// `expected_session_id` 防止两个迟到的重连请求依次关闭彼此的新 session；不匹配时
+/// 直接返回当前 session，保持命令幂等。
+#[tauri::command]
+pub async fn connection_reconnect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    expected_session_id: Option<String>,
+    passphrase: Option<String>,
+) -> Result<String, String> {
+    let lifecycle = state.connection_lifecycle(&id);
+    let _lifecycle = lifecycle.lock().await;
+    let old = {
+        let mut connections = state.connections.lock().await;
+        if let (Some(expected), Some(current)) =
+            (expected_session_id.as_deref(), connections.get(&id))
+        {
+            if !expected_session_matches(&current.session_id, Some(expected)) {
+                return Ok(current.session_id.clone());
+            }
+        }
+        connections.remove(&id)
+    };
+    cancel_connection_queries(&state.queries, &id).await;
+    if let Some(old) = old {
+        old.close().await;
+    }
+    open_connection_locked(&app, &state, &id, passphrase).await
+}
+
+/// 生命周期锁内建立并注册连接；调用方必须先持有 `connection_lifecycle`。
+async fn open_connection_locked(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    id: &str,
+    passphrase: Option<String>,
+) -> Result<String, String> {
+    let session_id = uuid::Uuid::new_v4().to_string();
 
     // 取出目标连接配置（brief lock）
     let conn = {
@@ -292,29 +366,46 @@ pub async fn connection_open(
     // passphrase：本次传入优先，否则用会话缓存
     let effective_passphrase = passphrase
         .clone()
-        .or_else(|| state.passphrases.lock().unwrap().get(&id).cloned());
+        .or_else(|| state.passphrases.lock().unwrap().get(id).cloned());
 
     // 直连用真实 host:port；走隧道时换隧道的本地端口
     let (host, port, tunnel) = if conn.ssh.enabled {
         let hops = build_runtime_hops(&conn.ssh, effective_passphrase.as_deref())?;
         for hop_index in 0..hops.len() {
-            emit_hop_status(&app, &id, hop_index, "pending", None);
+            emit_hop_status(app, id, &session_id, hop_index, "pending", None);
         }
         let ctx = TunnelContext {
-            status_cb: Some(build_status_callback(app.clone(), id.clone())),
-            verifier: Some(build_verifier(&app, &state, id.clone())),
+            status_cb: Some(build_status_callback(
+                app.clone(),
+                id.to_string(),
+                session_id.clone(),
+            )),
+            rtt_cb: Some(build_rtt_callback(
+                app.clone(),
+                id.to_string(),
+                session_id.clone(),
+            )),
+            verifier: Some(build_verifier(app, state, id.to_string())),
+            keepalive: build_tunnel_keepalive(&conn.advanced),
         };
         let tunnel = match ssh_multihop::open(&hops, &conn.host, conn.port, &ctx).await {
             Ok(tunnel) => tunnel,
             Err(e) => {
                 if let Some(hop_index) = e.hop_index() {
-                    emit_hop_status(&app, &id, hop_index, "failed", Some(e.i18n_key()));
+                    emit_hop_status(
+                        app,
+                        id,
+                        &session_id,
+                        hop_index,
+                        "failed",
+                        Some(e.i18n_key()),
+                    );
                 }
                 return Err(e.i18n_key().to_string());
             }
         };
         for hop_index in 0..hops.len() {
-            emit_hop_status(&app, &id, hop_index, "connected", None);
+            emit_hop_status(app, id, &session_id, hop_index, "connected", None);
         }
         let addr = tunnel.local_addr();
         (addr.ip().to_string(), addr.port(), Some(tunnel))
@@ -334,36 +425,87 @@ pub async fn connection_open(
     })
     .await?;
     // 立即 ping 确认握手成功（隧道桥接 + 数据库认证）
-    Driver::ping(&driver)
-        .await
-        .map_err(|e| e.i18n_key().to_string())?;
+    if let Err(error) = Driver::ping(&driver).await {
+        Driver::close(&driver).await;
+        drop(tunnel);
+        return Err(error.i18n_key().to_string());
+    }
 
     // 成功：缓存本次 passphrase + 落注册表 + 刷新最近使用
     if let Some(pp) = passphrase {
-        state.passphrases.lock().unwrap().insert(id.clone(), pp);
+        state.passphrases.lock().unwrap().insert(id.to_string(), pp);
     }
-    state
-        .connections
-        .lock()
-        .await
-        .insert(id.clone(), OpenConnection { driver, tunnel });
+    state.connections.lock().await.insert(
+        id.to_string(),
+        OpenConnection {
+            driver,
+            tunnel,
+            session_id: session_id.clone(),
+        },
+    );
     let now = chrono::Utc::now().to_rfc3339();
-    let _ = state.store.lock().unwrap().touch_last_used(&id, now);
-    Ok(())
+    let _ = state.store.lock().unwrap().touch_last_used(id, now);
+    Ok(session_id)
 }
 
 /// 关闭一条活跃连接（先关 pool 再关隧道）。未打开时静默成功。
+/// `expected_session_id` 不匹配时说明这是旧 UI 操作，不能关闭重连后的新 session。
 #[tauri::command]
-pub async fn connection_close(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let conn = state.connections.lock().await.remove(&id);
+pub async fn connection_close(
+    state: State<'_, AppState>,
+    id: String,
+    expected_session_id: Option<String>,
+) -> Result<(), String> {
+    let lifecycle = state.connection_lifecycle(&id);
+    let _lifecycle = lifecycle.lock().await;
+    let conn = {
+        let mut connections = state.connections.lock().await;
+        if let (Some(expected), Some(current)) =
+            (expected_session_id.as_deref(), connections.get(&id))
+        {
+            if !expected_session_matches(&current.session_id, Some(expected)) {
+                return Ok(());
+            }
+        }
+        connections.remove(&id)
+    };
+    cancel_connection_queries(&state.queries, &id).await;
     if let Some(conn) = conn {
         conn.close().await;
     }
     Ok(())
 }
 
+fn expected_session_matches(current_session_id: &str, expected_session_id: Option<&str>) -> bool {
+    expected_session_id
+        .map(|expected| expected == current_session_id)
+        .unwrap_or(true)
+}
+
+/// 取消并移除一条连接名下的全部执行中查询。
+async fn cancel_connection_queries(
+    queries: &tokio::sync::Mutex<HashMap<String, ActiveQuery>>,
+    connection_id: &str,
+) -> usize {
+    let mut cancelled = 0;
+    queries.lock().await.retain(|_, query| {
+        if query.connection_id == connection_id {
+            query.cancel_token.cancel();
+            cancelled += 1;
+            false
+        } else {
+            true
+        }
+    });
+    cancelled
+}
+
 /// 构造 keepalive 断开回调：把 ssh-multihop 的状态事件转成 Tauri `ssh:hop-status` 事件。
-fn build_status_callback(app: AppHandle, connection_id: String) -> HopStatusCallback {
+fn build_status_callback(
+    app: AppHandle,
+    connection_id: String,
+    session_id: String,
+) -> HopStatusCallback {
     Arc::new(move |ev: HopStatusEvent| {
         let status = match ev.status {
             ssh_multihop::HopStatus::Lost => "lost",
@@ -371,6 +513,7 @@ fn build_status_callback(app: AppHandle, connection_id: String) -> HopStatusCall
         emit_hop_status(
             &app,
             &connection_id,
+            &session_id,
             ev.hop_index,
             status,
             ev.reason.as_deref(),
@@ -381,6 +524,7 @@ fn build_status_callback(app: AppHandle, connection_id: String) -> HopStatusCall
 fn emit_hop_status(
     app: &AppHandle,
     connection_id: &str,
+    session_id: &str,
     hop_index: usize,
     status: &str,
     reason: Option<&str>,
@@ -389,11 +533,33 @@ fn emit_hop_status(
         "ssh:hop-status",
         HopStatusPayload {
             connection_id: connection_id.to_string(),
+            session_id: session_id.to_string(),
             hop_index,
             status: status.to_string(),
             reason: reason.map(ToString::to_string),
         },
     );
+}
+
+/// 构造 RTT 回调；测量的是 SSH global-request 往返，不等同 ICMP 或单段延迟。
+fn build_rtt_callback(app: AppHandle, connection_id: String, session_id: String) -> HopRttCallback {
+    Arc::new(move |event: HopRttEvent| {
+        let (state, rtt_ms) = match event.sample {
+            HopRttSample::Measured(duration) => ("measured", Some(duration.as_secs_f64() * 1000.0)),
+            HopRttSample::TimedOut => ("timeout", None),
+            HopRttSample::Unavailable => ("unavailable", None),
+        };
+        let _ = app.emit(
+            "ssh:hop-rtt",
+            HopRttPayload {
+                connection_id: connection_id.clone(),
+                session_id: session_id.clone(),
+                hop_index: event.hop_index,
+                state: state.to_string(),
+                rtt_ms,
+            },
+        );
+    })
 }
 
 /// 构造 host key 校验器：known_hosts 命中比对，未知走 TOFU 弹窗，指纹变更硬拒绝。
@@ -469,6 +635,104 @@ mod tests {
             }
             SshAuth::Password(_) => panic!("应构造私钥认证"),
         }
+    }
+
+    #[test]
+    fn advanced_keepalive_is_forwarded_and_zero_values_are_clamped() {
+        let advanced = AdvancedConfig {
+            keep_alive_interval_seconds: 0,
+            keep_alive_failure_threshold: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_tunnel_keepalive(&advanced),
+            KeepaliveConfig::enabled(Duration::from_secs(1), 1)
+        );
+    }
+
+    #[test]
+    fn disabled_advanced_keepalive_is_forwarded() {
+        let advanced = AdvancedConfig {
+            keep_alive_enabled: false,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            build_tunnel_keepalive(&advanced),
+            KeepaliveConfig::disabled()
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnect_cancels_only_queries_from_target_connection() {
+        let target_token = tokio_util::sync::CancellationToken::new();
+        let other_token = tokio_util::sync::CancellationToken::new();
+        let queries = tokio::sync::Mutex::new(HashMap::from([
+            (
+                "q-target".to_string(),
+                ActiveQuery {
+                    connection_id: "c1".to_string(),
+                    cancel_token: target_token.clone(),
+                },
+            ),
+            (
+                "q-other".to_string(),
+                ActiveQuery {
+                    connection_id: "c2".to_string(),
+                    cancel_token: other_token.clone(),
+                },
+            ),
+        ]));
+
+        assert_eq!(cancel_connection_queries(&queries, "c1").await, 1);
+        assert!(target_token.is_cancelled());
+        assert!(!other_token.is_cancelled());
+        assert_eq!(queries.lock().await.len(), 1);
+        assert!(queries.lock().await.contains_key("q-other"));
+    }
+
+    #[test]
+    fn hop_status_payload_contains_runtime_session_id() {
+        let payload = HopStatusPayload {
+            connection_id: "c1".to_string(),
+            session_id: "session-new".to_string(),
+            hop_index: 1,
+            status: "lost".to_string(),
+            reason: Some("error.ssh.channel_dropped".to_string()),
+        };
+
+        let value = serde_json::to_value(payload).unwrap();
+        assert_eq!(value["connectionId"], "c1");
+        assert_eq!(value["sessionId"], "session-new");
+    }
+
+    #[test]
+    fn hop_rtt_payload_keeps_measurement_scope_fields() {
+        let payload = HopRttPayload {
+            connection_id: "c1".to_string(),
+            session_id: "session-new".to_string(),
+            hop_index: 2,
+            state: "measured".to_string(),
+            rtt_ms: Some(12.5),
+        };
+
+        let value = serde_json::to_value(payload).unwrap();
+        assert_eq!(value["connectionId"], "c1");
+        assert_eq!(value["sessionId"], "session-new");
+        assert_eq!(value["hopIndex"], 2);
+        assert_eq!(value["state"], "measured");
+        assert_eq!(value["rttMs"], 12.5);
+    }
+
+    #[test]
+    fn stale_expected_session_does_not_match_reconnected_session() {
+        assert!(expected_session_matches("session-new", None));
+        assert!(expected_session_matches("session-new", Some("session-new")));
+        assert!(!expected_session_matches(
+            "session-new",
+            Some("session-old")
+        ));
     }
 
     #[test]

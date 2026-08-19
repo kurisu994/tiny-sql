@@ -69,4 +69,15 @@ describe("MetadataCache", () => {
     expect(cache.get(auditKey)).toEqual(["events"]);
     expect(cache.get(otherConnectionKey)).toEqual(["users"]);
   });
+
+  it("大 schema 写入始终受 LRU 容量约束", () => {
+    const cache = new MetadataCache(128, 1000);
+    for (let index = 0; index < 5000; index += 1) {
+      cache.set(key(`database_${index}`), [`table_${index}`]);
+    }
+
+    expect(cache.size).toBe(128);
+    expect(cache.get(key("database_0"))).toBeUndefined();
+    expect(cache.get(key("database_4999"))).toEqual(["table_4999"]);
+  });
 });

@@ -9,6 +9,7 @@ import {
   SSH_EVENTS,
   isTauriRuntime,
   tofuApi,
+  type HopRttPayload,
   type HopStatusPayload,
   type TofuRequestPayload,
 } from "@/lib/tauri-api";
@@ -26,6 +27,7 @@ export function ConnectionDialogs() {
   const submitPassphrase = useSessionStore((s) => s.submitPassphrase);
   const cancelPassphrase = useSessionStore((s) => s.cancelPassphrase);
   const markHopStatus = useSessionStore((s) => s.markHopStatus);
+  const markHopRtt = useSessionStore((s) => s.markHopRtt);
 
   // TOFU 请求事件 → 入队
   useEffect(() => {
@@ -48,6 +50,17 @@ export function ConnectionDialogs() {
       un.then((f) => f());
     };
   }, [markHopStatus]);
+
+  // SSH 协议 RTT → 仅更新指标，不改变连接状态
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const un = listen<HopRttPayload>(SSH_EVENTS.hopRtt, (e) => {
+      markHopRtt(e.payload);
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [markHopRtt]);
 
   const current = tofuQueue[0] ?? null;
 

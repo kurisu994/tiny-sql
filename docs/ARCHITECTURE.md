@@ -278,7 +278,9 @@ src-tauri/src/
 
 `src/lib/metadata-cache.ts` 提供纯内存 LRU，默认最多 128 项、TTL 5 分钟。key 固定包含 `connectionId + driver + database + schema + resource + table?`，其中 resource 为 schemas / tables / columns；不能以同名 database/schema/table 复用其他连接或 driver 的结果。读取命中会提升最近使用顺序，过期项在读取时删除，进程退出后不保留。
 
-`session-store` 在 schema、table、column 按需加载时先查 cache；连接重开/关闭、新建 database 及成功执行 CREATE / ALTER / DROP / TRUNCATE / RENAME / COMMENT 后清除该连接的全部 metadata。树顶部“刷新”会失效当前 database 下的分区并重新请求 database、schema、table 和当前展开列；异步响应仍需核对当前 connection/database/schema/table，旧响应不得覆盖新选择。
+`session-store` 在 schema、table、column 按需加载时先查 cache；连接重开/关闭、新建 database 及成功执行 CREATE / ALTER / DROP / TRUNCATE / RENAME / COMMENT 后清除该连接的全部 metadata。树顶部“刷新”会失效当前 database 下的分区并重新请求 database、schema、table 和当前展开列。
+
+所有 metadata 操作共享单调递增的 request epoch。每次选择 database/schema/table、刷新、建库或 DDL 失效都会开始新 epoch 或使旧 epoch 失效；异步响应在写 UI 和 cache 前必须同时核对 epoch 与 connection/database/schema/table。仅比较名称不能防住 A→B→A：最早的 A 返回时名称再次相同，仍会覆盖最新 A；epoch 用于消除该 ABA 竞态。
 
 ### 2.5 Schema-aware SQL completion（v0.2）
 
@@ -314,7 +316,16 @@ pub enum SshAuth {
 /// 建立 / 运行隧道所需的回调上下文 — 保持 ssh-multihop 不依赖 Tauri
 pub struct TunnelContext {
     pub status_cb: Option<HopStatusCallback>,
+    pub rtt_cb: Option<HopRttCallback>,
     pub verifier: Option<HostKeyVerifier>,
+    pub keepalive: KeepaliveConfig,
+}
+
+/// 单次 SSH 协议 RTT 采样；多跳时是本机累计到对应 session 的往返时间
+pub enum HopRttSample {
+    Measured(std::time::Duration),
+    TimedOut,
+    Unavailable,
 }
 
 /// SSH 隧道错误 — 每个变体对应一个稳定的前端 i18n key
@@ -369,15 +380,18 @@ pub async fn open(
 
 1. **逐跳建立**：hops[0] 用 `TcpStream::connect` 直连；hops[1..] 用前一跳的 channel `into_stream()` 当 transport，给 `client::connect_stream` 用。
 2. **每跳认证**：`authenticate_hop()` 按 `auth_type` 分支调 password 或 publickey；publickey 自动协商 RSA 最佳 hash 算法。
-3. **session 全链路保活**：`SshTunnel._sessions: Vec<SharedSession>` 持有所有中间跳板的 session 引用，中间任何一跳 drop 都会导致下一跳的 channel stream 失活，所以必须整链保活。
-4. **本地 listener loop**：`tokio::spawn` 的循环里 accept → `tokio::spawn` 一个新 task → 在最后一跳 session 上开 direct-tcpip → `copy_bidirectional(socket, stream)`。
-5. **keepalive task**（**FR-014 新增**）：russh session 配置 `keepalive_interval=60s`、`keepalive_max=2`，由 russh 在第 3 次未响应时结束 session；每跳另起轻量监控 task 周期调用 `send_keepalive(false)` 探测 session 是否已经退出，失败后 emit `ssh:hop-status` `{status: "lost"}`。监控 task handle 存到 `SshTunnel.keepalive_tasks: Vec<JoinHandle<()>>`，drop 时一起 abort。v0.1 代码没有单独识别 channel drop / accept loop panic 并主动构造对应错误变体，这两类公共错误目前主要用于稳定错误契约与后续接线。
+3. **session actor 全链路保活**：russh `Handle` 含非 `Sync` receiver，每跳由一个 session actor 独占；调用方只持可 clone 的 `SharedSession` 命令端。`SshTunnel._sessions` 保持整条链的 actor 引用，中间任何一跳提前结束都会使后续 transport channel 失活。
+4. **本地 listener loop**：`tokio::spawn` 的循环里 accept → `tokio::spawn` 一个新 task → 通过最后一跳 actor 打开 direct-tcpip → `copy_bidirectional(socket, stream)`。
+5. **keepalive task**（**FR-014**）：`TunnelContext.keepalive` 把高级设置转换为 russh `keepalive_interval` / `keepalive_max`，默认 60s / 连续 3 次；关闭时 interval 为 `None`。每跳另起轻量监控 task 周期只读 actor 的 `closed` 原子标记，session 退出后 emit `ssh:hop-status` `{status: "lost"}`，不会额外发送心跳。监控 task handle 存到 `SshTunnel.keepalive_tasks`，drop 时一起 abort；`TunnelHandler::disconnected`、accept monitor 与每跳原子标记分别覆盖 channel/首跳/worker 故障、正常关闭抑制和重复事件去重。
+6. **RTT task**（**FR-105**）：仅在 `TunnelContext.rtt_cb` 存在时为每跳启动低频采样；actor 调 russh `send_ping()` 测量 SSH global-request 往返时间。探测等待期间用有偏 `select!` 优先处理 direct-tcpip 命令，避免 RTT 超时阻塞数据库新连接；采样结果只走独立指标事件，不改变连接四态。
 
 **known_hosts 存储**：自有 store，路径 `~/Library/Application Support/tiny-sql/known_hosts.json`。结构为 `{ "host:port": "sha256:xxx", ... }`。**不读、不写** `~/.ssh/known_hosts`（NFR-012）。
 
 **单测覆盖**：
 - `SshTunnelError::i18n_key()` 稳定性（公开 API 契约）
 - `error_reports_hop_index`：各变体带/不带 `hop_index` 的归因
+- `KeepaliveConfig`：默认值、关闭状态、0 值归一化与 russh `N-1` 阈值换算
+- `HopRttEvent`：按跳携带 measured / timeout / unavailable 采样，Tauri payload 保留 connection/session 边界
 - `expand_home_path` 各种 ~ 前缀
 
 ### 3.2 crates/db-driver
@@ -468,6 +482,7 @@ pub enum DriverError {
 pub struct OpenConnection {
     pub driver: ActiveDriver,
     pub tunnel: Option<SshTunnel>,
+    pub session_id: String,
 }
 
 impl OpenConnection {
@@ -487,7 +502,7 @@ impl OpenConnection {
 2. 若直连：直接使用连接配置里的 host/port
 3. 按 DriverKind 创建 MySqlDriver 或 PostgresDriver，包装为 ActiveDriver
 4. driver.ping().await? 确认隧道桥接 + 数据库认证成功
-5. AppState.connections.insert(id, OpenConnection { driver, tunnel })
+5. 生成新的 session_id，AppState.connections.insert(id, OpenConnection { driver, tunnel, session_id })
 ```
 
 ### 3.3 src-tauri/commands
@@ -501,8 +516,9 @@ impl OpenConnection {
 | `connection_list` | - | `Vec<StoredConnection>` | 按最近使用倒序；Week 2 简化返回完整配置（含明文 password）供前端编辑回显，落盘已整体加密 |
 | `connection_delete` | `id` | `()` | 加密落盘后删 |
 | `connection_test` | `(config, passphrase?)` | `()` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；passphrase 只用于本次测试，不持久化或缓存 |
-| `connection_open` | `(id, passphrase?)` | `()` | 建立持久连接，注册到 AppState；幂等，成功刷新最近使用 |
-| `connection_close` | `id` | `()` | 关闭并清理 |
+| `connection_open` | `(id, passphrase?)` | `session_id` | 建立持久连接，注册到 AppState；同 id 幂等返回当前 session，成功刷新最近使用 |
+| `connection_reconnect` | `(id, expected_session_id?, passphrase?)` | `session_id` | 仅在期望 session 仍为当前值时取消旧查询、关闭旧 pool/tunnel 并建立新 session |
+| `connection_close` | `(id, expected_session_id?)` | `()` | 仅关闭匹配 session；迟到关闭幂等忽略 |
 | `db_create_database` | `(id, name, charset?, collation?)` | `()` | MySQL 专属创建 database；其他 driver 返回不支持 |
 | `db_list_databases` | `id` | `Vec<DatabaseMeta>` | 列出 database |
 | `db_list_schemas` | `(id, database)` | `Vec<SchemaMeta>` | 列出 schema |
@@ -522,8 +538,10 @@ pub struct AppState {
     pub store: Mutex<ConnectionStore>,
     /// 已打开连接注册表（connection_id → driver + optional tunnel）
     pub connections: AsyncMutex<HashMap<String, OpenConnection>>,
-    /// 正在执行的 query 注册表（query_id → cancel_token）
-    pub queries: AsyncMutex<HashMap<String, CancellationToken>>,
+    /// 每个 connection_id 独立的生命周期互斥锁
+    connection_lifecycles: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    /// 正在执行的 query 注册表（query_id → connection_id + cancel_token）
+    pub queries: AsyncMutex<HashMap<String, ActiveQuery>>,
     /// SSH known_hosts store
     pub known_hosts: Arc<SshKnownHostsStore>,
     /// TOFU 决策 manager（前端弹窗响应回调通道）
@@ -604,7 +622,7 @@ v0.1 每跳的生命周期简化为 **4 态**（FR-015），与 `ssh:hop-status`
 - `pending → connected` 是首次建立的正常路径；任一跳建立失败（TCP 连不上 / 认证失败 / TOFU 拒绝）→ 该跳 `failed`，后续跳保持 `pending`。
 - `connected → lost` 是 FR-014 keepalive 检测出来的运行中断开。
 - `failed` 与 `lost` 都是红色，但视觉区分：failed = 静态红边、lost = 闪烁红边 + toast。
-- v0.1 **不做自动重连**：lost 后用户需手动「断开」再重新打开连接进入重连流程（UI 上的"重连"按钮暂未实现，见 §10.3 已知缺口）。
+- v0.2 仍**不做自动重连**；lost 后用户点击「重连」，显式触发清理与 pending → connected。重连不是新增隐式 reconnecting 状态，也不做指数退避。
 
 ### 4.3 错误模型
 
@@ -636,9 +654,9 @@ v0.1 每跳的生命周期简化为 **4 态**（FR-015），与 `ssh:hop-status`
 SshTunnel 建立时:
 
 ┌──────────────────────────────────────────────────────────────┐
-│ 1. 每跳 session 都用同一份 russh Config：                      │
+│ 1. 每跳 session 都用同一份 russh Config（以下为默认值）：        │
 │    keepalive_interval: Some(60s)                              │
-│    keepalive_max: 2   // 连续 2 次未收到数据即断                │
+│    keepalive_max: 2   // 第 3 次未收到数据即断                  │
 │    inactivity_timeout: Some(3600s)  // 空闲兜底                 │
 │    → russh 内置 keepalive 完成「60s×3≈180s」死链判定            │
 │      （russh 判据是 alive_timeouts > keepalive_max，            │
@@ -646,10 +664,10 @@ SshTunnel 建立时:
 │                                                              │
 │ 2. 每跳再 spawn 一个 keepalive 监控 task（spawn_keepalive_    │
 │    monitor，每 20s 轮询一次）：                                │
-│      guard.send_keepalive(false).await 是否 Err               │
+│      session.is_closed()  // 读取 actor 的 closed 原子标记      │
 │      → session 任务已退出（russh 判定断开）→ status_cb 上报     │
 │        HopStatus::Lost → src-tauri emit ssh:hop-status         │
-│      持锁极短，不阻塞末跳 accept loop 开 channel                │
+│      只读检查，不额外发心跳或干扰用户配置的间隔                   │
 └──────────────────────────────────────────────────────────────┘
 
 SshTunnel::drop():
@@ -657,8 +675,11 @@ SshTunnel::drop():
 ┌──────────────────────────────────────────────────────────────┐
 │ impl Drop for SshTunnel {                                     │
 │   fn drop(&mut self) {                                        │
-│     self.accept_task.abort();                                 │
+│     self.accept_abort.abort();                                │
+│     self.accept_monitor.abort();                              │
 │     for t in &self.keepalive_tasks { t.abort(); }            │
+│     for t in &self.rtt_tasks { t.abort(); }                  │
+│     for t in &self.session_tasks { t.abort(); }              │
 │   }                                                          │
 │ }                                                             │
 └──────────────────────────────────────────────────────────────┘
@@ -670,9 +691,18 @@ SshTunnel::drop():
 - 1 次失败即报会误报：弱网偶尔丢包、bastion 短暂 ratelimit 都会触发假 lost
 - 60s 间隔 + 连续 3 次失败（≈180s）才判定断开，平衡了"误报"和"感知速度"
 - 180s 感知边界仍远胜 DBeaver/TablePlus 的"下次 query 才发现"（NFR-003）
-- 死链判定交给 russh 内置 keepalive，自建 task 只做「发现 session 已死 → 上报」；文档第 4 版起与实现对齐
-- keepalive 间隔与失败阈值 v0.1 是常量，v0.2 做成可配置（见 [ROADMAP v0.2 工程](./ROADMAP.md#工程)）
-- v0.2 可加"连续 2 次失败"作为更稳重的策略
+- 死链判定交给 russh 内置 keepalive，自建 task 只做「发现 session 已死 → 上报」，不主动发包
+- v0.2 已把启用状态、间隔与失败阈值接入连接高级配置；新建和缺失整个高级配置的旧记录默认 60s / 3 次，已有显式值保持不变
+- 后端把 0 归一化为 1；阈值 N 按 russh 的 `alive_timeouts > keepalive_max` 换算为 `keepalive_max=N-1`
+
+### 4.4.1 SSH RTT 采样（FR-105）
+
+- **测量对象**：调用 russh `Handle::send_ping()`，等待 SSH global-request 回复；多跳中的每个数值是“本机累计到第 N 跳 SSH session”的协议 RTT，不是 ICMP RTT，也不能用相邻数值相减推导单段网络延迟。
+- **频率与超时**：隧道打开返回 1 秒后首次采样，之后每次完成再等待 10 秒；单次等待最多 2 秒。超时上报 `timeout`，session 已不可用则上报 `unavailable`。
+- **不阻塞主链路**：每跳 russh `Handle` 由 session actor 独占。actor 等待 ping 时用有偏 `select!` 优先处理 `OpenDirectTcpip` 命令，因此 sqlx 新建连接不必等待 RTT 回复或超时；同一 session 的重复探测直接返回 unavailable，避免堆积。
+- **不污染连接状态**：RTT 通过独立 `ssh:hop-rtt` 事件更新边指标，timeout / unavailable 不会把节点从 connected 改为 failed/lost；断链仍只由 FR-014 的运行期状态通道判定。
+- **零流量边界**：`TunnelContext.rtt_cb=None` 时不创建采样 task，`connection_test` 因而不会产生额外探测流量。
+- **生命周期**：`SshTunnel::drop` 先置 shutdown，再中止 accept monitor、keepalive、RTT 与 session actor tasks，避免后台任务或旧 session 事件泄漏。
 
 ### 4.5 与 sqlx 的桥接模式
 
@@ -708,7 +738,9 @@ sqlx::MySqlPool (max_connections = 5)
 **生命周期绑定**：
 
 - `src-tauri::state::OpenConnection` 同时持有 `driver: ActiveDriver` 和 `tunnel: Option<SshTunnel>`
-- `connection_close` 从注册表移除后调用 `OpenConnection::close()`：先 `driver.close().await`（关 pool），再 `drop(tunnel)`（关 listener / session）
+- 同 connection_id 的 open/close/reconnect 与 query 注册使用同一生命周期锁；不同连接不互相阻塞
+- `connection_close/reconnect` 先取消并移除该连接的 query token，再从注册表移除并调用 `OpenConnection::close()`：先 `driver.close().await`（关 pool），再 `drop(tunnel)`（关 listener / session）
+- 每次成功打开生成 `session_id`；重连与关闭携带 expected_session_id，旧命令和旧 `ssh:hop-status` 事件不能作用于新 session
 - 异常 drop 时字段顺序兜底：`driver` 声明在前先 drop，`tunnel` 在后
 - 反过来不行：tunnel 先 drop 会导致 listener 关，pool 里的连接报 EOF，sqlx 会刷一堆错误日志
 
@@ -875,7 +907,8 @@ ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握�
 | Event 名 | Payload | 触发时机 | 前端处理 |
 |---|---|---|---|
 | `ssh:tofu-request` | `{connectionId, hopIndex, host, port, fingerprint}` | 后端遇到未知 host key | 弹 `SshTofuDialog` |
-| `ssh:hop-status` | `{connectionId, hopIndex, status, reason?}`（status ∈ pending/connected/failed/lost） | 隧道每跳状态变化 | zustand store 更新 hop 状态 → 拓扑节点重渲染 |
+| `ssh:hop-status` | `{connectionId, sessionId, hopIndex, status, reason?}`（status ∈ pending/connected/failed/lost） | 隧道每跳状态变化 | zustand 只接收当前 session 事件 → 拓扑节点重渲染 |
+| `ssh:hop-rtt` | `{connectionId, sessionId, hopIndex, state, rttMs}`（state ∈ measured/timeout/unavailable） | 每跳低频 SSH 协议探测完成 | zustand 只接收当前 session 事件 → 更新进入该跳的边指标，不改变节点状态 |
 | `query:result-chunk` | `{query_id, rows_partial, done: false}` | （v0.2 才用）流式结果 | v0.1 不用此 event，query 全量返回 |
 | `app:log` | `{level, message, target}` | 后端日志同步（tauri-plugin-log） | DevTools console |
 | `app:check-update` | `{}` | macOS 应用菜单「Check for Updates...」 | 触发手动检查更新 |
@@ -888,6 +921,8 @@ type SshHopStatus = "pending" | "connected" | "failed" | "lost";
 interface SshHopStatusPayload {
   /** 哪个连接的哪一跳 */
   connectionId: string;
+  /** 每次打开的新代号；重连后拒绝旧事件 */
+  sessionId: string;
   hopIndex: number;        // 0-based
 
   /** 状态枚举（v0.1 简化 4 态，FR-015） */
@@ -907,7 +942,25 @@ interface SshHopStatusPayload {
 | `failed` | 红色 | 静态红 | tooltip 显示 reason |
 | `lost` | 红色 | **闪烁红**（区别 failed） | toast + tooltip 显示 reason |
 
-### 7.4 连接配置 schema（落盘前）
+### 7.4 ssh:hop-rtt 详细 schema
+
+```typescript
+type SshHopRttState = "measured" | "timeout" | "unavailable";
+
+interface SshHopRttPayload {
+  connectionId: string;
+  /** 每次打开的新代号；重连后拒绝旧采样 */
+  sessionId: string;
+  hopIndex: number;        // 0-based
+  state: SshHopRttState;
+  /** 仅 state=measured 时有值；毫秒，可包含小数 */
+  rttMs: number | null;
+}
+```
+
+前端把采样显示在“进入对应 SSH hop”的边上：低于 1ms 显示 `SSH <1 ms`，其余四舍五入为整数毫秒，超时和不可用分别显示 `SSH 超时` / `SSH 不可用`。tooltip 必须说明这是累计 SSH 协议 RTT，不是 ICMP 或单段延迟。payload 的 `connectionId + sessionId` 必须同时匹配当前连接；迟到的旧 session 采样直接丢弃。
+
+### 7.5 连接配置 schema（落盘前）
 
 与 `StoredConnection` 序列化一致（扁平 camelCase，整体文件加密后明文落盘）：
 
@@ -952,6 +1005,7 @@ interface SslConfig {
 interface AdvancedConfig {
   keepAliveEnabled: boolean;
   keepAliveIntervalSeconds: number;
+  keepAliveFailureThreshold: number;
   connectTimeoutEnabled: boolean;
   connectTimeoutSeconds: number;
   readTimeoutEnabled: boolean;
@@ -1057,11 +1111,11 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 - **Playwright E2E 已推迟**（决策记录见 memory-bank）：原计划 Week 2 架齐 `playwright`（Tauri 2 模式）+ `vitest`，CI 跑 playwright headless；当前仓库无 playwright 依赖，前端单测（vitest）已覆盖 store / sql-guard / sql-editor / tauri-api，组件层仅 ConnectionForm 有冒烟渲染测试。
 - dogfooding（FR-041）作为补充 E2E 验证。
 
-**已知 UI 缺口**（需求已有但 v0.1 未实现，推 v0.2）：
+**v0.1 历史 UI 缺口在 v0.2 的处理状态**：
 
-- `db_list_columns` 前后端已实现，但前端 schema 树未展示列清单 UI（点表只进数据 tab）
+- schema 树列清单已由 V2-T5.1 完成
 - 结果表格列宽固定（`minmax(140px, 260px)`），**列宽拖拽未实现**（FR-021 验收项）
-- 隧道 lost 后 UI 无「重连」按钮，需先「断开」再重新打开连接（FR-014/FR-026 验收项）
+- 隧道 lost 后的手动幂等「重连」已由 V2-T7.2 完成
 - 语言下拉框未实现（FR-030 验收项）；UI 固定全中文，静态 `ERROR_ZH` map 翻译
 
 ---
@@ -1097,7 +1151,8 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 | hop | jump / bastion | 一跳 SSH 节点 |
 | TOFU | first-use trust | Trust On First Use |
 | direct-tcpip | port forwarding | SSH 协议标准 channel 类型 |
-| keepalive | heartbeat | russh 的 `send_keepalive()` |
+| keepalive | heartbeat | russh 按配置自动发送的保活 global request |
+| SSH RTT | protocol round-trip | russh `send_ping()` 测得的累计 session 往返时间，非 ICMP |
 | TunnelLost | dead tunnel | 已建立隧道因 keepalive 失败而失活 |
 
 ## 附录 B：与设计文档的对齐

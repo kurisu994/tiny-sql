@@ -77,7 +77,9 @@ tiny-sql/
 - `connection_test` 的 passphrase 是独立瞬时参数，只用于本次 SSH 私钥握手；不得写入 `ConnectionInput`、持久化配置或正式连接的会话缓存。
 - 与具体跳相关的 `SshTunnelError` 变体带 `hop_index: usize`；`NoHops` / `LocalListenFailed` 返回 `None`。Tauri command 用 `hop_index()` emit 拓扑状态，错误返回值只暴露稳定 i18n key。
 - 公共类型/函数加中文 doc comment。
-- 隧道 `Drop` 里 abort 所有 keepalive task 和 accept task，防 leak。
+- russh `Handle` 含非 `Sync` receiver，每跳必须由单一 session actor 独占；RTT 等待期间优先处理 `direct-tcpip` 命令，禁止让指标采样阻塞数据库连接主链路。
+- RTT 只能描述为“本机累计到第 N 跳 SSH session 的 global-request 往返时间”，不是 ICMP 或可相减的单段延迟；timeout/unavailable 只更新指标，不改变连接四态。`rtt_cb=None` 时不得产生探测流量。
+- 隧道 `Drop` 里 abort accept monitor、keepalive、RTT 和 session actor tasks，防 leak。
 - 运行期断链按首跳 `tunnel_lost`、嵌套跳 `channel_dropped`、accept worker `accept_loop_died` 分类；正常 drop 先置 shutdown，单跳用原子标记去重。
 
 **前端**
@@ -85,6 +87,8 @@ tiny-sql/
 - `"use client"` 组件 + `invoke<T>()` 调 command；i18n key → 中文映射（v0.1 用静态 `ERROR_ZH` map，完整 i18next runtime 留英文 UI 时接入）。
 - 状态用 zustand；拓扑图用纯 CSS 静态布局；结果表格用 `react-virtuoso` 虚拟滚动。
 - schema metadata cache 只能是进程内 LRU，key 必须包含 connection/driver/database/schema/resource/table 完整边界；重连、建库、成功 DDL 和手动刷新必须失效，异步旧响应不得覆盖当前命名空间。
+- 同一 connection_id 的 open/close/reconnect 与 query 注册必须共用生命周期锁；不同连接使用独立锁。重连前按 connection_id 取消查询并先关 pool 后关 tunnel，每次打开生成 session_id，旧 query_id 结果和旧 session 事件不得写回。
+- metadata 异步返回除核对 connection/database/schema/table 外必须核对单调 request epoch；仅比较当前名称无法防住 A→B→A 的 ABA 覆盖。
 - CodeMirror 必须按连接 driver 使用 MySQL/PostgreSQL dialect；column/alias 复用原生 schema completion，JOIN 候选只基于已加载实际列的保守命名启发式，不得伪造 FOREIGN KEY 关系。
 - UI 组件库用 **shadcn/ui**（radix base，组件源码落 `src/components/ui/`，用 `cn()` 合并 className）：新建/编辑表单用 `Dialog`、右键菜单用 `ContextMenu`、二次确认用 `AlertDialog`；确认统一走全局命令式 `confirm-store`（`await confirm({...})`）替代 `window.confirm`。
 
@@ -112,7 +116,8 @@ tiny-sql/
 - ❌ **不向前端泄露原始 Rust 错误** —— 必须走 i18n key。
 - ❌ **不上传业务数据** —— 无遥测/错误上报；业务通信只访问用户配置的 SSH/数据库目标，自动更新只访问 GitHub Release 正式版清单。
 - ❌ **数据库设计不定义 FOREIGN KEY**（全局规则）—— 关联由代码与索引控制。
-- ❌ **keepalive 不要 30s/1 次即报** —— 用 60s + 连续 3 次，防误报。
+- ❌ **keepalive 默认值不要 30s/1 次即报** —— 默认用 60s + 连续 3 次，防误报；运行时只读监控不得额外发心跳干扰用户设置的间隔。
+- ❌ **不把 SSH RTT 冒充网络分段延迟** —— 仅显示累计 SSH 协议探测值；不得相减、不得用超时直接驱动 failed/lost。
 - ❌ **不把暗色切成 `.dark` class 策略** —— 保持 Tailwind v4 默认 `prefers-color-scheme`（跟随系统），shadcn 主题变量在 `@media` 下随系统切换，避免现有满屏 `dark:` 工具类失效。
 
 相关：[[techContext]] · [[productContext]] · [[activeContext]]

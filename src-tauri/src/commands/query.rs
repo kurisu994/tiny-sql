@@ -12,7 +12,7 @@ use tauri::State;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::state::{ActiveDriver, AppState};
+use crate::state::{ActiveDriver, ActiveQuery, AppState};
 
 /// 查询命令返回给前端的安全错误载荷，只包含稳定 key 与可选行号。
 #[derive(Debug, Serialize)]
@@ -150,16 +150,25 @@ pub async fn db_query(
     row_limit: Option<u32>,
     allow_write: Option<bool>,
 ) -> Result<RowSet, QueryCommandError> {
-    let driver = driver_of(&state, &id)
-        .await
-        .map_err(QueryCommandError::from_key)?;
     let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let token = CancellationToken::new();
-    state
-        .queries
-        .lock()
-        .await
-        .insert(query_id.clone(), token.clone());
+    // 与 close/reconnect 串行化“取 driver + 注册 token”：这样重连要么能看到并
+    // 取消本查询，要么查询取得的就是新 session driver，不会落进两个阶段之间。
+    let (driver, token) = {
+        let lifecycle = state.connection_lifecycle(&id);
+        let _lifecycle = lifecycle.lock().await;
+        let driver = driver_of(&state, &id)
+            .await
+            .map_err(QueryCommandError::from_key)?;
+        let token = CancellationToken::new();
+        state.queries.lock().await.insert(
+            query_id.clone(),
+            ActiveQuery {
+                connection_id: id,
+                cancel_token: token.clone(),
+            },
+        );
+        (driver, token)
+    };
 
     let result = Driver::query(
         &driver,
@@ -180,8 +189,8 @@ pub async fn db_query(
 /// 取消正在执行的 SQL。若 query 已完成，幂等成功。
 #[tauri::command]
 pub async fn db_query_cancel(state: State<'_, AppState>, query_id: String) -> Result<(), String> {
-    if let Some(token) = state.queries.lock().await.get(&query_id) {
-        token.cancel();
+    if let Some(query) = state.queries.lock().await.get(&query_id) {
+        query.cancel_token.cancel();
     }
     Ok(())
 }

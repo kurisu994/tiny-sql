@@ -8,8 +8,9 @@
 //! - 本 crate **不依赖 Tauri**，方便未来独立 publish 到 crates.io。运行期需要回调
 //!   到上层（keepalive 断开通知、host key 校验）的地方，统一用 [`TunnelContext`]
 //!   注入闭包，绝不引用 `tauri::*`。
-//! - keepalive 走 russh 内置机制（[`KEEPALIVE_INTERVAL`] + [`KEEPALIVE_MAX_MISSED`]），
-//!   每跳再起一个监控 task 探测 session 是否已断，断开经 [`HopStatusCallback`] 上报。
+//! - keepalive 走 russh 内置机制（默认 60s / 连续 3 次），间隔与失败阈值由
+//!   [`KeepaliveConfig`] 配置；每跳再起一个只读监控 task 探测 session 是否已断，
+//!   断开经 [`HopStatusCallback`] 上报。
 //! - host key 校验（known_hosts + TOFU）由上层经 [`TunnelContext::verifier`] 注入；
 //!   不注入时接受任意 key，仅限自动化测试等受信环境使用。
 //!
@@ -18,6 +19,7 @@
 
 use russh::client::{self, AuthResult, Config, DisconnectReason, Handle, Handler};
 use russh::keys::{load_secret_key, ssh_key, PrivateKeyWithHashAlg};
+use russh::Channel;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -26,10 +28,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, JoinHandle};
 
 /// SSH 隧道空闲超时（russh 心跳与断连判定的兜底）。
@@ -37,15 +39,23 @@ use tokio::task::{AbortHandle, JoinHandle};
 /// 所以活跃会话不会被它误杀，仅用于彻底空闲的兜底回收。
 const TUNNEL_INACTIVITY: Duration = Duration::from_secs(3600);
 
-/// keepalive 发包间隔（russh 内置 keepalive）。
-const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
+/// 默认 keepalive 发包间隔（russh 内置 keepalive）。
+const DEFAULT_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(60);
 
-/// 连续多少次 keepalive 未响应即判定该跳断开（≈ `KEEPALIVE_INTERVAL` × 该值 = 180s）。
-/// 取 3 而非 1，是为了容忍弱网 / bastion ratelimit 的偶发丢包，避免误报（FR-014）。
-const KEEPALIVE_MAX_MISSED: usize = 3;
+/// 默认连续失败阈值（≈ 60s × 3 = 180s）。
+const DEFAULT_KEEPALIVE_FAILURE_THRESHOLD: usize = 3;
 
 /// 监控 task 轮询 session 存活的间隔——探测 session 任务是否已因 keepalive 超时退出。
 const KEEPALIVE_MONITOR_POLL: Duration = Duration::from_secs(20);
+
+/// SSH 协议 RTT 采样间隔；低频采样避免给多跳堡垒机制造额外噪声。
+const RTT_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// 首次采样延迟；隧道和数据库握手完成后再开始，不进入连接关键路径。
+const RTT_INITIAL_DELAY: Duration = Duration::from_secs(1);
+
+/// 单次 SSH global-request 探测超时；超时仅更新指标，不改变连接状态。
+const RTT_SAMPLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// 一跳 SSH 节点配置
 #[derive(Debug, Clone)]
@@ -65,6 +75,47 @@ pub enum SshAuth {
         path: String,
         passphrase: Option<String>,
     },
+}
+
+/// SSH keepalive 运行参数。
+///
+/// `interval=None` 表示关闭 keepalive；`failure_threshold` 表示连续多少次未响应后
+/// 判定 session 断开。阈值会按 russh 的 `alive_timeouts > keepalive_max` 语义换算。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeepaliveConfig {
+    pub interval: Option<Duration>,
+    pub failure_threshold: usize,
+}
+
+impl KeepaliveConfig {
+    /// 构造启用状态；间隔与失败阈值最小都按 1 处理。
+    pub fn enabled(interval: Duration, failure_threshold: usize) -> Self {
+        Self {
+            interval: Some(interval.max(Duration::from_secs(1))),
+            failure_threshold: failure_threshold.max(1),
+        }
+    }
+
+    /// 构造关闭状态。
+    pub fn disabled() -> Self {
+        Self {
+            interval: None,
+            failure_threshold: DEFAULT_KEEPALIVE_FAILURE_THRESHOLD,
+        }
+    }
+
+    fn russh_max_missed(self) -> usize {
+        self.failure_threshold.max(1).saturating_sub(1)
+    }
+}
+
+impl Default for KeepaliveConfig {
+    fn default() -> Self {
+        Self::enabled(
+            DEFAULT_KEEPALIVE_INTERVAL,
+            DEFAULT_KEEPALIVE_FAILURE_THRESHOLD,
+        )
+    }
 }
 
 /// SSH 隧道错误 —— 每个变体对应一个稳定的前端 i18n key，且尽量带 `hop_index`
@@ -175,6 +226,27 @@ pub enum HopStatus {
 /// ssh-multihop 自身**不依赖 Tauri**，故用闭包解耦。
 pub type HopStatusCallback = Arc<dyn Fn(HopStatusEvent) + Send + Sync>;
 
+/// 一次 SSH 协议探测结果。
+///
+/// 多跳时每个值是“从本机累计到该 SSH session”的 global-request 往返时间，
+/// 不是 ICMP RTT，也不能相减后当作单段网络延迟。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HopRttSample {
+    Measured(Duration),
+    TimedOut,
+    Unavailable,
+}
+
+/// 某一跳的 SSH 协议 RTT 采样事件。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HopRttEvent {
+    pub hop_index: usize,
+    pub sample: HopRttSample,
+}
+
+/// RTT 采样回调；由上层注入事件总线，None 表示不启动采样 task。
+pub type HopRttCallback = Arc<dyn Fn(HopRttEvent) + Send + Sync>;
+
 /// host key 校验请求 —— 传给上层注入的 [`HostKeyVerifier`]。
 /// 只携带预计算的指纹字符串，**不暴露 russh / ssh_key 类型**，让上层无需依赖 SSH 库。
 #[derive(Debug, Clone)]
@@ -208,9 +280,13 @@ pub type HostKeyVerifier = Arc<
 pub struct TunnelContext {
     /// 跳状态回调（keepalive 断开等）；None = 不上报。
     pub status_cb: Option<HopStatusCallback>,
+    /// SSH 协议 RTT 回调；None 时不产生额外探测流量。
+    pub rtt_cb: Option<HopRttCallback>,
     /// host key 校验器；None = 接受任意 key，仅限自动化测试等受信环境，
     /// 应用内的连接路径（含测试连接）一律注入。
     pub verifier: Option<HostKeyVerifier>,
+    /// russh keepalive 参数；默认 60s / 连续 3 次。
+    pub keepalive: KeepaliveConfig,
 }
 
 /// 整条隧道共享的运行期上报状态。
@@ -262,8 +338,163 @@ impl SessionRuntimeReporter {
     }
 }
 
-/// `Handle` 含 `UnboundedReceiver` 不是 Sync，跨任务共享需走 Mutex
-type SharedSession = Arc<TokioMutex<Handle<TunnelHandler>>>;
+type DirectTcpipChannel = Channel<client::Msg>;
+
+enum SessionCommand {
+    OpenDirectTcpip {
+        host: String,
+        port: u32,
+        reply: oneshot::Sender<Result<DirectTcpipChannel, String>>,
+    },
+    ProbeRtt {
+        timeout: Duration,
+        reply: oneshot::Sender<HopRttSample>,
+    },
+}
+
+/// `Handle` 含非 Sync receiver，由单一 actor 独占；调用方只持可 Clone 的命令端。
+/// RTT 等待在 actor 内用 `select!` 与 channel-open 命令并行，避免探测阻塞主链路。
+#[derive(Clone)]
+struct SharedSession {
+    commands: mpsc::Sender<SessionCommand>,
+    closed: Arc<AtomicBool>,
+}
+
+impl SharedSession {
+    async fn open_direct_tcpip(&self, host: &str, port: u32) -> Result<DirectTcpipChannel, String> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(SessionCommand::OpenDirectTcpip {
+                host: host.to_string(),
+                port,
+                reply,
+            })
+            .await
+            .map_err(|_| "SSH session actor 已停止".to_string())?;
+        response
+            .await
+            .map_err(|_| "SSH session actor 未返回 channel".to_string())?
+    }
+
+    async fn probe_rtt(&self, timeout: Duration) -> HopRttSample {
+        let (reply, response) = oneshot::channel();
+        if self
+            .commands
+            .send(SessionCommand::ProbeRtt { timeout, reply })
+            .await
+            .is_err()
+        {
+            return HopRttSample::Unavailable;
+        }
+        response.await.unwrap_or(HopRttSample::Unavailable)
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+}
+
+fn spawn_session_actor(handle: Handle<TunnelHandler>) -> (SharedSession, JoinHandle<()>) {
+    let (commands, mut receiver) = mpsc::channel(32);
+    let closed = Arc::new(AtomicBool::new(false));
+    let closed_for_task = closed.clone();
+    let task = tokio::spawn(async move {
+        let mut closed_poll = tokio::time::interval(Duration::from_secs(1));
+        closed_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                command = receiver.recv() => {
+                    let Some(command) = command else { break };
+                    match command {
+                        SessionCommand::OpenDirectTcpip { host, port, reply } => {
+                            let result = open_direct_tcpip(&handle, &host, port).await;
+                            let _ = reply.send(result);
+                        }
+                        SessionCommand::ProbeRtt { timeout, reply } => {
+                            if !run_rtt_probe(&handle, &mut receiver, &mut closed_poll, timeout, reply).await {
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ = closed_poll.tick() => {
+                    if handle.is_closed() {
+                        break;
+                    }
+                }
+            }
+        }
+        closed_for_task.store(true, Ordering::Release);
+    });
+    (SharedSession { commands, closed }, task)
+}
+
+async fn open_direct_tcpip(
+    handle: &Handle<TunnelHandler>,
+    host: &str,
+    port: u32,
+) -> Result<DirectTcpipChannel, String> {
+    handle
+        .channel_open_direct_tcpip(host, port, "127.0.0.1", 0)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// 在等待 ping 回复时继续优先处理 direct-tcpip，RTT 不占住 session 主链路。
+/// 返回 false 表示 actor 应退出。
+async fn run_rtt_probe(
+    handle: &Handle<TunnelHandler>,
+    receiver: &mut mpsc::Receiver<SessionCommand>,
+    closed_poll: &mut tokio::time::Interval,
+    timeout: Duration,
+    reply: oneshot::Sender<HopRttSample>,
+) -> bool {
+    let started = Instant::now();
+    let ping = handle.send_ping();
+    tokio::pin!(ping);
+    let deadline = tokio::time::sleep(timeout);
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            biased;
+            command = receiver.recv() => {
+                match command {
+                    Some(SessionCommand::OpenDirectTcpip { host, port, reply }) => {
+                        let result = open_direct_tcpip(handle, &host, port).await;
+                        let _ = reply.send(result);
+                    }
+                    Some(SessionCommand::ProbeRtt { reply, .. }) => {
+                        let _ = reply.send(HopRttSample::Unavailable);
+                    }
+                    None => {
+                        let _ = reply.send(HopRttSample::Unavailable);
+                        return false;
+                    }
+                }
+            }
+            result = &mut ping => {
+                // russh 的 send_ping 会忽略 oneshot 被关闭；需同时检查 session sender。
+                let sample = if result.is_ok() && !handle.is_closed() {
+                    HopRttSample::Measured(started.elapsed())
+                } else {
+                    HopRttSample::Unavailable
+                };
+                let _ = reply.send(sample);
+                return true;
+            }
+            _ = &mut deadline => {
+                let _ = reply.send(HopRttSample::TimedOut);
+                return true;
+            }
+            _ = closed_poll.tick() => {
+                if handle.is_closed() {
+                    let _ = reply.send(HopRttSample::Unavailable);
+                    return false;
+                }
+            }
+        }
+    }
+}
 
 /// russh 客户端 handler：每跳一个，承载该跳的 host key 校验。
 ///
@@ -342,6 +573,10 @@ pub struct SshTunnel {
     accept_monitor: JoinHandle<()>,
     /// 每跳一个 keepalive 监控 task，drop 时一起 abort，防 leak
     keepalive_tasks: Vec<JoinHandle<()>>,
+    /// 每跳一个 RTT 采样 task；未注入回调时为空。
+    rtt_tasks: Vec<JoinHandle<()>>,
+    /// 每跳一个 session actor，负责串行 russh Handle 命令并让 RTT 等待不挡主链路。
+    session_tasks: Vec<JoinHandle<()>>,
     /// 持有所有跳板 session 引用直到 drop；中间跳板若提前 drop，
     /// 派生在其上的下一跳 channel stream 会失活，因此必须整链保活
     _sessions: Vec<SharedSession>,
@@ -362,6 +597,12 @@ impl Drop for SshTunnel {
         self.accept_abort.abort();
         self.accept_monitor.abort();
         for task in &self.keepalive_tasks {
+            task.abort();
+        }
+        for task in &self.rtt_tasks {
+            task.abort();
+        }
+        for task in &self.session_tasks {
             task.abort();
         }
     }
@@ -386,16 +627,10 @@ pub async fn open(
         return Err(SshTunnelError::NoHops);
     }
 
-    // 配 russh 内置 keepalive：每 60s 发一次，连续 KEEPALIVE_MAX_MISSED 次未收到
-    // 任意数据即断开（russh 判据是 alive_timeouts > keepalive_max，故 max 取 MISSED-1）。
-    let config = Arc::new(Config {
-        inactivity_timeout: Some(TUNNEL_INACTIVITY),
-        keepalive_interval: Some(KEEPALIVE_INTERVAL),
-        keepalive_max: KEEPALIVE_MAX_MISSED.saturating_sub(1),
-        ..Default::default()
-    });
+    let config = Arc::new(build_russh_config(ctx.keepalive));
 
     let mut sessions: Vec<SharedSession> = Vec::with_capacity(hops.len());
+    let mut session_tasks = Vec::with_capacity(hops.len());
     let shutdown = Arc::new(AtomicBool::new(false));
     let runtime_context = RuntimeReportContext {
         status_cb: ctx.status_cb.clone(),
@@ -422,28 +657,19 @@ pub async fn open(
         first_reporter.clone(),
     )
     .await?;
-    sessions.push(Arc::new(TokioMutex::new(current)));
+    let (current, session_task) = spawn_session_actor(current);
+    sessions.push(current);
+    session_tasks.push(session_task);
     runtime_reporters.push(first_reporter);
 
     // 第 2..N 跳：在前一跳 session 上开 direct-tcpip 到下一跳 SSH 端口，
     // 把 channel stream 作为下一跳 session 的 transport（等效 OpenSSH ProxyJump）
     for (hop_index, next_hop) in hops.iter().enumerate().skip(1) {
         let prev = sessions.last().expect("已建立至少一个 session").clone();
-        let channel = {
-            let prev_guard = prev.lock().await;
-            prev_guard
-                .channel_open_direct_tcpip(
-                    next_hop.host.as_str(),
-                    next_hop.port as u32,
-                    "127.0.0.1",
-                    0,
-                )
-                .await
-                .map_err(|e| SshTunnelError::ChannelOpenFailed {
-                    hop_index,
-                    reason: e.to_string(),
-                })?
-        };
+        let channel = prev
+            .open_direct_tcpip(next_hop.host.as_str(), next_hop.port as u32)
+            .await
+            .map_err(|reason| SshTunnelError::ChannelOpenFailed { hop_index, reason })?;
         let stream = channel.into_stream();
         let runtime_reporter = SessionRuntimeReporter::new(hop_index, runtime_context.clone());
         let current = connect_and_auth(
@@ -455,7 +681,9 @@ pub async fn open(
             runtime_reporter.clone(),
         )
         .await?;
-        sessions.push(Arc::new(TokioMutex::new(current)));
+        let (current, session_task) = spawn_session_actor(current);
+        sessions.push(current);
+        session_tasks.push(session_task);
         runtime_reporters.push(runtime_reporter);
     }
 
@@ -470,13 +698,26 @@ pub async fn open(
     // 链路和本地 listener 均准备完成后才开启运行期上报，避免握手失败被重复当成掉线。
     runtime_context.enabled.store(true, Ordering::Release);
 
-    // 每跳起一个 keepalive 监控 task：探测 session 是否已断，断开经回调上报。
+    // 每跳起一个只读监控 task：探测 session 是否已断，断开经回调上报。
     let mut keepalive_tasks = Vec::with_capacity(sessions.len());
     for (session, runtime_reporter) in sessions.iter().zip(runtime_reporters.iter()) {
         keepalive_tasks.push(spawn_keepalive_monitor(
             session.clone(),
             runtime_reporter.clone(),
         ));
+    }
+
+    // RTT 首次采样延后到 open 返回之后；没有回调（如测试连接）则零额外流量。
+    let mut rtt_tasks = Vec::new();
+    if let Some(callback) = &ctx.rtt_cb {
+        rtt_tasks.reserve(sessions.len());
+        for (hop_index, session) in sessions.iter().enumerate() {
+            rtt_tasks.push(spawn_rtt_monitor(
+                session.clone(),
+                hop_index,
+                callback.clone(),
+            ));
+        }
     }
 
     let last_session = sessions.last().expect("已建立至少一个 session").clone();
@@ -497,17 +738,9 @@ pub async fn open(
             let last = last_session.clone();
             let target_host = target_host.clone();
             tokio::spawn(async move {
-                let channel_res = {
-                    let guard = last.lock().await;
-                    guard
-                        .channel_open_direct_tcpip(
-                            target_host.as_str(),
-                            target_port as u32,
-                            "127.0.0.1",
-                            0,
-                        )
-                        .await
-                };
+                let channel_res = last
+                    .open_direct_tcpip(target_host.as_str(), target_port as u32)
+                    .await;
                 let channel = match channel_res {
                     Ok(c) => c,
                     Err(e) => {
@@ -530,9 +763,22 @@ pub async fn open(
         accept_abort,
         accept_monitor,
         keepalive_tasks,
+        rtt_tasks,
+        session_tasks,
         _sessions: sessions,
         shutdown,
     })
+}
+
+/// 把公共 keepalive 参数换算成 russh 的内部判定语义。
+fn build_russh_config(keepalive: KeepaliveConfig) -> Config {
+    Config {
+        inactivity_timeout: Some(TUNNEL_INACTIVITY),
+        keepalive_interval: keepalive.interval,
+        // russh 使用 `alive_timeouts > keepalive_max`，所以连续 N 次失败对应 N-1。
+        keepalive_max: keepalive.russh_max_missed(),
+        ..Default::default()
+    }
 }
 
 /// 监听 accept worker 的非预期退出；正常 drop 会先设置 `shutdown`，不会误报。
@@ -568,10 +814,8 @@ fn spawn_accept_monitor(
 
 /// 为一跳 session 起 keepalive 监控：周期性轻量探测 session 是否仍存活。
 ///
-/// 真正的「60s/3 次」死链判定由 russh 内置 keepalive 完成（超时后 session 任务退出）；
-/// 本 task 只负责发现 session 已退出，并经 `status_cb` 上报 [`HopStatus::Lost`]。
-/// `send_keepalive(false)` 在 session 任务已结束时立即返回 `Err`，且持锁极短，
-/// 不会阻塞末跳 accept loop 开 channel。
+/// 真正的死链判定由 russh 内置 keepalive 完成（超时后 session 任务退出）；
+/// 本 task 只读检查 session actor 的关闭标记，不会额外发送心跳或改变配置间隔。
 fn spawn_keepalive_monitor(
     session: SharedSession,
     runtime_reporter: SessionRuntimeReporter,
@@ -579,14 +823,29 @@ fn spawn_keepalive_monitor(
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(KEEPALIVE_MONITOR_POLL).await;
-            let dead = {
-                let guard = session.lock().await;
-                guard.send_keepalive(false).await.is_err()
-            };
-            if dead {
+            if session.is_closed() {
                 runtime_reporter.report_loss();
                 break;
             }
+        }
+    })
+}
+
+/// 后台采样每跳 SSH global-request RTT；失败只上报指标，不改变连接状态。
+fn spawn_rtt_monitor(
+    session: SharedSession,
+    hop_index: usize,
+    callback: HopRttCallback,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        tokio::time::sleep(RTT_INITIAL_DELAY).await;
+        loop {
+            let sample = session.probe_rtt(RTT_SAMPLE_TIMEOUT).await;
+            callback(HopRttEvent { hop_index, sample });
+            if session.is_closed() {
+                break;
+            }
+            tokio::time::sleep(RTT_SAMPLE_INTERVAL).await;
         }
     })
 }
@@ -777,6 +1036,31 @@ mod tests {
             expand_home_path("/tmp/id_rsa"),
             Some(PathBuf::from("/tmp/id_rsa"))
         );
+    }
+
+    #[test]
+    fn keepalive_config_maps_to_russh_threshold_semantics() {
+        let config = build_russh_config(KeepaliveConfig::enabled(Duration::from_secs(17), 5));
+
+        assert_eq!(config.keepalive_interval, Some(Duration::from_secs(17)));
+        assert_eq!(config.keepalive_max, 4);
+    }
+
+    #[test]
+    fn disabled_keepalive_has_no_interval_and_safe_threshold() {
+        let config = build_russh_config(KeepaliveConfig::disabled());
+
+        assert_eq!(config.keepalive_interval, None);
+        assert_eq!(config.keepalive_max, 2);
+    }
+
+    #[test]
+    fn keepalive_config_clamps_zero_values() {
+        let config = KeepaliveConfig::enabled(Duration::ZERO, 0);
+
+        assert_eq!(config.interval, Some(Duration::from_secs(1)));
+        assert_eq!(config.failure_threshold, 1);
+        assert_eq!(build_russh_config(config).keepalive_max, 0);
     }
 
     #[test]

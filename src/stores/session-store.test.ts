@@ -31,6 +31,7 @@ function sampleConnection(driver: DriverKind): StoredConnection {
     advanced: {
       keepAliveEnabled: false,
       keepAliveIntervalSeconds: 240,
+      keepAliveFailureThreshold: 3,
       connectTimeoutEnabled: true,
       connectTimeoutSeconds: 30,
       readTimeoutEnabled: false,
@@ -50,11 +51,20 @@ function routeInvoke(map: Record<string, unknown>) {
   );
 }
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   mockInvoke.mockReset();
   metadataCache.clear();
   useSessionStore.setState({
     openId: null,
+    runtimeSessionId: null,
     activeConnection: null,
     status: "idle",
     errorMsg: null,
@@ -86,7 +96,7 @@ beforeEach(() => {
 describe("session-store", () => {
   it("open 成功后置 connected 并加载 databases", async () => {
     routeInvoke({
-      connection_open: undefined,
+      connection_open: "session-1",
       db_list_databases: [
         { name: "app", isCurrent: true },
         { name: "sys", isCurrent: false },
@@ -100,6 +110,7 @@ describe("session-store", () => {
     });
     expect(s.status).toBe("connected");
     expect(s.openId).toBe("c1");
+    expect(s.runtimeSessionId).toBe("session-1");
     expect(s.databases).toHaveLength(2);
   });
 
@@ -113,7 +124,7 @@ describe("session-store", () => {
 
   it("submitPassphrase 带 passphrase 重新打开", async () => {
     useSessionStore.setState({ passphraseFor: "c1" });
-    routeInvoke({ connection_open: undefined, db_list_databases: [] });
+    routeInvoke({ connection_open: "session-1", db_list_databases: [] });
     await useSessionStore.getState().submitPassphrase("secret");
     expect(mockInvoke).toHaveBeenCalledWith("connection_open", {
       id: "c1",
@@ -135,6 +146,182 @@ describe("session-store", () => {
       allowWrite: false,
     });
     expect(useSessionStore.getState().rowSet?.rows).toHaveLength(1);
+  });
+
+  it("reconnect 清理旧查询状态并使用新 session 重新加载数据库", async () => {
+    const connection = sampleConnection("mysql");
+    useSessionStore.setState({
+      openId: "c1",
+      runtimeSessionId: "session-old",
+      activeConnection: connection,
+      status: "connected",
+      sqlText: "SELECT * FROM users",
+      queryRunning: true,
+      currentQueryId: "q-old",
+      lostHops: [0],
+    });
+    routeInvoke({
+      connection_reconnect: "session-new",
+      db_list_databases: [{ name: "app", isCurrent: true }],
+    });
+
+    await useSessionStore.getState().reconnect(connection);
+
+    expect(mockInvoke).toHaveBeenCalledWith("connection_reconnect", {
+      id: "c1",
+      expectedSessionId: "session-old",
+      passphrase: null,
+    });
+    const state = useSessionStore.getState();
+    expect(state.status).toBe("connected");
+    expect(state.runtimeSessionId).toBe("session-new");
+    expect(state.databases).toEqual([{ name: "app", isCurrent: true }]);
+    expect(state.currentQueryId).toBeNull();
+    expect(state.queryRunning).toBe(false);
+    expect(state.lostHops).toEqual([]);
+    expect(state.sqlText).toBe("SELECT * FROM users");
+  });
+
+  it("切换连接前按 session 代号关闭旧连接", async () => {
+    const oldConnection = sampleConnection("mysql");
+    const nextConnection = {
+      ...sampleConnection("postgresql"),
+      id: "c2",
+    };
+    useSessionStore.setState({
+      openId: "c1",
+      runtimeSessionId: "session-old",
+      activeConnection: oldConnection,
+      status: "connected",
+    });
+    routeInvoke({
+      connection_close: undefined,
+      connection_open: "session-next",
+      db_list_databases: [{ name: "app", isCurrent: true }],
+    });
+
+    await useSessionStore.getState().open("c2", undefined, nextConnection);
+
+    expect(mockInvoke).toHaveBeenCalledWith("connection_close", {
+      id: "c1",
+      expectedSessionId: "session-old",
+    });
+    expect(useSessionStore.getState().openId).toBe("c2");
+    expect(useSessionStore.getState().runtimeSessionId).toBe("session-next");
+  });
+
+  it("重连后忽略旧 session 的迟到 SSH 状态事件", () => {
+    useSessionStore.setState({
+      activeConnection: sampleConnection("mysql"),
+      runtimeSessionId: "session-new",
+      hopStatuses: {
+        0: {
+          status: "connected",
+          reason: null,
+          rttState: "idle",
+          rttMs: null,
+        },
+      },
+      lostHops: [],
+    });
+
+    useSessionStore.getState().markHopStatus({
+      connectionId: "c1",
+      sessionId: "session-old",
+      hopIndex: 0,
+      status: "lost",
+      reason: "error.ssh.tunnel_lost",
+    });
+    expect(useSessionStore.getState().lostHops).toEqual([]);
+
+    useSessionStore.getState().markHopStatus({
+      connectionId: "c1",
+      sessionId: "session-new",
+      hopIndex: 0,
+      status: "lost",
+      reason: "error.ssh.tunnel_lost",
+    });
+    expect(useSessionStore.getState().lostHops).toEqual([0]);
+  });
+
+  it("SSH RTT 只更新当前 session 指标且超时不改变连接状态", () => {
+    useSessionStore.setState({
+      activeConnection: sampleConnection("mysql"),
+      runtimeSessionId: "session-new",
+      hopStatuses: {
+        0: {
+          status: "connected",
+          reason: null,
+          rttState: "idle",
+          rttMs: null,
+        },
+      },
+    });
+
+    useSessionStore.getState().markHopRtt({
+      connectionId: "c1",
+      sessionId: "session-old",
+      hopIndex: 0,
+      state: "measured",
+      rttMs: 999,
+    });
+    expect(useSessionStore.getState().hopStatuses[0]?.rttState).toBe("idle");
+
+    useSessionStore.getState().markHopRtt({
+      connectionId: "c1",
+      sessionId: "session-new",
+      hopIndex: 0,
+      state: "measured",
+      rttMs: 12.6,
+    });
+    expect(useSessionStore.getState().hopStatuses[0]).toEqual({
+      status: "connected",
+      reason: null,
+      rttState: "measured",
+      rttMs: 12.6,
+    });
+
+    useSessionStore.getState().markHopRtt({
+      connectionId: "c1",
+      sessionId: "session-new",
+      hopIndex: 0,
+      state: "timeout",
+      rttMs: null,
+    });
+    expect(useSessionStore.getState().hopStatuses[0]).toEqual({
+      status: "connected",
+      reason: null,
+      rttState: "timeout",
+      rttMs: null,
+    });
+  });
+
+  it("重连后旧查询的迟到结果不能覆盖新会话", async () => {
+    const query = deferred<unknown>();
+    const connection = sampleConnection("mysql");
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "db_query") return query.promise;
+      if (command === "connection_reconnect") return Promise.resolve("session-new");
+      if (command === "db_list_databases") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    useSessionStore.setState({
+      openId: "c1",
+      runtimeSessionId: "session-old",
+      activeConnection: connection,
+      status: "connected",
+    });
+
+    const pendingQuery = useSessionStore.getState().executeSql("SELECT pg_sleep(10)");
+    expect(mockInvoke).toHaveBeenCalledWith("db_query", expect.anything());
+    await useSessionStore.getState().reconnect(connection);
+    query.resolve({ columns: ["stale"], rows: [["old"]], truncated: false });
+    await pendingQuery;
+
+    const state = useSessionStore.getState();
+    expect(state.runtimeSessionId).toBe("session-new");
+    expect(state.rowSet).toBeNull();
+    expect(state.queryErrorMsg).toBeNull();
   });
 
   it("toggleExpandedDb 只收起当前 database，不重置当前表和结果", () => {
@@ -519,6 +706,145 @@ describe("session-store", () => {
     expect(s.tables).toEqual([
       { name: "orders", tableType: "BASE TABLE", rows: null, comment: null },
     ]);
+  });
+
+  it("selectDb A→B→A 时最早的 A 响应不能覆盖最新 A", async () => {
+    const firstApp = deferred<unknown>();
+    const billing = deferred<unknown>();
+    const latestApp = deferred<unknown>();
+    let appRequestCount = 0;
+    mockInvoke.mockImplementation((cmd: string, args) => {
+      if (cmd !== "db_list_tables") return Promise.resolve(undefined);
+      const database = (args as { database: string }).database;
+      if (database === "billing") return billing.promise;
+      appRequestCount += 1;
+      return appRequestCount === 1 ? firstApp.promise : latestApp.promise;
+    });
+    useSessionStore.setState({ openId: "c1" });
+
+    const firstPending = useSessionStore.getState().selectDb("app");
+    const billingPending = useSessionStore.getState().selectDb("billing");
+    billing.resolve([
+      { name: "billing_orders", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    await billingPending;
+    const latestPending = useSessionStore.getState().selectDb("app");
+    latestApp.resolve([
+      { name: "new_users", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    await latestPending;
+    firstApp.resolve([
+      { name: "stale_users", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    await firstPending;
+
+    expect(useSessionStore.getState().selectedDb).toBe("app");
+    expect(useSessionStore.getState().tables[0]?.name).toBe("new_users");
+    expect(
+      metadataCache.get<unknown[]>({
+        connectionId: "c1",
+        driver: "mysql",
+        database: "app",
+        schema: null,
+        resource: "tables",
+      }),
+    ).toEqual([
+      { name: "new_users", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+  });
+
+  it("selectSchema A→B→A 时旧响应不能覆盖最新 schema", async () => {
+    const firstPublic = deferred<unknown>();
+    const audit = deferred<unknown>();
+    const latestPublic = deferred<unknown>();
+    let publicRequestCount = 0;
+    mockInvoke.mockImplementation((cmd: string, args) => {
+      if (cmd !== "db_list_tables") return Promise.resolve(undefined);
+      const schema = (args as { schema: string }).schema;
+      if (schema === "audit") return audit.promise;
+      publicRequestCount += 1;
+      return publicRequestCount === 1
+        ? firstPublic.promise
+        : latestPublic.promise;
+    });
+    useSessionStore.setState({
+      openId: "c1",
+      activeConnection: sampleConnection("postgresql"),
+      selectedDb: "app",
+    });
+
+    const firstPending = useSessionStore.getState().selectSchema("public");
+    const auditPending = useSessionStore.getState().selectSchema("audit");
+    audit.resolve([
+      { name: "audit_log", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    await auditPending;
+    const latestPending = useSessionStore.getState().selectSchema("public");
+    latestPublic.resolve([
+      { name: "new_users", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    await latestPending;
+    firstPublic.resolve([
+      { name: "stale_users", tableType: "BASE TABLE", rows: null, comment: null },
+    ]);
+    await firstPending;
+
+    expect(useSessionStore.getState().selectedSchema).toBe("public");
+    expect(useSessionStore.getState().tables[0]?.name).toBe("new_users");
+  });
+
+  it("展开列 A→B→A 时旧响应不能污染列树和补全 metadata", async () => {
+    const firstUsers = deferred<unknown>();
+    const orders = deferred<unknown>();
+    const latestUsers = deferred<unknown>();
+    let usersRequestCount = 0;
+    mockInvoke.mockImplementation((cmd: string, args) => {
+      if (cmd !== "db_list_columns") return Promise.resolve(undefined);
+      const table = (args as { table: string }).table;
+      if (table === "orders") return orders.promise;
+      usersRequestCount += 1;
+      return usersRequestCount === 1
+        ? firstUsers.promise
+        : latestUsers.promise;
+    });
+    useSessionStore.setState({
+      openId: "c1",
+      activeConnection: sampleConnection("mysql"),
+      selectedDb: "app",
+    });
+
+    const firstPending = useSessionStore.getState().toggleTableColumns("users");
+    const ordersPending = useSessionStore.getState().toggleTableColumns("orders");
+    const latestPending = useSessionStore.getState().toggleTableColumns("users");
+    latestUsers.resolve([
+      {
+        name: "new_name",
+        dataType: "varchar(20)",
+        nullable: true,
+        columnKey: "",
+        defaultValue: null,
+        comment: null,
+      },
+    ]);
+    await latestPending;
+    orders.resolve([]);
+    await ordersPending;
+    firstUsers.resolve([
+      {
+        name: "stale_name",
+        dataType: "varchar(20)",
+        nullable: true,
+        columnKey: "",
+        defaultValue: null,
+        comment: null,
+      },
+    ]);
+    await firstPending;
+
+    const state = useSessionStore.getState();
+    expect(state.expandedTable).toBe("users");
+    expect(state.tableColumns[0]?.name).toBe("new_name");
+    expect(state.columnsByTable.users?.[0]?.name).toBe("new_name");
   });
 
   it("createDatabase 成功后刷新列表并选中新库", async () => {

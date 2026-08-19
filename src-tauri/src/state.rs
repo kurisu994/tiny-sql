@@ -111,6 +111,14 @@ pub struct OpenConnection {
     pub driver: ActiveDriver,
     /// 直连时为 None；走 SSH 时持有隧道，保活到连接关闭
     pub tunnel: Option<SshTunnel>,
+    /// 每次成功打开都生成的新代号，用于隔离重连前后的异步事件。
+    pub session_id: String,
+}
+
+/// 正在执行的查询及其所属连接，用于关闭 / 重连时按连接取消。
+pub struct ActiveQuery {
+    pub connection_id: String,
+    pub cancel_token: CancellationToken,
 }
 
 impl OpenConnection {
@@ -127,8 +135,10 @@ pub struct AppState {
     pub store: Mutex<ConnectionStore>,
     /// 已打开的活跃连接注册表：connection_id → OpenConnection。
     pub connections: AsyncMutex<HashMap<String, OpenConnection>>,
-    /// 正在执行的 query：query_id → cancel token。
-    pub queries: AsyncMutex<HashMap<String, CancellationToken>>,
+    /// 每条连接独立的 open/close/reconnect 生命周期锁，不阻塞其他连接查询。
+    connection_lifecycles: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    /// 正在执行的 query：query_id → 连接边界与 cancel token。
+    pub queries: AsyncMutex<HashMap<String, ActiveQuery>>,
     /// SSH known_hosts 信任库（TOFU）。
     pub known_hosts: Arc<SshKnownHostsStore>,
     /// TOFU 决策管理器（前端弹窗回调通道）。
@@ -142,11 +152,22 @@ impl AppState {
         Self {
             store: Mutex::new(store),
             connections: AsyncMutex::new(HashMap::new()),
+            connection_lifecycles: Mutex::new(HashMap::new()),
             queries: AsyncMutex::new(HashMap::new()),
             known_hosts: Arc::new(known_hosts),
             tofu: Arc::new(SshTofuManager::default()),
             passphrases: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// 获取指定连接的生命周期锁；同 id 串行，不同 id 可并发。
+    pub fn connection_lifecycle(&self, id: &str) -> Arc<AsyncMutex<()>> {
+        self.connection_lifecycles
+            .lock()
+            .unwrap()
+            .entry(id.to_string())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
     }
 }
 

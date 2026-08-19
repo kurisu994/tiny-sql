@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 
 import { translateError, type StoredConnection } from "@/lib/tauri-api";
+import { cn } from "@/lib/utils";
 import type { TopologyHopStatus } from "@/stores/session-store";
 
 type NodeStatus = "pending" | "connected" | "failed" | "lost";
@@ -13,6 +14,8 @@ type TopologyNode = {
   subtitle: string;
   status: NodeStatus;
   reason: string | null;
+  rttState: TopologyHopStatus["rttState"];
+  rttMs: number | null;
 };
 
 const STATUS_LABEL: Record<NodeStatus, string> = {
@@ -57,7 +60,7 @@ export function TopologyGraph({
           <TopologySegment
             key={node.id}
             node={node}
-            nextStatus={nodes[index + 1]?.status ?? null}
+            nextNode={nodes[index + 1] ?? null}
             isLast={index === nodes.length - 1}
           />
         ))}
@@ -87,6 +90,8 @@ function buildNodes(
       subtitle: "127.0.0.1",
       status: "connected",
       reason: null,
+      rttState: "idle",
+      rttMs: null,
     },
     ...hops.map((hop, index) => {
       const tracked = hopStatuses[index];
@@ -96,40 +101,71 @@ function buildNodes(
         subtitle: `${hop.host}:${hop.port}`,
         status: tracked?.status ?? (sessionStatus === "connected" ? "connected" : "pending"),
         reason: tracked?.reason ?? null,
+        rttState: tracked?.rttState ?? "idle",
+        rttMs: tracked?.rttMs ?? null,
       } satisfies TopologyNode;
     }),
     {
-      id: "mysql",
-      title: "MySQL",
+      id: "database",
+      title: connection.driver === "postgresql" ? "PostgreSQL" : "MySQL",
       subtitle: `${connection.host}:${connection.port}`,
       status: mysqlStatus,
       reason: null,
+      rttState: "idle",
+      rttMs: null,
     },
   ];
 }
 
 function TopologySegment({
   node,
-  nextStatus,
+  nextNode,
   isLast,
 }: {
   node: TopologyNode;
-  nextStatus: NodeStatus | null;
+  nextNode: TopologyNode | null;
   isLast: boolean;
 }) {
   return (
     <>
       <TopologyCard node={node} />
       {!isLast && (
-        <div className="flex w-14 shrink-0 items-center px-2" aria-hidden="true">
+        <div className="relative flex w-20 shrink-0 items-center px-2">
+          {nextNode && <RttLabel node={nextNode} />}
           <div
+            aria-hidden="true"
             className={`h-0.5 w-full rounded-full ${
-              nextStatus ? LINE_CLASS[nextStatus] : LINE_CLASS.pending
+              nextNode ? LINE_CLASS[nextNode.status] : LINE_CLASS.pending
             }`}
           />
         </div>
       )}
     </>
+  );
+}
+
+function RttLabel({ node }: { node: TopologyNode }) {
+  if (node.rttState === "idle") return null;
+  const label =
+    node.rttState === "measured" && node.rttMs !== null
+      ? node.rttMs < 1
+        ? "SSH <1 ms"
+        : `SSH ${Math.round(node.rttMs)} ms`
+      : node.rttState === "timeout"
+        ? "SSH 超时"
+        : "SSH 不可用";
+  return (
+    <span
+      title={`累计到${node.title}的 SSH 协议探测 RTT；不是 ICMP，也不是单段链路延迟`}
+      className={cn(
+        "absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded px-1 text-[10px] font-medium",
+        node.rttState === "measured"
+          ? "text-emerald-700 dark:text-emerald-300"
+          : "text-amber-700 dark:text-amber-300",
+      )}
+    >
+      {label}
+    </span>
   );
 }
 

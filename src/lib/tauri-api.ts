@@ -45,6 +45,7 @@ export interface SslConfig {
 export interface AdvancedConfig {
   keepAliveEnabled: boolean;
   keepAliveIntervalSeconds: number;
+  keepAliveFailureThreshold: number;
   connectTimeoutEnabled: boolean;
   connectTimeoutSeconds: number;
   readTimeoutEnabled: boolean;
@@ -234,9 +235,20 @@ export const connectionApi = {
     }),
   /** 打开连接（建隧道 + 连接池）；passphrase 仅本次会话生效 */
   open: (id: string, passphrase?: string) =>
-    invoke<void>("connection_open", { id, passphrase: passphrase ?? null }),
-  /** 关闭连接 */
-  close: (id: string) => invoke<void>("connection_close", { id }),
+    invoke<string>("connection_open", { id, passphrase: passphrase ?? null }),
+  /** 清理旧查询、连接池和隧道后重建连接；返回新 session 代号。 */
+  reconnect: (id: string, expectedSessionId?: string, passphrase?: string) =>
+    invoke<string>("connection_reconnect", {
+      id,
+      expectedSessionId: expectedSessionId ?? null,
+      passphrase: passphrase ?? null,
+    }),
+  /** 关闭指定 session；代号不匹配时后端幂等忽略迟到操作。 */
+  close: (id: string, expectedSessionId?: string) =>
+    invoke<void>("connection_close", {
+      id,
+      expectedSessionId: expectedSessionId ?? null,
+    }),
 };
 
 // === 数据浏览（schema / 结果集）===
@@ -334,6 +346,7 @@ export const dbApi = {
 export const SSH_EVENTS = {
   tofuRequest: "ssh:tofu-request",
   hopStatus: "ssh:hop-status",
+  hopRtt: "ssh:hop-rtt",
 } as const;
 
 /** `ssh:tofu-request` 事件载荷 */
@@ -348,9 +361,19 @@ export interface TofuRequestPayload {
 /** `ssh:hop-status` 事件载荷 */
 export interface HopStatusPayload {
   connectionId: string;
+  sessionId: string;
   hopIndex: number;
   status: "pending" | "connected" | "failed" | "lost";
   reason: string | null;
+}
+
+/** `ssh:hop-rtt` 事件载荷；为累计到该 SSH session 的协议 RTT，不是 ICMP。 */
+export interface HopRttPayload {
+  connectionId: string;
+  sessionId: string;
+  hopIndex: number;
+  state: "measured" | "timeout" | "unavailable";
+  rttMs: number | null;
 }
 
 /** TOFU 决策回传 command */

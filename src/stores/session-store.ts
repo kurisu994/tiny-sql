@@ -19,6 +19,7 @@ import {
   type ColumnMeta,
   type DatabaseMeta,
   type HopStatusPayload,
+  type HopRttPayload,
   type RowSet,
   type SchemaMeta,
   type StoredConnection,
@@ -38,6 +39,8 @@ type HopRuntimeStatus = "pending" | "connected" | "failed" | "lost";
 export interface TopologyHopStatus {
   status: HopRuntimeStatus;
   reason: string | null;
+  rttState: "idle" | HopRttPayload["state"];
+  rttMs: number | null;
 }
 
 function createQueryId(): string {
@@ -55,6 +58,36 @@ function metadataKey(
   return { connectionId, driver, database, schema, resource, table };
 }
 
+// 单会话 metadata 请求序号：即使选择发生 A→B→A，旧 A 也不能覆盖新 A。
+let metadataRequestEpoch = 0;
+let sessionRequestEpoch = 0;
+
+function beginSessionRequest(): number {
+  sessionRequestEpoch += 1;
+  return sessionRequestEpoch;
+}
+
+function invalidateSessionRequests(): void {
+  sessionRequestEpoch += 1;
+}
+
+function isCurrentSessionRequest(epoch: number): boolean {
+  return epoch === sessionRequestEpoch;
+}
+
+function beginMetadataRequest(): number {
+  metadataRequestEpoch += 1;
+  return metadataRequestEpoch;
+}
+
+function invalidateMetadataRequests(): void {
+  metadataRequestEpoch += 1;
+}
+
+function isCurrentMetadataRequest(epoch: number): boolean {
+  return epoch === metadataRequestEpoch;
+}
+
 function initialHopStatuses(
   connection?: StoredConnection | null,
 ): Record<number, TopologyHopStatus> {
@@ -62,7 +95,12 @@ function initialHopStatuses(
   return Object.fromEntries(
     connection.ssh.hops.map((_, index) => [
       index,
-      { status: "pending" as HopRuntimeStatus, reason: null },
+      {
+        status: "pending" as HopRuntimeStatus,
+        reason: null,
+        rttState: "idle" as const,
+        rttMs: null,
+      },
     ]),
   );
 }
@@ -74,7 +112,12 @@ function connectedHopStatuses(
   return Object.fromEntries(
     connection.ssh.hops.map((_, index) => [
       index,
-      { status: "connected" as HopRuntimeStatus, reason: null },
+      {
+        status: "connected" as HopRuntimeStatus,
+        reason: null,
+        rttState: "idle" as const,
+        rttMs: null,
+      },
     ]),
   );
 }
@@ -82,6 +125,8 @@ function connectedHopStatuses(
 interface SessionState {
   /** 当前打开的连接 id（未连接为 null） */
   openId: string | null;
+  /** 后端每次成功打开生成的会话代号，用于拒绝重连前的迟到事件。 */
+  runtimeSessionId: string | null;
   /** 当前正在连接 / 浏览的连接配置，用于连接中与失败态也能显示拓扑 */
   activeConnection: StoredConnection | null;
   status: Status;
@@ -119,6 +164,7 @@ interface SessionState {
     passphrase?: string,
     connection?: StoredConnection,
   ) => Promise<void>;
+  reconnect: (connection?: StoredConnection) => Promise<void>;
   close: () => Promise<void>;
   submitPassphrase: (passphrase: string) => Promise<void>;
   cancelPassphrase: () => void;
@@ -137,11 +183,13 @@ interface SessionState {
   ) => Promise<void>;
   cancelQuery: () => Promise<void>;
   markHopStatus: (payload: HopStatusPayload) => void;
+  markHopRtt: (payload: HopRttPayload) => void;
   markHopLost: (hopIndex: number) => void;
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   openId: null,
+  runtimeSessionId: null,
   activeConnection: null,
   status: "idle",
   errorMsg: null,
@@ -169,20 +217,40 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   lostHops: [],
 
   open: async (id, passphrase, connection) => {
+    const requestEpoch = beginSessionRequest();
+    invalidateMetadataRequests();
+    const previousOpenId = get().openId;
+    const previousSessionId = get().runtimeSessionId;
     set({
       activeConnection: connection ?? get().activeConnection,
+      openId: null,
+      runtimeSessionId: null,
       status: "connecting",
       errorMsg: null,
       lostHops: [],
       hopStatuses: initialHopStatuses(connection ?? get().activeConnection),
       passphraseFor: null,
+      loadingData: false,
+      queryRunning: false,
+      currentQueryId: null,
+      queryErrorMsg: null,
     });
+    let openedSessionId: string | null = null;
     try {
-      await connectionApi.open(id, passphrase);
+      if (previousOpenId && previousOpenId !== id) {
+        await connectionApi.close(previousOpenId, previousSessionId ?? undefined);
+        metadataCache.clearConnection(previousOpenId);
+        if (!isCurrentSessionRequest(requestEpoch)) return;
+      }
+      openedSessionId = await connectionApi.open(id, passphrase);
+      if (!isCurrentSessionRequest(requestEpoch)) return;
+      set({ openId: id, runtimeSessionId: openedSessionId });
       metadataCache.clearConnection(id);
       const databases = await dbApi.listDatabases(id);
+      if (!isCurrentSessionRequest(requestEpoch)) return;
       set({
         openId: id,
+        runtimeSessionId: openedSessionId,
         activeConnection: connection ?? get().activeConnection,
         status: "connected",
         databases,
@@ -199,9 +267,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         refreshingMetadata: false,
         selectedTable: null,
         rowSet: null,
+        loadingData: false,
+        queryRunning: false,
+        currentQueryId: null,
+        queryErrorMsg: null,
         hopStatuses: connectedHopStatuses(connection ?? get().activeConnection),
       });
     } catch (e) {
+      if (!isCurrentSessionRequest(requestEpoch)) return;
       const key = typeof e === "string" ? e : String(e);
       // 私钥需要 passphrase → 弹窗收集后重试
       if (key === "error.ssh.invalid_passphrase") {
@@ -211,24 +284,94 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({
         status: "error",
         errorMsg: translateError(e),
-        openId: null,
+        openId: openedSessionId ? id : null,
+        runtimeSessionId: openedSessionId,
         activeConnection: connection ?? get().activeConnection,
       });
     }
   },
 
-  close: async () => {
-    const { openId } = get();
-    if (openId) {
-      try {
-        await connectionApi.close(openId);
-      } catch {
-        // 关闭失败不阻塞 UI 复位
+  reconnect: async (connection) => {
+    const current = connection ?? get().activeConnection;
+    const id = current?.id ?? get().openId;
+    if (!id || !current) return;
+    const expectedSessionId = get().runtimeSessionId;
+    const requestEpoch = beginSessionRequest();
+    invalidateMetadataRequests();
+    metadataCache.clearConnection(id);
+    set({
+      openId: id,
+      runtimeSessionId: null,
+      activeConnection: current,
+      status: "connecting",
+      errorMsg: null,
+      passphraseFor: null,
+      databases: [],
+      expandedDb: null,
+      selectedDb: null,
+      schemas: [],
+      expandedSchema: null,
+      selectedSchema: null,
+      tables: [],
+      expandedTable: null,
+      tableColumns: [],
+      columnsByTable: {},
+      loadingColumns: false,
+      refreshingMetadata: false,
+      selectedTable: null,
+      rowSet: null,
+      loadingData: false,
+      queryRunning: false,
+      currentQueryId: null,
+      queryErrorMsg: null,
+      hopStatuses: initialHopStatuses(current),
+      lostHops: [],
+    });
+    let openedSessionId: string | null = null;
+    try {
+      openedSessionId = await connectionApi.reconnect(
+        id,
+        expectedSessionId ?? undefined,
+      );
+      if (!isCurrentSessionRequest(requestEpoch)) return;
+      set({ runtimeSessionId: openedSessionId });
+      const databases = await dbApi.listDatabases(id);
+      if (!isCurrentSessionRequest(requestEpoch)) return;
+      set({
+        openId: id,
+        runtimeSessionId: openedSessionId,
+        status: "connected",
+        databases,
+        hopStatuses: connectedHopStatuses(current),
+      });
+    } catch (e) {
+      if (!isCurrentSessionRequest(requestEpoch)) return;
+      const key = typeof e === "string" ? e : String(e);
+      if (key === "error.ssh.invalid_passphrase") {
+        set({
+          openId: null,
+          runtimeSessionId: null,
+          status: "idle",
+          passphraseFor: id,
+        });
+        return;
       }
-      metadataCache.clearConnection(openId);
+      set({
+        openId: openedSessionId ? id : null,
+        runtimeSessionId: openedSessionId,
+        status: "error",
+        errorMsg: translateError(e),
+      });
     }
+  },
+
+  close: async () => {
+    invalidateSessionRequests();
+    invalidateMetadataRequests();
+    const { openId, runtimeSessionId } = get();
     set({
       openId: null,
+      runtimeSessionId: null,
       activeConnection: null,
       status: "idle",
       errorMsg: null,
@@ -248,12 +391,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       selectedTable: null,
       rowSet: null,
       sqlText: "SELECT 1",
+      loadingData: false,
       queryRunning: false,
       currentQueryId: null,
       queryErrorMsg: null,
       hopStatuses: {},
       lostHops: [],
     });
+    if (openId) {
+      try {
+        await connectionApi.close(openId, runtimeSessionId ?? undefined);
+      } catch {
+        // 关闭失败不阻塞 UI 复位
+      }
+      metadataCache.clearConnection(openId);
+    }
   },
 
   submitPassphrase: async (passphrase) => {
@@ -270,6 +422,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ expandedDb: db });
       return;
     }
+    const requestEpoch = beginMetadataRequest();
     set({
       expandedDb: db,
       selectedDb: db,
@@ -292,12 +445,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         const key = metadataKey(openId, driver, db, null, "schemas");
         const cached = metadataCache.get<SchemaMeta[]>(key);
         if (cached) {
-          if (get().selectedDb !== db) return;
+          if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
+            return;
           set({ schemas: cached, loadingData: false });
           return;
         }
         const schemas = await dbApi.listSchemas(openId, db);
-        if (get().selectedDb !== db) return;
+        if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
+          return;
         metadataCache.set(key, schemas);
         set({ schemas, loadingData: false });
         return;
@@ -305,16 +460,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const key = metadataKey(openId, driver, db, null, "tables");
       const cached = metadataCache.get<TableMeta[]>(key);
       if (cached) {
-        if (get().selectedDb !== db) return;
+        if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
+          return;
         set({ tables: cached, loadingData: false });
         return;
       }
       const tables = await dbApi.listTables(openId, db, null);
-      if (get().selectedDb !== db) return;
+      if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
+        return;
       metadataCache.set(key, tables);
       set({ tables, loadingData: false });
     } catch (e) {
-      if (get().selectedDb !== db) return;
+      if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
+        return;
       set({ errorMsg: translateError(e), loadingData: false });
     }
   },
@@ -332,6 +490,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ expandedSchema: schema });
       return;
     }
+    const requestEpoch = beginMetadataRequest();
     set({
       expandedSchema: schema,
       selectedSchema: schema,
@@ -356,17 +515,31 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       );
       const cached = metadataCache.get<TableMeta[]>(key);
       if (cached) {
-        if (get().selectedDb !== selectedDb || get().selectedSchema !== schema)
+        if (
+          !isCurrentMetadataRequest(requestEpoch) ||
+          get().selectedDb !== selectedDb ||
+          get().selectedSchema !== schema
+        )
           return;
         set({ tables: cached, loadingData: false });
         return;
       }
       const tables = await dbApi.listTables(openId, selectedDb, schema);
-      if (get().selectedDb !== selectedDb || get().selectedSchema !== schema) return;
+      if (
+        !isCurrentMetadataRequest(requestEpoch) ||
+        get().selectedDb !== selectedDb ||
+        get().selectedSchema !== schema
+      )
+        return;
       metadataCache.set(key, tables);
       set({ tables, loadingData: false });
     } catch (error) {
-      if (get().selectedDb !== selectedDb || get().selectedSchema !== schema) return;
+      if (
+        !isCurrentMetadataRequest(requestEpoch) ||
+        get().selectedDb !== selectedDb ||
+        get().selectedSchema !== schema
+      )
+        return;
       set({ errorMsg: translateError(error), loadingData: false });
     }
   },
@@ -389,6 +562,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } = get();
     if (!openId || !selectedDb) return;
     if (expandedTable === table) {
+      invalidateMetadataRequests();
       set({
         expandedTable: null,
         tableColumns: [],
@@ -400,6 +574,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const schema =
       activeConnection?.driver === "postgresql" ? selectedSchema : null;
     if (activeConnection?.driver === "postgresql" && !schema) return;
+    const requestEpoch = beginMetadataRequest();
     const driver = activeConnection?.driver ?? "mysql";
     const key = metadataKey(
       openId,
@@ -420,7 +595,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const cached = metadataCache.get<ColumnMeta[]>(key);
       if (cached) {
-        if (get().expandedTable !== table) return;
+        if (
+          !isCurrentMetadataRequest(requestEpoch) ||
+          get().expandedTable !== table
+        )
+          return;
         set((state) => ({
           tableColumns: cached,
           columnsByTable: { ...state.columnsByTable, [table]: cached },
@@ -436,6 +615,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       );
       const current = get();
       if (
+        !isCurrentMetadataRequest(requestEpoch) ||
         current.openId !== openId ||
         current.selectedDb !== selectedDb ||
         current.selectedSchema !== selectedSchema ||
@@ -452,6 +632,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch (error) {
       const current = get();
       if (
+        !isCurrentMetadataRequest(requestEpoch) ||
         current.openId !== openId ||
         current.selectedDb !== selectedDb ||
         current.selectedSchema !== selectedSchema ||
@@ -472,14 +653,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       expandedTable,
     } = get();
     if (!openId || !activeConnection) return;
+    const requestEpoch = beginMetadataRequest();
     if (!selectedDb) {
       set({ refreshingMetadata: true, errorMsg: null });
       try {
         const databases = await dbApi.listDatabases(openId);
-        if (get().openId !== openId || get().selectedDb !== null) return;
+        if (
+          !isCurrentMetadataRequest(requestEpoch) ||
+          get().openId !== openId ||
+          get().selectedDb !== null
+        )
+          return;
         set({ databases, refreshingMetadata: false });
       } catch (error) {
-        if (get().openId !== openId || get().selectedDb !== null) return;
+        if (
+          !isCurrentMetadataRequest(requestEpoch) ||
+          get().openId !== openId ||
+          get().selectedDb !== null
+        )
+          return;
         set({
           errorMsg: translateError(error),
           refreshingMetadata: false,
@@ -522,6 +714,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       ]);
       const current = get();
       if (
+        !isCurrentMetadataRequest(requestEpoch) ||
         current.openId !== openId ||
         current.selectedDb !== selectedDb ||
         current.selectedSchema !== selectedSchema ||
@@ -569,6 +762,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch (error) {
       const current = get();
       if (
+        !isCurrentMetadataRequest(requestEpoch) ||
         current.openId !== openId ||
         current.selectedDb !== selectedDb ||
         current.selectedSchema !== selectedSchema
@@ -591,6 +785,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       return Promise.reject(err);
     }
     const name = input.name.trim();
+    const requestEpoch = beginMetadataRequest();
     set({
       loadingData: true,
       errorMsg: null,
@@ -604,6 +799,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       });
       metadataCache.clearConnection(id);
       const databases = await dbApi.listDatabases(id);
+      if (!isCurrentMetadataRequest(requestEpoch)) return;
       set({
         databases,
         expandedDb: name,
@@ -622,6 +818,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         loadingData: false,
       });
     } catch (e) {
+      if (!isCurrentMetadataRequest(requestEpoch)) return;
       set({ errorMsg: translateError(e), loadingData: false });
       throw e;
     }
@@ -648,6 +845,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         queryId,
         rowLimit: 1000,
       });
+      if (get().currentQueryId !== queryId) return;
       set({
         rowSet,
         loadingData: false,
@@ -655,6 +853,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         currentQueryId: null,
       });
     } catch (e) {
+      if (get().currentQueryId !== queryId) return;
       set({
         errorMsg: translateError(e),
         queryErrorMsg: translateError(e),
@@ -686,7 +885,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         rowLimit: options?.rowLimit ?? 100000,
         allowWrite: options?.allowWrite ?? false,
       });
+      if (get().currentQueryId !== queryId) return;
       if (invalidatesMetadataCache(sql)) {
+        invalidateMetadataRequests();
         metadataCache.clearConnection(openId);
         set({
           expandedTable: null,
@@ -702,6 +903,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         currentQueryId: null,
       });
     } catch (e) {
+      if (get().currentQueryId !== queryId) return;
       set({
         queryErrorMsg: translateError(e),
         errorMsg: translateError(e),
@@ -720,6 +922,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch {
       // 取消失败不阻塞 UI 停止等待；后端 query promise 会返回最终错误。
     }
+    if (get().currentQueryId !== currentQueryId) return;
     set({
       queryRunning: false,
       loadingData: false,
@@ -730,14 +933,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   markHopStatus: (payload) =>
     set((s) => {
-      if (s.activeConnection?.id && payload.connectionId !== s.activeConnection.id) {
+      if (
+        !s.runtimeSessionId ||
+        payload.sessionId !== s.runtimeSessionId ||
+        (s.activeConnection?.id && payload.connectionId !== s.activeConnection.id)
+      ) {
         return s;
       }
       const next = {
         ...s.hopStatuses,
         [payload.hopIndex]: {
+          ...s.hopStatuses[payload.hopIndex],
           status: payload.status,
           reason: payload.reason,
+          rttState: s.hopStatuses[payload.hopIndex]?.rttState ?? "idle",
+          rttMs: s.hopStatuses[payload.hopIndex]?.rttMs ?? null,
         },
       };
       const lostHops =
@@ -745,6 +955,41 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           ? [...s.lostHops, payload.hopIndex]
           : s.lostHops;
       return { hopStatuses: next, lostHops };
+    }),
+
+  markHopRtt: (payload) =>
+    set((s) => {
+      if (
+        !s.runtimeSessionId ||
+        payload.sessionId !== s.runtimeSessionId ||
+        (s.activeConnection?.id && payload.connectionId !== s.activeConnection.id)
+      ) {
+        return s;
+      }
+      const measured =
+        payload.state === "measured" &&
+        payload.rttMs !== null &&
+        Number.isFinite(payload.rttMs) &&
+        payload.rttMs >= 0;
+      const current = s.hopStatuses[payload.hopIndex] ?? {
+        status: "connected" as HopRuntimeStatus,
+        reason: null,
+        rttState: "idle" as const,
+        rttMs: null,
+      };
+      return {
+        hopStatuses: {
+          ...s.hopStatuses,
+          [payload.hopIndex]: {
+            ...current,
+            rttState:
+              payload.state === "measured" && !measured
+                ? "unavailable"
+                : payload.state,
+            rttMs: measured ? payload.rttMs : null,
+          },
+        },
+      };
     }),
 
   markHopLost: (hopIndex) =>

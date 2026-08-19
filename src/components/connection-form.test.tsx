@@ -35,6 +35,7 @@ describe("ConnectionForm", () => {
       advanced: {
         keepAliveEnabled: false,
         keepAliveIntervalSeconds: 240,
+        keepAliveFailureThreshold: 3,
         connectTimeoutEnabled: true,
         connectTimeoutSeconds: 30,
         readTimeoutEnabled: false,
@@ -60,6 +61,25 @@ describe("ConnectionForm", () => {
     expect(screen.getByLabelText("端口")).toHaveValue(5432);
     expect(screen.getByLabelText("用户")).toHaveValue("postgres");
     expect(screen.getByText(/当前使用驱动默认 TLS 策略/)).toBeInTheDocument();
+  });
+
+  it("新建连接使用 60 秒与连续 3 次 keepalive 默认值", () => {
+    render(<ConnectionForm editing={null} onDone={() => {}} />);
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "高级" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+
+    expect(
+      screen.getByRole("checkbox", { name: "保持连接间隔（秒）" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("spinbutton", { name: "保持连接间隔（秒）" }),
+    ).toHaveValue(60);
+    expect(
+      screen.getByRole("spinbutton", { name: "连续失败阈值（次）" }),
+    ).toHaveValue(3);
   });
 
   it("测试连接会转发仅用于本次握手的私钥 passphrase", async () => {
