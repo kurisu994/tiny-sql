@@ -1,6 +1,6 @@
 //! 配置持久化 —— 加密 store 与连接配置 CRUD
 //!
-//! - [`encryption`]：AES-256-GCM + master key
+//! - [`encryption`]：AES-256-GCM + master key / Argon2id 主密码 KDF
 //! - [`store`]：连接配置整体加密落盘（connections.enc）
 //! - [`ssh_known_hosts`]：SSH 信任库（known_hosts.json，明文，TOFU 用）
 

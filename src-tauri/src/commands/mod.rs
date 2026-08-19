@@ -4,4 +4,5 @@
 
 pub mod connection;
 pub mod query;
+pub mod security;
 pub mod ssh_tofu;

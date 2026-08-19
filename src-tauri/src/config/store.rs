@@ -1,14 +1,18 @@
-//! 连接配置持久化 —— 整个文件 AES-256-GCM 加密落盘
+//! 连接配置持久化 —— 整个文件加密落盘
 //!
 //! 与 redis-desktop-client 的逐字段加密不同：tiny-sql 把**整个 JSON** 加密，
 //! 满足 FR-001（`cat connections.enc` 看不到明文 host/user/password）。
 //!
-//! passphrase 不进持久化模型（NFR-011：仅会话内存）；SSH 配置 Week 3 填充。
+//! 加密器由 [`SecurityManager`] 提供：未启用主密码时是 v1 本地 master key；
+//! 启用并解锁后是 v2 主密码派生 key（FR-102）。读取按文件实际格式自动嗅探，
+//! 锁定状态下读写返回 `error.security.locked`。
+//! passphrase 不进连接持久化模型（NFR-011）；启用主密码后可经 secrets map 加密存盘。
 
-use crate::config::encryption;
+use crate::security::SecurityManager;
 use db_driver::DriverKind;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// 密文存储文件名（整体加密，非明文 JSON）
 pub const CONNECTIONS_FILENAME: &str = "connections.enc";
@@ -165,25 +169,24 @@ fn default_keep_alive_failure_threshold() -> u64 {
     3
 }
 
-/// 连接存储管理器 —— 负责连接配置的加密读写
+/// 连接存储管理器 —— 负责连接配置的加密读写；加解密委托给 [`SecurityManager`]。
 pub struct ConnectionStore {
-    master_key: [u8; 32],
+    security: Arc<SecurityManager>,
     store_path: PathBuf,
 }
 
 impl ConnectionStore {
-    /// 初始化存储 —— 加载或生成 master key。`app_data_dir` 由 Tauri path API 提供。
-    pub fn new(app_data_dir: PathBuf) -> Result<Self, String> {
-        let key_path = app_data_dir.join(MASTER_KEY_FILENAME);
-        let master_key = encryption::get_or_create_master_key(&key_path)?;
+    /// 初始化存储。`app_data_dir` 由 Tauri path API 提供。
+    pub fn new(app_data_dir: PathBuf, security: Arc<SecurityManager>) -> Result<Self, String> {
         let store_path = app_data_dir.join(CONNECTIONS_FILENAME);
         Ok(Self {
-            master_key,
+            security,
             store_path,
         })
     }
 
-    /// 加载全部连接配置（解密整个文件）。文件不存在时返回空列表。
+    /// 加载全部连接配置（解密整个文件）。文件不存在时返回空列表；
+    /// 主密码锁定中返回 `error.security.locked`。
     pub fn load(&self) -> Result<Vec<StoredConnection>, String> {
         if !self.store_path.exists() {
             return Ok(vec![]);
@@ -192,14 +195,14 @@ impl ConnectionStore {
         if encrypted.trim().is_empty() {
             return Ok(vec![]);
         }
-        let json = encryption::decrypt_str(&self.master_key, encrypted.trim())?;
+        let json = self.security.read_cipher(&encrypted)?.decrypt(&encrypted)?;
         serde_json::from_str(&json).map_err(|e| e.to_string())
     }
 
     /// 保存全部连接配置（加密整个文件 + 临时文件原子写入）。
     fn save(&self, connections: &[StoredConnection]) -> Result<(), String> {
         let json = serde_json::to_string(connections).map_err(|e| e.to_string())?;
-        let encrypted = encryption::encrypt_str(&self.master_key, &json)?;
+        let encrypted = self.security.write_cipher()?.encrypt(&json)?;
         if let Some(parent) = self.store_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -242,12 +245,26 @@ impl ConnectionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::encryption;
+    use std::path::Path;
 
     /// 每个测试用独立临时目录，避免 master key / 存储互相污染
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("tiny-sql-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn temp_store() -> (PathBuf, Arc<SecurityManager>, ConnectionStore) {
+        let dir = temp_dir();
+        let security = Arc::new(SecurityManager::new(dir.clone()).unwrap());
+        let store = ConnectionStore::new(dir.clone(), security.clone()).unwrap();
+        (dir, security, store)
+    }
+
+    /// 读取临时目录里的本地 master key（v1）
+    fn local_master_key(dir: &Path) -> [u8; 32] {
+        encryption::get_or_create_master_key(&dir.join(MASTER_KEY_FILENAME)).unwrap()
     }
 
     fn sample(id: &str, host: &str) -> StoredConnection {
@@ -269,8 +286,7 @@ mod tests {
 
     #[test]
     fn upsert_load_roundtrip() {
-        let dir = temp_dir();
-        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let (dir, _security, store) = temp_store();
         store.upsert(sample("c1", "secret-host.internal")).unwrap();
 
         let loaded = store.load().unwrap();
@@ -328,8 +344,7 @@ mod tests {
 
     #[test]
     fn legacy_encrypted_store_loads_as_mysql_without_rewriting() {
-        let dir = temp_dir();
-        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let (dir, _security, store) = temp_store();
         let legacy_json = r#"[{
             "id": "legacy-1",
             "name": "legacy",
@@ -340,14 +355,14 @@ mod tests {
             "database": "",
             "ssh": { "enabled": false, "hops": [] }
         }]"#;
-        let encrypted = encryption::encrypt_str(&store.master_key, legacy_json).unwrap();
-        std::fs::write(&store.store_path, &encrypted).unwrap();
+        let encrypted = encryption::encrypt_str(&local_master_key(&dir), legacy_json).unwrap();
+        std::fs::write(dir.join(CONNECTIONS_FILENAME), &encrypted).unwrap();
 
         let loaded = store.load().unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].driver, DriverKind::MySql);
         assert_eq!(
-            std::fs::read_to_string(&store.store_path).unwrap(),
+            std::fs::read_to_string(dir.join(CONNECTIONS_FILENAME)).unwrap(),
             encrypted,
             "兼容读取不应在启动时重写原密文"
         );
@@ -357,8 +372,7 @@ mod tests {
 
     #[test]
     fn postgres_driver_roundtrip_uses_stable_serialized_value() {
-        let dir = temp_dir();
-        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let (dir, _security, store) = temp_store();
         let mut connection = sample("pg-1", "postgres.internal");
         connection.driver = DriverKind::PostgreSql;
         connection.port = 5432;
@@ -367,8 +381,8 @@ mod tests {
         let loaded = store.load().unwrap();
         assert_eq!(loaded[0].driver, DriverKind::PostgreSql);
 
-        let encrypted = std::fs::read_to_string(&store.store_path).unwrap();
-        let json = encryption::decrypt_str(&store.master_key, encrypted.trim()).unwrap();
+        let encrypted = std::fs::read_to_string(dir.join(CONNECTIONS_FILENAME)).unwrap();
+        let json = encryption::decrypt_str(&local_master_key(&dir), encrypted.trim()).unwrap();
         assert!(
             json.contains(r#""driver":"postgresql""#),
             "driver 持久化值必须稳定: {json}"
@@ -379,8 +393,7 @@ mod tests {
 
     #[test]
     fn failed_driver_migration_preserves_original_encrypted_file() {
-        let dir = temp_dir();
-        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let (dir, _security, store) = temp_store();
         let unsupported_json = r#"[{
             "id": "future-1",
             "name": "future",
@@ -392,12 +405,12 @@ mod tests {
             "database": "",
             "ssh": { "enabled": false, "hops": [] }
         }]"#;
-        let encrypted = encryption::encrypt_str(&store.master_key, unsupported_json).unwrap();
-        std::fs::write(&store.store_path, &encrypted).unwrap();
+        let encrypted = encryption::encrypt_str(&local_master_key(&dir), unsupported_json).unwrap();
+        std::fs::write(dir.join(CONNECTIONS_FILENAME), &encrypted).unwrap();
 
         assert!(store.load().is_err(), "未知 driver 必须拒绝迁移");
         assert_eq!(
-            std::fs::read_to_string(&store.store_path).unwrap(),
+            std::fs::read_to_string(dir.join(CONNECTIONS_FILENAME)).unwrap(),
             encrypted,
             "迁移失败不得覆盖原密文"
         );
@@ -408,8 +421,7 @@ mod tests {
     #[test]
     fn file_on_disk_has_no_plaintext() {
         // FR-001：磁盘文件不能出现明文 host / password
-        let dir = temp_dir();
-        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let (dir, _security, store) = temp_store();
         store.upsert(sample("c1", "secret-host.internal")).unwrap();
 
         let raw = std::fs::read_to_string(dir.join(CONNECTIONS_FILENAME)).unwrap();
@@ -424,8 +436,7 @@ mod tests {
 
     #[test]
     fn upsert_updates_existing_and_delete_removes() {
-        let dir = temp_dir();
-        let store = ConnectionStore::new(dir.clone()).unwrap();
+        let (dir, _security, store) = temp_store();
         store.upsert(sample("c1", "h1")).unwrap();
 
         let mut updated = sample("c1", "h2");
@@ -438,6 +449,58 @@ mod tests {
 
         store.delete("c1").unwrap();
         assert!(store.load().unwrap().is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ===== v0.2 主密码模式（FR-102）=====
+
+    #[test]
+    fn locked_store_read_write_fails_with_stable_key() {
+        let (dir, security, store) = temp_store();
+        store.upsert(sample("c1", "h1")).unwrap();
+        security.setup_master_password("pw").unwrap();
+        security.lock();
+
+        assert_eq!(store.load().unwrap_err(), "error.security.locked");
+        assert_eq!(
+            store.upsert(sample("c2", "h2")).unwrap_err(),
+            "error.security.locked"
+        );
+
+        security.unlock("pw").unwrap();
+        assert_eq!(store.load().unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unlocked_store_writes_v2_and_reads_back() {
+        let (dir, security, store) = temp_store();
+        store.upsert(sample("c1", "secret-host.internal")).unwrap();
+        security.setup_master_password("pw").unwrap();
+
+        // 迁移后文件为 v2，读取正常
+        let raw = std::fs::read_to_string(dir.join(CONNECTIONS_FILENAME)).unwrap();
+        assert!(encryption::is_v2_envelope(&raw));
+        assert!(!raw.contains("secret-host.internal"));
+
+        // 新写入也走 v2
+        store.upsert(sample("c2", "h2")).unwrap();
+        assert_eq!(store.load().unwrap().len(), 2);
+        let raw = std::fs::read_to_string(dir.join(CONNECTIONS_FILENAME)).unwrap();
+        assert!(encryption::is_v2_envelope(&raw));
+
+        // 模拟重启：锁定后 v2 读不了，解锁后恢复
+        let store2 = ConnectionStore::new(
+            dir.clone(),
+            Arc::new(SecurityManager::new(dir.clone()).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(store2.load().unwrap_err(), "error.security.locked");
+        let security3 = Arc::new(SecurityManager::new(dir.clone()).unwrap());
+        security3.unlock("pw").unwrap();
+        let store3 = ConnectionStore::new(dir.clone(), security3).unwrap();
+        assert_eq!(store3.load().unwrap().len(), 2);
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -12,6 +12,7 @@ use ssh_multihop::{
     HostKeyQuery, HostKeyVerifier, KeepaliveConfig, SshAuth, SshHop, TunnelContext,
 };
 use tauri::{AppHandle, Emitter, State};
+use zeroize::Zeroizing;
 
 use crate::config::store::{self, AdvancedConfig, SshConfig, SslConfig, StoredConnection};
 use crate::state::{ActiveDriver, ActiveQuery, AppState, OpenConnection};
@@ -84,9 +85,12 @@ pub async fn connection_update(
     state.store.lock().unwrap().upsert(connection)
 }
 
-/// 删除连接。
+/// 删除连接，同时清理会话缓存与已持久化的 passphrase。
 #[tauri::command]
 pub async fn connection_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.passphrases.lock().unwrap().remove(&id);
+    // secrets 清理失败不阻塞连接删除（例如当前处于锁定状态，解锁后可再清理）
+    let _ = state.security.remove_secret(&id);
     state.store.lock().unwrap().delete(&id)
 }
 
@@ -295,21 +299,30 @@ struct HopRttPayload {
 
 /// 打开一条已保存的连接：建立（可选）SSH 隧道 + 对应数据库连接池，存入注册表。
 ///
-/// `passphrase` 为本次提供的私钥口令（仅会话内存）；成功后缓存，下次打开同一连接
-/// 自动复用（FR-011：首次弹窗、本会话第二次静默）。已打开则幂等返回。
+/// `passphrase` 为本次提供的私钥口令；优先级：本次传入 > 会话缓存 > 已持久化
+/// secrets（需主密码已解锁）。`remember_passphrase=true` 且主密码解锁时，把本次
+/// passphrase 加密落盘（FR-102）；否则仅缓存到会话内存（NFR-011）。已打开则幂等返回。
 #[tauri::command]
 pub async fn connection_open(
     app: AppHandle,
     state: State<'_, AppState>,
     id: String,
     passphrase: Option<String>,
+    remember_passphrase: Option<bool>,
 ) -> Result<String, String> {
     let lifecycle = state.connection_lifecycle(&id);
     let _lifecycle = lifecycle.lock().await;
     if let Some(existing) = state.connections.lock().await.get(&id) {
         return Ok(existing.session_id.clone());
     }
-    open_connection_locked(&app, &state, &id, passphrase).await
+    open_connection_locked(
+        &app,
+        &state,
+        &id,
+        passphrase,
+        remember_passphrase.unwrap_or(false),
+    )
+    .await
 }
 
 /// 手动重连：按连接取消旧查询，关闭旧 pool/tunnel，再建立一个新 session。
@@ -341,7 +354,8 @@ pub async fn connection_reconnect(
     if let Some(old) = old {
         old.close().await;
     }
-    open_connection_locked(&app, &state, &id, passphrase).await
+    // 重连不持久化新 passphrase（remember 语义只在显式 open 时生效）
+    open_connection_locked(&app, &state, &id, passphrase, false).await
 }
 
 /// 生命周期锁内建立并注册连接；调用方必须先持有 `connection_lifecycle`。
@@ -350,6 +364,7 @@ async fn open_connection_locked(
     state: &State<'_, AppState>,
     id: &str,
     passphrase: Option<String>,
+    remember_passphrase: bool,
 ) -> Result<String, String> {
     let session_id = uuid::Uuid::new_v4().to_string();
 
@@ -364,9 +379,18 @@ async fn open_connection_locked(
     };
 
     // passphrase：本次传入优先，否则用会话缓存
+    // passphrase：本次传入优先，其次会话缓存，最后已持久化 secrets（需已解锁）
     let effective_passphrase = passphrase
         .clone()
-        .or_else(|| state.passphrases.lock().unwrap().get(id).cloned());
+        .or_else(|| {
+            state
+                .passphrases
+                .lock()
+                .unwrap()
+                .get(id)
+                .map(|p| p.to_string())
+        })
+        .or_else(|| state.security.secret_for(id));
 
     // 直连用真实 host:port；走隧道时换隧道的本地端口
     let (host, port, tunnel) = if conn.ssh.enabled {
@@ -431,9 +455,17 @@ async fn open_connection_locked(
         return Err(error.i18n_key().to_string());
     }
 
-    // 成功：缓存本次 passphrase + 落注册表 + 刷新最近使用
+    // 成功：缓存本次 passphrase + 按需持久化 + 落注册表 + 刷新最近使用
     if let Some(pp) = passphrase {
-        state.passphrases.lock().unwrap().insert(id.to_string(), pp);
+        if remember_passphrase {
+            // 仅在主密码解锁时允许落盘；失败不阻塞连接（仅本次会话生效）
+            let _ = state.security.save_secret(id, &pp);
+        }
+        state
+            .passphrases
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), Zeroizing::new(pp));
     }
     state.connections.lock().await.insert(
         id.to_string(),

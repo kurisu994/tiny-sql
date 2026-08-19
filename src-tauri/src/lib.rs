@@ -9,6 +9,7 @@ use tauri::Manager;
 
 pub mod commands;
 pub mod config;
+pub mod security;
 pub mod state;
 pub mod tofu;
 
@@ -38,7 +39,9 @@ fn setup_app_menu<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_process::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(desktop)]
     let builder = builder.on_menu_event(|app, event| {
@@ -63,13 +66,18 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            // 初始化连接配置加密存储 + SSH 信任库（master key / connections.enc /
-            // known_hosts.json 都落在 app data 目录）
+            // 初始化主密码安全管理、连接配置加密存储与 SSH 信任库
+            // （security.json / master.key / connections.enc / known_hosts.json
+            // 都落在 app data 目录）
             let app_data_dir = app.path().app_data_dir()?;
-            let store = config::store::ConnectionStore::new(app_data_dir.clone())
+            let security = std::sync::Arc::new(
+                security::SecurityManager::new(app_data_dir.clone())
+                    .map_err(std::io::Error::other)?,
+            );
+            let store = config::store::ConnectionStore::new(app_data_dir.clone(), security.clone())
                 .map_err(std::io::Error::other)?;
             let known_hosts = config::ssh_known_hosts::SshKnownHostsStore::new(app_data_dir);
-            app.manage(state::AppState::new(store, known_hosts));
+            app.manage(state::AppState::new(store, known_hosts, security));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -89,6 +97,12 @@ pub fn run() {
             commands::query::db_query,
             commands::query::db_query_cancel,
             commands::ssh_tofu::ssh_tofu_decision,
+            commands::security::security_status,
+            commands::security::security_setup,
+            commands::security::security_unlock,
+            commands::security::security_lock,
+            commands::security::security_disable,
+            commands::security::security_reset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

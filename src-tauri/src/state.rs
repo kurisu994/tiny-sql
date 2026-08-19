@@ -10,9 +10,11 @@ use db_driver::{
 use ssh_multihop::SshTunnel;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
+use zeroize::Zeroizing;
 
 use crate::config::ssh_known_hosts::SshKnownHostsStore;
 use crate::config::store::ConnectionStore;
+use crate::security::SecurityManager;
 use crate::tofu::SshTofuManager;
 
 /// 活跃连接持有的具体数据库 driver。
@@ -143,12 +145,19 @@ pub struct AppState {
     pub known_hosts: Arc<SshKnownHostsStore>,
     /// TOFU 决策管理器（前端弹窗回调通道）。
     pub tofu: Arc<SshTofuManager>,
-    /// 会话内 passphrase 缓存：connection_id → passphrase（NFR-011：仅内存不落盘）。
-    pub passphrases: Mutex<HashMap<String, String>>,
+    /// 会话内 passphrase 缓存：connection_id → passphrase（NFR-011：仅内存不落盘；
+    /// 主密码启用后可通过 secrets map 加密持久化）。
+    pub passphrases: Mutex<HashMap<String, Zeroizing<String>>>,
+    /// 用户主密码与派生 key 状态机（FR-102）。
+    pub security: Arc<SecurityManager>,
 }
 
 impl AppState {
-    pub fn new(store: ConnectionStore, known_hosts: SshKnownHostsStore) -> Self {
+    pub fn new(
+        store: ConnectionStore,
+        known_hosts: SshKnownHostsStore,
+        security: Arc<SecurityManager>,
+    ) -> Self {
         Self {
             store: Mutex::new(store),
             connections: AsyncMutex::new(HashMap::new()),
@@ -157,6 +166,7 @@ impl AppState {
             known_hosts: Arc::new(known_hosts),
             tofu: Arc::new(SshTofuManager::default()),
             passphrases: Mutex::new(HashMap::new()),
+            security,
         }
     }
 
