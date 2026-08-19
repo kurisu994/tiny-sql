@@ -182,6 +182,26 @@ describe("session-store", () => {
     expect(useSessionStore.getState().tabs).toHaveLength(2);
   });
 
+  it("selectTable 重复点击同一表复用已有预览 tab，不产生重复 tab", async () => {
+    useSessionStore.setState({ openId: "c1", selectedDb: "app" });
+    routeInvoke({
+      db_query: { columns: ["id"], rows: [["1"]], truncated: false },
+    });
+    // 模拟双击 / 反复点击同一张表
+    await useSessionStore.getState().selectTable("users");
+    await useSessionStore.getState().selectTable("users");
+    await useSessionStore.getState().selectTable("users");
+
+    const s = useSessionStore.getState();
+    expect(s.tabs.filter((t) => t.selectedTable === "users")).toHaveLength(1);
+    expect(s.tabs).toHaveLength(2); // 初始 tab + 一个预览 tab
+    expect(activeTab().selectedTable).toBe("users");
+    // 只查询过一次
+    expect(
+      mockInvoke.mock.calls.filter(([cmd]) => cmd === "db_query"),
+    ).toHaveLength(1);
+  });
+
   it("reconnect 清理旧查询状态并使用新 session 重新加载数据库", async () => {
     const connection = sampleConnection("mysql");
     useSessionStore.setState({

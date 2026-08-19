@@ -6,7 +6,9 @@
 
 ## 当前状态
 
-**本轮新增：PostgreSQL 跨 database 浏览的「一键切换」引导**——`selectDb`/`refreshMetadata` 捕获 `error.driver.database_switch_required` 时记录 `pendingDbSwitch`，错误横幅出现「切换到 <db>」按钮；点击后以 session 级 `databaseOverride` 走标准重连（`connection_reconnect` 新增可选参数，不落盘），成功后自动选中目标库。关闭后重新打开仍是保存配置里的原 database。前端 tsc + vitest（session-store 35、schema-browser 3）与 cargo clippy/test（45）全绿。
+**本轮修复：点击表重复开 tab（2026-08-19）**——schema 树表名单击触发 `selectTable`，原实现每次无条件 `createTab`，双击一次会开出两个同名预览 tab。修复为去重复用：已存在 `selectedTable === table && initialSql === 生成的预览 SQL` 的 tab 时只激活不新建（initialSql 含命名空间引号，可区分不同 db/schema 同名表）。新增 session-store 去重测试，前端 vitest 36/36 与 tsc 全绿，CHANGELOG `[Unreleased]` 已补录。
+
+**上轮新增：PostgreSQL 跨 database 浏览的「一键切换」引导**——`selectDb`/`refreshMetadata` 捕获 `error.driver.database_switch_required` 时记录 `pendingDbSwitch`，错误横幅出现「切换到 <db>」按钮；点击后以 session 级 `databaseOverride` 走标准重连（`connection_reconnect` 新增可选参数，不落盘），成功后自动选中目标库。关闭后重新打开仍是保存配置里的原 database。前端 tsc + vitest（session-store 35、schema-browser 3）与 cargo clippy/test（45）全绿。
 
 **v0.2 全部代码事项已完成：Week 4 主密码加密/TLS 代码、Week 6 查询工作台（历史/多 tab/导出/列宽）本周落地，加上此前的 Week 1-3 多 driver、Week 5 schema intelligence、Week 7 RTT/重连/状态决策，v0.2 自动化门禁全绿。** 剩余均为真实环境/人工验收：V2-T3.4（PostgreSQL Tauri 直连/切换/取消/1 跳 SSH）、V2-T4.3（真实 TLS 正反例）、V2-T8.1/T8.2（双 driver dogfooding）、V2-T8.4（RC 全平台下载与发布）。
 
@@ -97,7 +99,7 @@
 
 - V2-T4.1 采用「集中 KDF 元信息 + 最小 envelope」：security.json 存 Argon2id 参数/盐/verifier，数据文件 envelope 只带 v/nonce/data；v1/v2 按文件嗅探，未启用主密码保持 v1 行为零变化。
 - zeroize 精确约束 =1.8.1（1.9 起 MSRV 1.85 会破坏项目 1.77.2 承诺）；argon2 0.5 / rust_xlsxwriter 0.83 / tauri-plugin-dialog 2.7 的 MSRV 与 license（均 MIT/Apache）已审计。
-- 多 tab 采用「表预览新开 tab、重连/建库保留 SQL 只复位执行态」语义；query 迟到守卫从单 query_id 升级为 tab-local query_id。
+- 多 tab 采用「表预览按表去重（已有同表预览 tab 只激活不新开）、重连/建库保留 SQL 只复位执行态」语义；query 迟到守卫从单 query_id 升级为 tab-local query_id。
 - 导出重新执行当前 SQL 并在后端流式写文件（不经过前端序列化）；只允许只读 SQL；CSV NULL 字面量与加引号空串/"NULL" 文本严格区分。
 - V2-T7.4 决策保留现有公共契约（不新增 KILL QUERY 四状态/统一状态机），重审触发条件已记录到 progress.md。
 

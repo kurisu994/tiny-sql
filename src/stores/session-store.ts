@@ -930,7 +930,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const namespace = driver === "postgresql" ? selectedSchema : selectedDb;
     if (!namespace) return;
     const sql = `SELECT * FROM ${quoteIdent(namespace, driver)}.${quoteIdent(table, driver)}`;
-    // 双击表 = 新开 tab 执行预览（FR-109），不覆盖用户在其他 tab 的 SQL
+    // 已存在同一张表的预览 tab（initialSql 与预览 SQL 一致）时直接激活，
+    // 避免双击/反复点击同一表产生重复 tab；不覆盖用户在其他 tab 的 SQL
+    const existing = get().tabs.find(
+      (t) => t.selectedTable === table && t.initialSql === sql,
+    );
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return;
+    }
     const tab = createTab(table, sql);
     set((s) => ({
       tabs: [...s.tabs, tab],
