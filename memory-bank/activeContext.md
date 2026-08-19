@@ -6,11 +6,13 @@
 
 ## 当前状态
 
-**本轮修复：点击表重复开 tab（2026-08-19）**——schema 树表名单击触发 `selectTable`，原实现每次无条件 `createTab`，双击一次会开出两个同名预览 tab。修复为去重复用：已存在 `selectedTable === table && initialSql === 生成的预览 SQL` 的 tab 时只激活不新建（initialSql 含命名空间引号，可区分不同 db/schema 同名表）。新增 session-store 去重测试，前端 vitest 36/36 与 tsc 全绿，CHANGELOG `[Unreleased]` 已补录。
+**里程碑：v0.2 真实环境验收全部通过（2026-08-19）**——用户实测通过 PLAN.md「真实环境验收」全部四项：T3.4（PostgreSQL 直连、双 driver 切换/取消不串线、各自 1 跳 SSH）、T4.3（真实 TLS MySQL 四种模式正反例 + 双向证书）、T7.1/T7.2 真实链路（RTT/超时不阻塞主链路、断中间跳 lost → 重连闭环）、T8.1（双 driver × 直连/1 跳/3 跳 dogfooding）。V2-CP2/CP3/CP4 关闭，PLAN.md 仅余发布事项；CHANGELOG / ARCHITECTURE / REQUIREMENTS 的验收口径已同步。
+
+**上一轮修复：点击表重复开 tab（2026-08-19）**——schema 树表名单击触发 `selectTable`，原实现每次无条件 `createTab`，双击一次会开出两个同名预览 tab。修复为去重复用：已存在 `selectedTable === table && initialSql === 生成的预览 SQL` 的 tab 时只激活不新建（initialSql 含命名空间引号，可区分不同 db/schema 同名表）。新增 session-store 去重测试，前端 vitest 36/36 与 tsc 全绿，CHANGELOG `[Unreleased]` 已补录。
 
 **上轮新增：PostgreSQL 跨 database 浏览的「一键切换」引导**——`selectDb`/`refreshMetadata` 捕获 `error.driver.database_switch_required` 时记录 `pendingDbSwitch`，错误横幅出现「切换到 <db>」按钮；点击后以 session 级 `databaseOverride` 走标准重连（`connection_reconnect` 新增可选参数，不落盘），成功后自动选中目标库。关闭后重新打开仍是保存配置里的原 database。前端 tsc + vitest（session-store 35、schema-browser 3）与 cargo clippy/test（45）全绿。
 
-**v0.2 全部代码事项已完成：Week 4 主密码加密/TLS 代码、Week 6 查询工作台（历史/多 tab/导出/列宽）本周落地，加上此前的 Week 1-3 多 driver、Week 5 schema intelligence、Week 7 RTT/重连/状态决策，v0.2 自动化门禁全绿。** 剩余均为真实环境/人工验收：V2-T3.4（PostgreSQL Tauri 直连/切换/取消/1 跳 SSH）、V2-T4.3（真实 TLS 正反例）、V2-T8.1/T8.2（双 driver dogfooding）、V2-T8.4（RC 全平台下载与发布）。
+**v0.2 全部代码事项与真实环境验收已完成：Week 4 主密码加密/TLS 代码、Week 6 查询工作台（历史/多 tab/导出/列宽）本周落地，加上此前的 Week 1-3 多 driver、Week 5 schema intelligence、Week 7 RTT/重连/状态决策，v0.2 自动化门禁全绿、真实验收通过。** 剩余仅为发布事项：PostgreSQL 15/18 双端点回归、V2-T8.2（双 driver RC 一周试用）、V2-T8.4（RC 全平台下载与发布）。
 
 本轮门禁事实：`just check` 全绿（app_lib 45、db-driver 27、ssh-multihop 8、前端 90 项测试、TypeScript、Next.js 生产构建）；真实 MySQL 5/5 与 PostgreSQL 4/4 integration 全绿；本机 Tauri debug bundle + dmg + updater 签名产物构建成功。
 
@@ -46,12 +48,12 @@
 
 ## 已知代码 / 承诺边界
 
-- MySQL TLS 已接线 SSL 模式和证书路径，但真实 TLS / 双向证书环境尚未验收。
+- MySQL TLS 已接线 SSL 模式和证书路径，真实 TLS / 双向证书环境已验收通过（V2-T4.3）。
 - SSH keepalive 使用 russh 内置机制 + 轻量只读监控 task；运行期会统一上报 `lost`，监控不会额外发包或改变配置间隔。
 - SSH 运行期首跳 session、嵌套 transport channel 与 accept worker 故障均已接入 `lost` 事件；shutdown 与每跳原子标记分别抑制正常关闭误报和重复断链事件。
 - `connection_test` 的 passphrase 仍为瞬时参数（不落盘、不进会话缓存）；正式连接的 passphrase 在启用主密码后可经 secrets.enc 持久化，否则仅会话缓存（Zeroizing）。
 - Tauri query error 使用 `{ key, line? }` 安全载荷；db-driver 只从后端原始错误提取正整数行号，CodeMirror 继续从本地化文案标记 gutter，原始数据库错误与 SQL 片段不进入 IPC。
-- PostgreSQL 同一连接只展开当前 database；浏览其他 database 时错误横幅提供一键切换（session 级 override 重连，不落盘，重开仍是原库），不做隐式重连。证书路径尚未传给 PostgreSQL driver，真实 Tauri 直连/1 跳 SSH 仍待 V2-T3.4 验收。
+- PostgreSQL 同一连接只展开当前 database；浏览其他 database 时错误横幅提供一键切换（session 级 override 重连，不落盘，重开仍是原库），不做隐式重连。真实 Tauri 直连 / 1 跳 SSH 验收已通过（V2-T3.4）；证书路径尚未传给 PostgreSQL driver。
 
 ## 活跃文件
 
@@ -105,11 +107,9 @@
 
 ## 下一步（按优先级）
 
-1. V2-T3.4 人工验收：用 `target/debug/bundle` 的调试包补验 PostgreSQL 直连、双 driver 切换/取消不串线、各自 1 跳 SSH，通过后关闭 V2-CP2。
-2. V2-T4.3 人工验收：准备真实 TLS MySQL（含自签 CA 与双向证书），跑 Preferred/Required/Verify CA/Verify Identity 正反例。
-3. 真实多跳环境验收 T7.1 RTT 数值/超时与 T7.2 中间跳断链 lost → 重连闭环。
-4. Week 8：双 driver 0/1/3 跳 dogfooding（T8.1）→ ≥2 位试用者 1 周 RC（T8.2）→ `just release v0.2.0-rc1` 全平台下载验收（T8.4）→ P0/P1 清零后发布 v0.2.0。
-5. RC 前补 PostgreSQL 15.latest / 18.latest 双端点兼容回归。
+1. RC 前完成 PostgreSQL 15.latest / 18.latest 双端点 integration 回归（版本基线见 techContext.md）。
+2. V2-T8.2：作者和至少 2 位试用者使用 v0.2 RC ≥ 1 周（至少 1 人以 PostgreSQL 为主），要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
+3. V2-T8.4：`just release v0.2.0-rc1` 触发全平台构建并下载验收；P0/P1 清零后发布 v0.2.0（V2-CP5）。
 
 ## 阻塞 / 风险
 

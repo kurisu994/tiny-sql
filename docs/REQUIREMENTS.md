@@ -293,7 +293,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md)。
 
-- **FR-100** PostgreSQL driver（后端与 AppState/Tauri/UI 代码已接线，真实 driver integration 通过；Tauri 直连/1 跳 SSH 应用验收仍待 V2-T3.4）
+- **FR-100** PostgreSQL driver（后端与 AppState/Tauri/UI 已接线，真实 driver integration 与 Tauri 直连/1 跳 SSH 应用验收均通过）
 - **FR-102** 加密 passphrase 存储（v0.2 已实现用户主密码 Argon2id 派生 key + v2 envelope + secrets.enc；迁移可回滚）
 - **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（模式/路径/证书选择器与 TLS 专项错误 key 已接线；真实 TLS 环境验收仍待 V2-T8.1）
 - **FR-104** Schema-aware 智能联想：按 MySQL/PostgreSQL 方言补全当前命名空间的 table、column 和 alias；已加载列满足 `target_id → target.id`、反向关系或同名 key/id 时，在输入 `JOIN` 后提供带 ON 条件的候选片段。

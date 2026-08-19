@@ -15,6 +15,8 @@ v0.2 在 v0.1 全平台发布链路不变的前提下，新增以下验收项（
 
 ### v0.2 双 driver dogfooding（V2-T8.1 / T8.2）
 
+> 状态：T8.1 部分（双 driver × 直连/1 跳/3 跳、metadata/查询/取消/历史/tab/导出/重连、MySQL 真实 TLS 正反例、断中间跳 lost → 重连、RTT 不阻塞主链路）已于 2026-08-19 验收通过；主密码全路径与 ≥2 位试用者 RC 一周试用（T8.2）待进行。
+
 - MySQL 与 PostgreSQL 各自完成：直连、1 跳 SSH、真实 3 跳 SSH 回归，覆盖 metadata 树、查询、取消、SQL 历史、多 tab、导出、重连。
 - MySQL 真实 TLS 环境验收：Preferred / Required / Verify CA / Verify Identity 正反例与双向证书（V2-T4.3）；PostgreSQL 走 driver 默认 TLS 策略。
 - 主密码全路径：启用迁移（旧配置无损）→ 重启解锁 → 错误密码拒绝且不破坏数据 → 记住 passphrase 后重启免输入 → 锁定/关闭/忘记密码重置。

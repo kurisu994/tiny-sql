@@ -472,7 +472,7 @@ pub enum DriverError {
 
 **MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5）。`connect_with_settings` 用 `MySqlConnectOptions` 分字段传参（host/port/user/password/database + SSL + 超时），避免 URL 拼接带来的密码特殊字符编码问题；SSL 默认禁用，但用户显式选择 Preferred / Required / Verify CA / Verify Identity 时会把模式和证书路径传给 sqlx。该链路已有单元测试与配置接线，真实 TLS MySQL 服务器验收仍待 dogfooding。`connect_url` 接受 `mysql://` URL，仅用于 integration 测试等场景。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
 
-**PostgresDriver 实现**：位于独立 `src/postgres.rs`。显式连接使用 `PgConnectOptions::new_without_pgpass()`，不会在密码为空时静默读取用户 `~/.pgpass`；metadata 分别查询 `pg_database`、`pg_namespace`、`pg_class` 与 `pg_attribute`，保留 database/schema 两层语义。query 支持 PostgreSQL `TABLE` / `VALUES`、dollar-quoted body、数据修改 CTE 与 DML `RETURNING`；结果覆盖 NULL、日期时间、整数/浮点/NUMERIC、JSON/JSONB、文本与 BYTEA。后端契约与 AppState/Tauri/UI 已接线；真实 Tauri 直连和 1 跳 SSH 验收仍待 V2-T3.4。
+**PostgresDriver 实现**：位于独立 `src/postgres.rs`。显式连接使用 `PgConnectOptions::new_without_pgpass()`，不会在密码为空时静默读取用户 `~/.pgpass`；metadata 分别查询 `pg_database`、`pg_namespace`、`pg_class` 与 `pg_attribute`，保留 database/schema 两层语义。query 支持 PostgreSQL `TABLE` / `VALUES`、dollar-quoted body、数据修改 CTE 与 DML `RETURNING`；结果覆盖 NULL、日期时间、整数/浮点/NUMERIC、JSON/JSONB、文本与 BYTEA。后端契约与 AppState/Tauri/UI 已接线；真实 Tauri 直连和 1 跳 SSH 验收已通过（V2-T3.4）。
 
 **取消的独立 control pool**：两个 driver 都在主 pool 外持有 max=1 的 control pool。MySQL 记录 `CONNECTION_ID()` 后发 `KILL QUERY <id>`；PostgreSQL 记录 `pg_backend_pid()` 后由同账号调用 `pg_cancel_backend($1)`。取消或客户端无服务端 LIMIT 截断后，PostgreSQL 将执行连接标为 `close_on_drop`，避免未消费协议消息污染 pool。control pool 与主 pool 使用同一连接参数/隧道本地端口，但状态解耦，主 pool 满时仍能取消。
 

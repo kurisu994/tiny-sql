@@ -8,7 +8,7 @@
 |---|---|---|
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
 | v0.1.0 | ✅ 正式版已发布 | 2026-08-18 全平台 Release 成功，含安装包、签名更新产物与四平台 `latest.json` |
-| v0.2 | 🚧 开发中 | Week 1-3（多 driver）、Week 4（主密码/TLS 代码）、Week 5（schema intelligence）、Week 6（查询工作台）、Week 7（RTT/重连/状态决策）自动化门禁均已完成；剩 T3.4/T4.3/T8.1/T8.2/T8.4 真实环境验收与发布 |
+| v0.2 | 🚧 待发布 | Week 1-7 开发与自动化门禁均完成；2026-08-19 真实环境验收（T3.4/T4.3/T7.x 链路/T8.1）全部通过，V2-CP2/CP3/CP4 关闭；剩 PostgreSQL 版本矩阵回归、T8.2 RC 试用与 T8.4 发布 |
 | v0.3 | 规划 | 保存/打开 SQL、index/constraint 树、对象搜索、服务端筛选分页、多结果与可靠事务 |
 | v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
 | v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
@@ -138,6 +138,7 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 - **2026-08-19 v0.2 Week 6 查询工作台（V2-T6.1~T6.5）**：SQL 历史 `history.enc` 由 `db_query` 自动记录（最新在前、100 条上限、SQL 截断 4000 字符、锁定不可读写、可显式清空）。session-store 重构为多 tab：每 tab 独立 SQL/结果/query_id/取消/dirty，双击表预览新开 tab，重连/建库保留 SQL 只复位执行态；并发取消隔离与关闭执行中 tab 先取消均有前端回归（T6.5）。导出 `db_export_query` 后端重新执行只读 SQL 并流式写文件：CSV 带 BOM、NULL 无引号字面量、空串与 "NULL" 文本强制加引号；XLSX 用 rust_xlsxwriter constant_memory 流式写出。列宽拖拽 64-640px clamp、按连接+列签名 localStorage 持久化、可恢复默认（FR-111）。
 - **2026-08-19 V2-T7.4 状态模型决策**：保留现有公共契约，不实施 KILL QUERY 四状态与 SSH 统一状态机。依据：取消令牌 + query_id/session_id 双守卫已覆盖取消、重连与并发串线场景且自动化门禁无反例；新增公共状态会扩大 IPC 契约面而无对应用户反馈。重审触发条件：真实 dogfooding 出现取消状态误报或连接状态混淆反馈。
 - **2026-08-19 V2-T8.3 文档与 T8.4 本地门禁**：ARCHITECTURE 双时代加密格式/目录结构、REQUIREMENTS FR 状态、RELEASE_CHECKLIST v0.2 段已更新；新增 `README_EN.md` 与 `CONTRIBUTING.md`。`just check` 全绿（app_lib 45、db-driver 27、ssh-multihop 8、前端 90），双 driver integration 9/9，本机 debug bundle + dmg + updater 签名产物构建成功。
+- **2026-08-19 v0.2 真实环境验收全部通过（V2-CP2/CP3/CP4 关闭）**：用户实测通过 T3.4（PostgreSQL 直连、双 driver 切换与取消不串线、MySQL/PostgreSQL 各自 1 跳 SSH）、T4.3（真实 TLS MySQL Preferred/Required/Verify CA/Verify Identity 正反例与双向证书）、T7.1/T7.2 真实链路（多跳 RTT 数值与 2s 超时不阻塞主链路、断中间跳 lost → 手动重连闭环无泄漏）、T8.1（双 driver × 直连/1 跳/3 跳 dogfooding，覆盖 metadata/查询/取消/历史/tab/导出/TLS/重连）。v0.2 剩余仅为发布：PostgreSQL 15/18 双端点回归、T8.2 RC 一周试用、T8.4 全平台发布。
 
 ## 已解决的阻碍
 
