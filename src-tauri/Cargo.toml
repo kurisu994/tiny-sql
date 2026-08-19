@@ -30,6 +30,13 @@ db-driver = { path = "../crates/db-driver" }
 # 连接配置加密 store
 aes-gcm = "0.10"
 base64 = "0.22"
+# 用户主密码 KDF（Argon2id v19，无 default features 即可满足 hash_password_into）
+argon2 = { version = "0.5", default-features = false }
+# 内存密钥清零；=1.8.x 精确约束以兼容项目声明的 MSRV 1.77（1.9 起官方 MSRV 1.85）
+zeroize = "=1.8.1"
 uuid = { version = "1", features = ["v4"] }
 # 最近使用时间戳（ISO 8601）
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+# 结果集导出 Excel（FR-107）；constant_memory 支持大结果集恒定内存流式写出
+rust_xlsxwriter = { version = "0.83", features = ["constant_memory"] }
+tauri-plugin-dialog = "2.7.2"
