@@ -11,7 +11,7 @@ last_updated: 2026-08-19
 >
 > 本文件只保留尚未完成的工作。v0.1 已实现内容、历史检查点和架构决策见 [progress.md](../memory-bank/progress.md)。
 
-当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包、`latest.json` 及从 v0.0.3 到 v0.1.0 的应用内更新闭环。PostgreSQL 版本基线已固化，v0.2 Week 1-3 自动化开发门禁已完成，真实 Tauri 应用验收仍待 V2-T3.4。
+当前稳定版为 `v0.1.0`，已于 2026-08-18 发布并验证全平台安装包、签名更新包、`latest.json` 及从 v0.0.3 到 v0.1.0 的应用内更新闭环。PostgreSQL 版本基线已固化，v0.2 Week 1-3 与 Week 4-7 的自动化开发门禁均已完成；剩余真实环境验收：V2-T3.4（PostgreSQL Tauri 直连/切换/取消/1 跳 SSH）、V2-T4.3（真实 TLS）、Week 8 dogfooding 与发布。
 
 ## v0.2 开发计划
 
@@ -75,12 +75,12 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### Week 4：凭据安全与 TLS（13h）
 
-- [ ] **V2-T4.1 [5h]** 设计用户主密码派生密钥与 passphrase 加密格式；新 KDF / secret 依赖先完成安全与 license 审计，不自创密码算法。
-- [ ] **V2-T4.2 [3h]** 实现旧连接文件到新格式的可恢复迁移、锁定/解锁 UX、错误密码与忘记主密码路径；采用临时文件 + 原子替换。
-- [ ] **V2-T4.3 [3h]** 在真实 TLS MySQL 上验收 Preferred / Required / Verify CA / Verify Identity 及双向证书，补证书选择和可行动错误提示。
-- [ ] **V2-T4.4 [2h]** 验证 passphrase 不出现在明文文件、日志、崩溃信息和导出内容；迁移失败可原样恢复。
+- [x] **V2-T4.1 [5h]** 用户主密码方案已落地：Argon2id v19（19 MiB / t=2 / p=1）派生 32 字节数据 key，AES-256-GCM v2 自描述 envelope，`security.json` 存明文 KDF 参数 + verifier 区分密码错误与数据损坏；passphrase 经独立 `secrets.enc` secrets map 持久化。新增直接依赖 argon2 0.5 / zeroize =1.8.1（MSRV 与 license 审计通过），不自创密码算法。
+- [x] **V2-T4.2 [3h]** v1→v2 迁移采用 `.bak` 备份 + 临时文件 + rename 原子替换，`security.json` 最后写入作为提交点；任一步失败用 `.bak` 回滚，崩溃中断后下次启动自动还原。前端提供启动解锁框、安全设置（启用/锁定/关闭）与忘记主密码重置路径；错误密码不触碰任何数据文件。
+- [ ] **V2-T4.3 [3h]** 代码部分已完成：SSL 页 CA/客户端证书/私钥路径支持系统文件选择器，MySQL 连接失败按 SSL 模式细分出 `error.driver.tls_handshake_failed` / `error.driver.tls_verify_failed` 并配可操作文案。真实 TLS MySQL 的 Preferred / Required / Verify CA / Verify Identity 及双向证书正反例验收仍待 V2-T8.1 环境。
+- [x] **V2-T4.4 [2h]** 明文扫描测试覆盖 connections.enc / secrets.enc / history.enc（host、密码、passphrase、SQL 字面量均不出现）；密钥材料 Debug 输出已脱敏，导出 IO 错误只回稳定 key、细节留在后端日志；迁移回滚与崩溃自动还原有专项测试。
 
-完成条件：重启后可用主密码解锁 passphrase；错误主密码不破坏数据；真实 TLS 正反例通过；通过 **V2-CP3**。
+完成条件：重启后可用主密码解锁 passphrase；错误主密码不破坏数据；真实 TLS 正反例通过；通过 **V2-CP3**。当前除真实 TLS 正反例（依赖 V2-T8.1 环境）外均已由代码与自动化测试覆盖。
 
 ### Week 5：Schema intelligence（13h）
 
@@ -93,20 +93,20 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### Week 6：查询工作台（13h）
 
-- [ ] **V2-T6.1 [3h]** 保存最近 100 条 SQL 历史，记录 driver/connection/schema/时间/成功状态；历史必须加密落盘并支持清空（FR-106）。
-- [ ] **V2-T6.2 [4h]** 实现多查询 tab；每 tab 独立保存 SQL、结果、query_id、取消 token、driver/schema 和 dirty state（FR-109）。
-- [ ] **V2-T6.3 [3h]** 从后端流式导出 CSV / Excel，区分 SQL NULL 与空字符串，避免把 10 万行复制到前端序列化（FR-107）。
-- [ ] **V2-T6.4 [2h]** 实现结果列宽拖拽、恢复默认与持久化（FR-111）。
-- [ ] **V2-T6.5 [1h]** 回归并发 tab 取消与连接关闭终态，取消 A 不得终止 B。
+- [x] **V2-T6.1 [3h]** `history.enc` 记录最近 100 条 SQL 历史（driver/connection/database/schema/时间/成功状态），与连接配置共用 v1/v2 加密器；`db_query` 结束自动记录，超长 SQL 截断 4000 字符；前端历史面板支持回填与确认清空（FR-106）。
+- [x] **V2-T6.2 [4h]** 查询工作台已改为多 tab：每 tab 独立 SQL、结果集、query_id、取消状态与 dirty 标记；双击表预览新开 tab，关闭 dirty/执行中 tab 先确认，重连与建库保留各 tab SQL 只复位执行态（FR-109）。
+- [x] **V2-T6.3 [3h]** 新增 `db_export_query`：后端重新执行只读 SQL 并流式写文件，结果不经过前端序列化；CSV 带 BOM、SQL NULL 写作无引号 `NULL`、空串与字面 "NULL" 文本强制加引号区分；Excel 用 rust_xlsxwriter constant memory 模式，NULL 为空白单元格（FR-107）。
+- [x] **V2-T6.4 [2h]** 表头右缘拖拽手柄实时调宽（64-640px clamp），松手按连接 + 列签名持久化到 localStorage；自定义后可一键恢复默认（FR-111）。
+- [x] **V2-T6.5 [1h]** 前端并发回归：双 tab 同时执行互不污染、取消 A 不影响 B、关闭执行中 tab 先取消后端查询、旧 query_id 迟到结果不写回；后端连接关闭/重连按 connection_id 收敛取消的已有测试保持通过。
 
-完成条件：历史加密且可清除；至少 3 个 tab 并发互不污染；大结果导出内存稳定；通过 **V2-CP4**。
+完成条件：历史加密且可清除；至少 3 个 tab 并发互不污染；大结果导出内存稳定；通过 **V2-CP4**。自动化门禁已全部覆盖，CP4 随 Week 8 真实 dogfooding 最终确认。
 
 ### Week 7：SSH 可观测性与连接恢复（10h）
 
 - [x] **V2-T7.1 [3h]** 使用 SSH global-request 测量累计到每跳 session 的协议 RTT，10s 低频采样、2s 超时；session actor 在等待 ping 时优先处理 direct-tcpip，采样不进入连接关键路径，超时不改变连接状态。拓扑明确标注“SSH”且 tooltip 说明非 ICMP/非单段延迟（FR-105）。
 - [x] **V2-T7.2 [3h]** 已在顶部、断链提示和连接右键菜单增加手动重连；后端按 connection_id 串行 open/close/reconnect，重连前取消该连接查询并按顺序关闭旧 pool/tunnel，每次打开生成 session_id 过滤旧事件，query_id 守卫拒绝旧结果回写（FR-110）。
 - [x] **V2-T7.3 [2h]** 将 keepalive 间隔和失败阈值接入高级配置，默认保持 60s / 3 次；旧记录缺少阈值时补 3，关闭配置不发送心跳，监控 task 改用只读 session 状态避免干扰设置间隔。
-- [ ] **V2-T7.4 [2h]** 根据反馈决定是否实施 KILL QUERY 四状态与 SSH 统一状态机；证据不足时保留现有公共契约。
+- [x] **V2-T7.4 [2h]** 决策：保留现有公共契约，不新增 KILL QUERY 四状态或统一状态机。依据：取消令牌 + query_id/session_id 双守卫已覆盖取消、重连与并发串线场景，自动化门禁无反例；新增公共状态会增加 IPC 契约面而没有对应用户反馈。触发重审的条件：真实 dogfooding 出现取消状态误报或连接状态混淆反馈。
 
 完成条件：断开中间跳后能看到 lost 并成功重连；RTT 不阻塞连接主链路；配置重启后生效；无旧 task / event 泄漏。
 
@@ -114,8 +114,8 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 - [ ] **V2-T8.1 [4h]** MySQL/PostgreSQL 分别完成直连、1 跳和真实 3 跳回归，覆盖 metadata、查询、取消、历史、tab、导出、TLS 与重连。
 - [ ] **V2-T8.2 [3h]** 作者和至少 2 位试用者使用 v0.2 RC ≥ 1 周；至少 1 人以 PostgreSQL 为主，要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
-- [ ] **V2-T8.3 [3h]** 更新 ARCHITECTURE 多 driver / 加密格式章节，补英文 README、CONTRIBUTING 和 v0.2 Release Checklist。
-- [ ] **V2-T8.4 [2h]** 运行 `just check`、双 driver integration、本机安装包与全平台 RC 下载验收；P0/P1 清零后发布 v0.2.0。
+- [x] **V2-T8.3 [3h]** ARCHITECTURE 已更新 v1/v2 双时代加密格式、迁移回滚、secrets/history 存储与目录结构；新增 `README_EN.md` 与 `CONTRIBUTING.md`；`docs/RELEASE_CHECKLIST.md` 增加 v0.2 段（双 driver dogfooding、主密码路径、安全矩阵）。
+- [ ] **V2-T8.4 [2h]** 已通过：`just check` 全绿、双 driver integration 9/9、本机 Tauri 调试包与 dmg/updater 产物构建成功。仍待：RC tag 触发全平台构建与下载验收、P0/P1 清零后发布 v0.2.0。
 
 完成条件：通过 **V2-CP5**；未完成 P2 明确移入 v0.2.1，不在 Release notes 中承诺。
 
@@ -134,12 +134,12 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### 测试矩阵
 
-- [ ] **静态质量**：每组改动至少跑 `just lint`；合并前跑 `just check`。
-- [ ] **driver integration**：使用 `TINY_SQL_TEST_MYSQL_URL` 与 `TINY_SQL_TEST_POSTGRES_URL` 连接本地实例，不引入 Docker；CI 只跑无外部数据库的单元测试。
-- [ ] **兼容回归**：覆盖 MySQL 5.7 / 8.x 与 PostgreSQL 最低支持版本 / 最新稳定版本。
-- [ ] **隧道矩阵**：覆盖 MySQL/PostgreSQL × 0/1/3 跳，以及密码、无口令私钥、带口令私钥认证。
-- [ ] **安全矩阵**：覆盖旧加密文件迁移、错误主密码、损坏文件、TLS CA/hostname/客户端证书正反例，以及历史/passphrase 明文扫描。
-- [ ] **并发矩阵**：覆盖多 tab 同时查询、分别取消、连接关闭、重连、cache 切换和大结果导出。
+- [x] **静态质量**：每组改动至少跑 `just lint`；合并前跑 `just check`。本轮全量 `just check` 通过（含新增 security/history/export 后端 20 项与前端 16 项测试）。
+- [x] **driver integration**：使用 `TINY_SQL_TEST_MYSQL_URL` 与 `TINY_SQL_TEST_POSTGRES_URL` 连接本地实例，不引入 Docker；CI 只跑无外部数据库的单元测试。本轮 MySQL 5/5、PostgreSQL 4/4 全绿。
+- [ ] **兼容回归**：覆盖 MySQL 5.7 / 8.x 与 PostgreSQL 最低支持版本 / 最新稳定版本。PostgreSQL 15.latest / 18.latest 双端点留 RC 前执行。
+- [ ] **隧道矩阵**：覆盖 MySQL/PostgreSQL × 0/1/3 跳，以及密码、无口令私钥、带口令私钥认证。留 V2-T3.4 / T8.1 真实环境验收。
+- [x] **安全矩阵**：自动化已覆盖旧加密文件迁移、错误主密码、篡改 KDF 参数、迁移中断 `.bak` 还原、历史/passphrase/连接配置明文扫描；TLS CA/hostname/客户端证书正反例留 V2-T4.3 真实环境。
+- [x] **并发矩阵**：自动化已覆盖多 tab 同时查询、分别取消、连接关闭、重连、cache 切换（前端 6 项新回归 + 既有 session/ABA 用例）；大结果导出内存稳定由 constant memory 流式实现保证，真实大数据量验证留 Week 8 dogfooding。
 
 ### 主要风险
 

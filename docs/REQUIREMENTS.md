@@ -294,16 +294,16 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md)。
 
 - **FR-100** PostgreSQL driver（后端与 AppState/Tauri/UI 代码已接线，真实 driver integration 通过；Tauri 直连/1 跳 SSH 应用验收仍待 V2-T3.4）
-- **FR-102** 加密 passphrase 存储（用户主密码 derive key）
-- **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（基础模式/路径已接线）
+- **FR-102** 加密 passphrase 存储（v0.2 已实现用户主密码 Argon2id 派生 key + v2 envelope + secrets.enc；迁移可回滚）
+- **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（模式/路径/证书选择器与 TLS 专项错误 key 已接线；真实 TLS 环境验收仍待 V2-T8.1）
 - **FR-104** Schema-aware 智能联想：按 MySQL/PostgreSQL 方言补全当前命名空间的 table、column 和 alias；已加载列满足 `target_id → target.id`、反向关系或同名 key/id 时，在输入 `JOIN` 后提供带 ON 条件的候选片段。
 - **FR-105** 实时隧道延迟动画（v0.2 已实现累计 SSH 协议 RTT/超时显示；非 ICMP、非单段延迟）
-- **FR-106** SQL 历史
-- **FR-107** 导出 CSV / Excel
+- **FR-106** SQL 历史（v0.2 已实现：最近 100 条、含成功状态、加密落盘、可清空）
+- **FR-107** 导出 CSV / Excel（v0.2 已实现：后端流式写文件，区分 SQL NULL 与空字符串）
 - **FR-108** 大表 LRU schema cache：按 connection/driver/database/schema 分区，覆盖 schema/table/column metadata；提供手动刷新，重连、建库和成功 DDL 后必须失效，禁止跨连接或跨 driver 命中。
-- **FR-109** 多 tab 同时执行
+- **FR-109** 多 tab 同时执行（v0.2 已实现：每 tab 独立 SQL/结果/query_id/取消 token/dirty state）
 - **FR-110** 隧道断开后的重连按钮（v0.2 已实现用户触发的幂等恢复；不含自动重试）
-- **FR-111** 结果表格列宽拖拽调整
+- **FR-111** 结果表格列宽拖拽调整（v0.2 已实现：拖拽 + localStorage 持久化 + 恢复默认）
 - **FR-112** schema 树列清单展示
 
 实施顺序、验收门槛与降级规则见 [v0.2 开发计划](./PLAN.md#v02-开发计划)。

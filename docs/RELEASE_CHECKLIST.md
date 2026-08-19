@@ -1,6 +1,35 @@
-# v0.1 发布检查清单
+# 发布检查清单
 
-> 本文件用于 Week 5 dogfooding、RC 和正式发布。不要在这里记录真实 host、用户名、库名、表名、IP 或公司环境细节；真实记录写到被忽略的 `docs/dogfooding-log.md`。
+> 本文件用于各版本 dogfooding、RC 和正式发布。不要在这里记录真实 host、用户名、库名、表名、IP 或公司环境细节；真实记录写到被忽略的 `docs/dogfooding-log.md`。
+
+## v0.2 发布检查清单
+
+v0.2 在 v0.1 全平台发布链路不变的前提下，新增以下验收项（对应 `docs/PLAN.md` 的 V2-CP5）：
+
+### v0.2 RC 前本地检查
+
+- `just check` 全绿（Rust fmt/clippy/workspace 测试、Vitest、Next build）。
+- `just test-integration` 双 driver 全绿：MySQL 5/5、PostgreSQL 4/4；PostgreSQL 需另外完成 15.latest / 18.latest 双端点回归（单一本地实例不能替代版本矩阵）。
+- `just build` 产出本机安装包与 updater artifact / `.sig`。
+- `CHANGELOG.md` 的 `[Unreleased]` 段覆盖 v0.2 全部用户可见变更。
+
+### v0.2 双 driver dogfooding（V2-T8.1 / T8.2）
+
+- MySQL 与 PostgreSQL 各自完成：直连、1 跳 SSH、真实 3 跳 SSH 回归，覆盖 metadata 树、查询、取消、SQL 历史、多 tab、导出、重连。
+- MySQL 真实 TLS 环境验收：Preferred / Required / Verify CA / Verify Identity 正反例与双向证书（V2-T4.3）；PostgreSQL 走 driver 默认 TLS 策略。
+- 主密码全路径：启用迁移（旧配置无损）→ 重启解锁 → 错误密码拒绝且不破坏数据 → 记住 passphrase 后重启免输入 → 锁定/关闭/忘记密码重置。
+- 至少 2 位试用者使用 RC ≥ 1 周，至少 1 人以 PostgreSQL 为主；要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
+- 断开中间跳后拓扑能看到 lost 且手动重连成功；RTT 采样不阻塞连接主链路。
+
+### v0.2 正式发布追加条件
+
+- 上述 dogfooding 全部完成且 P0/P1 清零；未完成 P2 明确移入 v0.2.1，不在 Release notes 承诺。
+- `README_EN.md` 与 `CONTRIBUTING.md` 已随版本更新。
+- 安全矩阵通过：旧加密文件迁移、错误主密码、损坏文件、TLS CA/hostname/客户端证书正反例、历史/passphrase 明文扫描（`cargo test -p tiny-sql` 中的 security/history 用例）。
+
+---
+
+## v0.1 发布检查清单
 
 ## 当前发布范围
 

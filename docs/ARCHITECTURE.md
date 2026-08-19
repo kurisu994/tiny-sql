@@ -47,15 +47,20 @@ tiny-sql/
 │       ├── main.rs
 │       ├── lib.rs                # Tauri 入口 + 全部 #[tauri::command] 注册
 │       ├── commands/             # tauri command 层
-│       │   ├── connection.rs     # connection_create / list / update / delete / test / open / close
-│       │   ├── query.rs          # db_list_* / db_query / db_query_cancel
+│       │   ├── connection.rs     # connection_create / list / update / delete / test / open / reconnect / close
+│       │   ├── query.rs          # db_list_* / db_query / db_query_cancel + SQL 历史记录
+│       │   ├── security.rs       # security_status / setup / unlock / lock / disable / reset（FR-102）
+│       │   ├── history.rs        # history_list / history_clear（FR-106）
+│       │   ├── export.rs         # db_export_query（CSV / Excel 流式导出，FR-107）
 │       │   └── ssh_tofu.rs       # ssh_tofu_decision
 │       ├── config/
-│       │   ├── encryption.rs     # AES-GCM 加密 + master key 管理
-│       │   ├── store.rs          # 连接配置序列化（扁平 Vec<StoredConnection>）
+│       │   ├── encryption.rs     # AES-GCM 加密 + master key / Argon2id 主密码 KDF
+│       │   ├── store.rs          # 连接配置序列化（扁平 Vec<StoredConnection>，v1/v2 envelope 嗅探）
+│       │   ├── history.rs        # SQL 历史加密落盘（history.enc，100 条上限）
 │       │   └── ssh_known_hosts.rs # 自有 known_hosts.json
+│       ├── security.rs           # SecurityManager（主密码状态机 / 迁移回滚 / secrets map）
 │       ├── tofu.rs               # SshTofuManager（TOFU 决策通道）
-│       └── state.rs              # AppState（连接池注册表 / passphrase 缓存）
+│       └── state.rs              # AppState（连接池注册表 / passphrase 缓存 / security / history）
 ├── src/                           # Next.js 16 前端
 │   ├── app/                       # App Router pages
 │   ├── components/
@@ -752,25 +757,31 @@ sqlx::MySqlPool (max_connections = 5)
 
 **目的**：用户的 host/user/password/private_key_path/SshHop 数组不能明文落盘。
 
-**实现**：复用 redis-desktop-client 的 `config::encryption` 模块。
+**实现**：复用 redis-desktop-client 的 `config::encryption` 模块，v0.2 扩展为双时代格式。
 
-**算法**：AES-GCM-256。
+**算法**：AES-GCM-256；v0.2 主密码模式用 Argon2id（v19，19 MiB / t=2 / p=1，RFC 9106 第二推荐档）从主密码派生 32 字节数据 key。
 
-**密钥管理**：v0.1 首次运行随机生成 32 字节 master key，以 base64 落盘到 `~/Library/Application Support/tiny-sql/master.key`（0600 权限）。**注意：这不是强安全，只是防止"打开文件就看到明文"的低门槛保护**。理由：
+**密钥管理**：两种模式由 `security.json` 是否存在决定——
 
-- v0.1 用户多是技术人员，攻击场景是"别人短暂能看到我的硬盘"而不是"专业逆向工程"
-- 用户主密码（更强方案）推 v0.2 一起跟 passphrase 加密做（FR-102）
-- 现状定位：等同 macOS Keychain 用户体验，无需输密码即可使用
+- **v1（默认，未启用主密码）**：首次运行随机生成 32 字节 master key，以 base64 落盘到 `~/Library/Application Support/tiny-sql/master.key`（0600 权限）。**这不是强安全，只是防止“打开文件就看到明文”的低门槛保护**，等同 macOS Keychain 用户体验。
+- **v2（FR-102，启用主密码后）**：主密码只用于派生 key，本身不落盘；派生 key 用 `Zeroizing` 包装仅驻留内存，锁定即清零。`security.json` 是明文元信息（KDF 参数 + base64 盐 + verifier 密文），verifier 用于区分「密码错误」与「数据损坏」。KDF 参数被篡改（如降级为弱参数）会直接拒绝解锁，不自创密码算法、不静默降级。
 
 **文件格式**：
 
 ```
-~/Library/Application Support/tiny-sql/connections.enc
+~/Library/Application Support/tiny-sql/
+├── security.json      # v2 才存在：明文 KDF 元信息 + verifier
+├── connections.enc    # 连接配置（v1 纯密文 或 v2 envelope JSON）
+├── secrets.enc        # v2 才存在：SSH 私钥 passphrase map（FR-102）
+└── history.enc        # SQL 历史（FR-106，最近 100 条）
 
-文件内容（base64 编码）：
-[12 字节 nonce] + [N 字节 AES-GCM ciphertext] + [16 字节 tag]
+v1 文件内容（base64）：[12 字节 nonce] + [N 字节 ciphertext] + [16 字节 tag]
+v2 envelope（自描述 JSON）：{ "v": 2, "nonce": "<base64 12B>", "data": "<base64 ct+tag>" }
+```
 
 明文 JSON 结构：扁平 Vec<StoredConnection>（camelCase 字段，无 version 包装、无 mysql 嵌套）
+
+```
 [
   {
     "id": "uuid",
@@ -788,33 +799,40 @@ sqlx::MySqlPool (max_connections = 5)
 
 `driver` 的稳定值为 `mysql` / `postgresql`。v0.1 旧记录缺少该字段时，反序列化只在内存中补为 `mysql`，启动读取不会重写 `connections.enc`；用户后续显式保存连接时才落成新格式。解密、JSON 或 driver 枚举迁移失败时直接返回错误，不覆盖原密文。
 
-### 5.2 passphrase 不持久化
+**读写与锁定语义**：读取按文件实际格式自动嗅探（`{` 开头且含 `"v":2` → v2），v1 文件在解锁后仍可读；写入跟随当前模式（v1 模式写 v1，v2 解锁写 v2）。Locked 状态下一切加密文件读写返回稳定 key `error.security.locked`。
 
-v0.1 SSH 私钥 passphrase **不写入 connections.enc**，也不写任何其他文件。
+**v1 → v2 迁移（V2-R03）**：`.bak` 备份 → 逐文件临时写 + `rename` 原子替换 → 最后写 `security.json` 作为提交点。任一步失败用 `.bak` 回滚；迁移中断（崩溃）后下次启动发现无 `security.json` 但存在 `.bak` 会自动还原，保证旧配置无损。关闭主密码则把数据迁回 v1 并删除 `secrets.enc`；「忘记主密码」的重置路径会删除全部加密数据文件，前端必须明确告知不可恢复。
+
+### 5.2 passphrase 存储（v0.2 起可选持久化）
+
+默认（未启用主密码）SSH 私钥 passphrase **不写入 connections.enc**，也不写任何其他文件，仅会话内存（NFR-011）。启用主密码并解锁后，用户可在 passphrase 弹窗勾选「记住 passphrase」，后端把 connection_id → passphrase 以 v2 envelope 加密落盘 `secrets.enc`（FR-102）。
 
 **生命周期**：
 
 ```
-首次连接 → 前端弹 PassphraseDialog → invoke('connection_open', {id, passphrase})
+首次连接 → 前端弹 PassphraseDialog → invoke('connection_open', {id, passphrase, rememberPassphrase})
                                           │
                                           ▼
-src-tauri 把 passphrase 写到 AppState 的内存 HashMap<connection_id, String>
-（v0.1 简化：单值应用到全部私钥跳）
+打开时取值优先级：本次传入 → 会话缓存（Zeroizing）→ secrets.enc（需已解锁）
                                           │
                                           ▼
 ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握手
                                           │
                                           ▼
-进程退出 → AppState drop → HashMap 释放 → passphrase 消失
+进程退出 → AppState drop → 会话缓存清零；secrets.enc 仅在主密码保护下存在
 ```
 
-> 注意：v0.1 **没有**独立的 `ssh_set_passphrase` command，passphrase 直接作为 `connection_open` 的 `passphrase?` 参数传入；缓存按 connection_id 而非 (conn_id, hop_index)。
+> 注意：**没有**独立的 `ssh_set_passphrase` command，passphrase 直接作为 `connection_open` 的 `passphrase?` 参数传入；缓存按 connection_id 而非 (conn_id, hop_index)。删除连接会同步清理会话缓存与已持久化 secret；关闭主密码会删除整个 `secrets.enc`。
 
 **已知风险**：
 
-- macOS 不阻止内存被换出到 swap，passphrase 可能短暂出现在 swap 文件里
-- v0.1 不做 `mlock` 等防换出保护（best effort）
-- v0.2 加用户主密码后，passphrase 可加密存盘，避免每次启动重新输
+- macOS 不阻止内存被换出到 swap，passphrase 可能短暂出现在 swap 文件里；会话缓存用 `Zeroizing` 包装，drop 即清零
+- 不做 `mlock` 等防换出保护（best effort）
+- passphrase 永不进入日志、崩溃信息与导出内容（T4.4 明文扫描测试守护）
+
+### 5.3 SQL 历史加密（FR-106）
+
+`db_query` 结束后（成功 / 失败都记）由后端写入 `history.enc`：扁平 `Vec<HistoryEntry>` 整体加密，最多保留最近 100 条，单条 SQL 文本截断到 4000 字符。加密器与连接配置同一套（v1 本地 key / v2 派生 key），Locked 状态不可读写。前端只读列表与显式清空；历史不进入日志，导出功能不读取历史。
 
 ---
 
@@ -1059,13 +1077,12 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 - `capabilities/default.json` 写最小集，只授权用得到的 plugin commands
 - 不开启 `withGlobalTauri`，避免 webview 全局污染
 
-### 8.6 加密 store 的不强但够用承诺
+### 8.6 加密 store 的两档安全承诺
 
-§5.1 已说明：v0.1 首次运行随机生成 master key 落盘 `master.key`（0600），**不是强加密**，定位等同"防止打开文件就看到明文"。用户应该理解这一点：
+§5.1 已说明两档模式。用户应该理解这一点：
 
-- 物理拿到笔记本 → 用 strings 命令在 connections.enc 上看不到明文，但拿到 `master.key` 后即可解密 .enc（`master.key` 与数据同机存储，防不了本机攻击者）
-- 这个等级足够防同事偷瞄屏幕、防误拷贝硬盘到云盘
-- 不足以防针对性攻击（v0.2 上用户主密码后增强）
+- **v1 默认档**：master key 落盘 `master.key`（0600），**不是强加密**，定位等同"防止打开文件就看到明文"。物理拿到笔记本 → 用 strings 命令在 connections.enc 上看不到明文，但拿到 `master.key` 后即可解密 .enc（`master.key` 与数据同机存储，防不了本机攻击者）。这个等级足够防同事偷瞄屏幕、防误拷贝硬盘到云盘。
+- **v2 主密码档（v0.2 已实现，FR-102）**：数据 key 由主密码经 Argon2id 现场派生，主密码与派生 key 均不落盘；拿到硬盘文件后的攻击面只剩暴力破解主密码（19 MiB 内存硬参数显著提高成本）。锁定时所有加密文件不可读写；启用后 SSH passphrase 与 SQL 历史同样受其保护。
 
 ---
 
@@ -1114,7 +1131,8 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 **v0.1 历史 UI 缺口在 v0.2 的处理状态**：
 
 - schema 树列清单已由 V2-T5.1 完成
-- 结果表格列宽固定（`minmax(140px, 260px)`），**列宽拖拽未实现**（FR-021 验收项）
+- 结果表格列宽拖拽与持久化已由 V2-T6.4 完成（localStorage 按连接 + 列签名存储，可恢复默认）
+- 多查询 tab（FR-109）、SQL 历史（FR-106）与 CSV/Excel 导出（FR-107）已由 Week 6 完成
 - 隧道 lost 后的手动幂等「重连」已由 V2-T7.2 完成
 - 语言下拉框未实现（FR-030 验收项）；UI 固定全中文，静态 `ERROR_ZH` map 翻译
 

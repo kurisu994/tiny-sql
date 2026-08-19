@@ -8,7 +8,7 @@
 |---|---|---|
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
 | v0.1.0 | ✅ 正式版已发布 | 2026-08-18 全平台 Release 成功，含安装包、签名更新产物与四平台 `latest.json` |
-| v0.2 | 🚧 开发中 | Week 1/2 后端与 Week 3 多 driver 应用接线已完成；真实 Tauri 直连/1 跳验收后进入 passphrase/TLS、schema intelligence、查询工作台与 RTT/重连 |
+| v0.2 | 🚧 开发中 | Week 1-3（多 driver）、Week 4（主密码/TLS 代码）、Week 5（schema intelligence）、Week 6（查询工作台）、Week 7（RTT/重连/状态决策）自动化门禁均已完成；剩 T3.4/T4.3/T8.1/T8.2/T8.4 真实环境验收与发布 |
 | v0.3 | 规划 | 保存/打开 SQL、index/constraint 树、对象搜索、服务端筛选分页、多结果与可靠事务 |
 | v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
 | v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
@@ -132,6 +132,12 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 - **2026-08-19 V2-T7.3 keepalive 配置落地**：高级设置新增连续失败阈值，启用状态、间隔和阈值均接入 `ssh-multihop`；新建连接默认 60s / 3 次，旧记录缺阈值时兼容补 3，运行时对 0 值兜底为 1。监控 task 从主动 `send_keepalive` 改为只读 `Handle::is_closed()`，避免固定 20s 探测改变用户设置的真实发包间隔；`just check` 全绿，含前端 66 项、ssh-multihop 8 项、app_lib 21 项测试。
 - **2026-08-19 V2-T7.2 手动幂等重连**：顶部、断链 banner 与连接右键菜单新增重连入口；后端按 connection_id 独立串行生命周期操作，重连前取消该连接查询并先关闭 pool 后 drop tunnel。open/reconnect 返回新 session_id，expected_session_id 防迟到命令关闭新会话，SSH 事件和查询结果分别用 session_id/query_id 拒绝旧写回；`just check` 全绿，前端测试增至 71 项、app_lib 增至 24 项。
 - **2026-08-19 V2-T7.1 SSH RTT 代码闭环**：每跳 session actor 独占 russh Handle，10 秒低频调用 SSH global-request 探测累计 RTT，2 秒超时；等待 ping 时优先处理 direct-tcpip，指标不阻塞数据库新连接。`ssh:hop-rtt` 以 connection_id/session_id 隔离旧采样，拓扑明确显示 SSH 毫秒/超时/不可用且不改变节点四态；`just check` 全绿（db-driver 26、ssh-multihop 8、app_lib 25、前端 74），真实多跳链路仍留 RC 人工验收。
+
+- **2026-08-19 v0.2 Week 4 主密码加密存储（V2-T4.1/T4.2/T4.4）**：新直接依赖 argon2 0.5（MSRV 1.65）与 zeroize =1.8.1（精确约束规避 1.9 的 MSRV 1.85，保持项目 1.77.2 承诺；均 MIT/Apache-2.0）。v2 envelope 为自描述 JSON（`{v,nonce,data}`），KDF 参数与盐集中在明文 `security.json`，verifier 区分错误密码与数据损坏；派生 key 用 `Zeroizing` 仅驻留内存。迁移用 `.bak` 备份 + tmp + rename + security.json 提交点，失败回滚、崩溃后启动自动还原；篡改 KDF 参数直接拒绝解锁。passphrase 仅在主密码解锁后可经 `secrets.enc` 持久化（连接删除同步清理）；关闭主密码迁回 v1 并删除 secrets；忘记密码重置删除全部加密数据且前端强警告。锁定状态一切加密读写返回 `error.security.locked`。
+- **2026-08-19 MySQL TLS 错误诊断与证书 UX（V2-T4.3 代码部分）**：连接失败在用户显式启用 TLS 时按错误文本分类为 `error.driver.tls_handshake_failed` / `error.driver.tls_verify_failed`，Disabled 模式永不误报；前端 SSL 页三个证书路径接入 tauri-plugin-dialog 文件选择器。真实 TLS 环境正反例验收仍留 V2-T8.1。
+- **2026-08-19 v0.2 Week 6 查询工作台（V2-T6.1~T6.5）**：SQL 历史 `history.enc` 由 `db_query` 自动记录（最新在前、100 条上限、SQL 截断 4000 字符、锁定不可读写、可显式清空）。session-store 重构为多 tab：每 tab 独立 SQL/结果/query_id/取消/dirty，双击表预览新开 tab，重连/建库保留 SQL 只复位执行态；并发取消隔离与关闭执行中 tab 先取消均有前端回归（T6.5）。导出 `db_export_query` 后端重新执行只读 SQL 并流式写文件：CSV 带 BOM、NULL 无引号字面量、空串与 "NULL" 文本强制加引号；XLSX 用 rust_xlsxwriter constant_memory 流式写出。列宽拖拽 64-640px clamp、按连接+列签名 localStorage 持久化、可恢复默认（FR-111）。
+- **2026-08-19 V2-T7.4 状态模型决策**：保留现有公共契约，不实施 KILL QUERY 四状态与 SSH 统一状态机。依据：取消令牌 + query_id/session_id 双守卫已覆盖取消、重连与并发串线场景且自动化门禁无反例；新增公共状态会扩大 IPC 契约面而无对应用户反馈。重审触发条件：真实 dogfooding 出现取消状态误报或连接状态混淆反馈。
+- **2026-08-19 V2-T8.3 文档与 T8.4 本地门禁**：ARCHITECTURE 双时代加密格式/目录结构、REQUIREMENTS FR 状态、RELEASE_CHECKLIST v0.2 段已更新；新增 `README_EN.md` 与 `CONTRIBUTING.md`。`just check` 全绿（app_lib 45、db-driver 27、ssh-multihop 8、前端 90），双 driver integration 9/9，本机 debug bundle + dmg + updater 签名产物构建成功。
 
 ## 已解决的阻碍
 

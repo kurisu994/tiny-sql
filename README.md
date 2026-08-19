@@ -23,7 +23,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 
 - N 跳 SSH 配置与连接：密码 / 私钥认证、passphrase 会话缓存、TOFU host key 校验、指纹变更硬拒绝。
 - MySQL SSL/TLS 配置：默认禁用，可显式选择 Preferred / Required / Verify CA / Verify Identity，并传入 CA、客户端证书与私钥路径；真实 TLS 服务器验收尚未完成。
-- MySQL 数据浏览：列出 database / table，点表浏览前 1000 行。（`db_list_columns` 后端已实现，前端列清单 UI 留 v0.2）
+- MySQL 数据浏览：列出 database / table，点表浏览前 1000 行。
 - SQL 执行：CodeMirror SQL 编辑器支持语法高亮、行号、基础 schema/table 补全和快捷执行；后端拒绝空 SQL / 多语句，`SELECT` / `WITH` 顶层安全时自动追加 `LIMIT`，结果上限 10 万行。
 - SQL 取消：执行时记录 MySQL `CONNECTION_ID()`，取消时通过独立 control pool 发 `KILL QUERY`。
 - 拓扑状态：本机 → N 跳 → MySQL 的只读拓扑图，支持 `pending` / `connected` / `failed` / `lost`。
@@ -40,7 +40,19 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 | SSH 隧道 | russh 0.54（N 跳，纯 Rust 异步） |
 | 数据库 | sqlx 0.8（MySQL；v0.2 加 PostgreSQL） |
 
-> v0.2 之后再考虑 PostgreSQL、MySQL TLS 真实环境验收与证书 UX 打磨、SQL 历史、导出与 schema-aware 智能联想。详见 [ROADMAP](./docs/ROADMAP.md)。
+> PostgreSQL、SQL 历史、多查询 tab 等已在 v0.2 落地，详见下方「v0.2 新增」与 [ROADMAP](./docs/ROADMAP.md)。
+
+## v0.2 新增（开发中，未发布）
+
+- PostgreSQL 支持：浏览当前数据库的 schema / table / column 四层结构，执行、限流与取消 SQL，编辑器按连接切换 MySQL / PostgreSQL 方言补全。
+- 主密码加密：Argon2id 派生密钥 + AES-256-GCM v2 envelope 保护连接配置；解锁后可持久化 SSH 私钥 passphrase；支持锁定与忘记密码重置。
+- SQL 历史：最近 100 条执行记录（含成功状态）加密落盘，可一键回填与清空。
+- 多查询 tab：每个 tab 独立保存 SQL、结果集与取消状态，可同时执行互不干扰。
+- 结果导出：CSV / Excel 后端流式写出，区分 SQL NULL 与空字符串，大结果集不经过前端序列化。
+- 结果表格列宽拖拽并可恢复默认。
+- SSH 可观测性：拓扑图展示每跳累计协议 RTT；断链后支持手动幂等重连；keepalive 间隔与失败阈值可配置。
+
+完整清单见 [CHANGELOG.md](./CHANGELOG.md) 的 `[Unreleased]` 段。
 
 ## 开发环境准备
 
@@ -158,11 +170,13 @@ xattr -cr /Applications/tiny-sql.app
 
 ## 文档
 
+- [English README](./README_EN.md)
+- [贡献指南](./CONTRIBUTING.md)
 - [需求文档](./docs/REQUIREMENTS.md)
 - [开发计划](./docs/PLAN.md)
 - [架构设计](./docs/ARCHITECTURE.md)
 - [路线图](./docs/ROADMAP.md)
-- [v0.1 发布检查清单](./docs/RELEASE_CHECKLIST.md)
+- [发布检查清单](./docs/RELEASE_CHECKLIST.md)
 
 ## License
 

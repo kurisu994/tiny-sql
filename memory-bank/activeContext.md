@@ -6,7 +6,9 @@
 
 ## 当前状态
 
-**v0.1.0 已于 2026-08-18 正式发布，v0.2 Week 1/2 后端、Week 3 多 driver 应用接线、Week 5 schema intelligence 与 V2-T7.1/T7.2/T7.3 已完成代码闭环。** PostgreSQL 已接入 `AppState`、Tauri commands、连接表单和 database → schema → table → column 浏览树；MySQL/PostgreSQL 真实 driver integration 共 9 项全绿。带口令私钥测试、SSH 三类运行故障上报和安全 SQL 行号三项历史代码承诺均已关闭，V2-CP1 已通过；Tauri 调试包已验证 MySQL 直连、元数据树与 `SELECT 1`，V2-T3.4 仍缺 PostgreSQL、切换/取消与 1 跳 SSH 验收，因此 CP2 保持未完成。
+**v0.2 全部代码事项已完成：Week 4 主密码加密/TLS 代码、Week 6 查询工作台（历史/多 tab/导出/列宽）本周落地，加上此前的 Week 1-3 多 driver、Week 5 schema intelligence、Week 7 RTT/重连/状态决策，v0.2 自动化门禁全绿。** 剩余均为真实环境/人工验收：V2-T3.4（PostgreSQL Tauri 直连/切换/取消/1 跳 SSH）、V2-T4.3（真实 TLS 正反例）、V2-T8.1/T8.2（双 driver dogfooding）、V2-T8.4（RC 全平台下载与发布）。
+
+本轮门禁事实：`just check` 全绿（app_lib 45、db-driver 27、ssh-multihop 8、前端 90 项测试、TypeScript、Next.js 生产构建）；真实 MySQL 5/5 与 PostgreSQL 4/4 integration 全绿；本机 Tauri debug bundle + dmg + updater 签名产物构建成功。
 
 ### 本轮核对后的事实基线
 
@@ -18,7 +20,7 @@
 - 自动更新：已在 `/Applications/tiny-sql.app` 从 v0.0.3 通过原生菜单 `Check for Updates...` 发现 v0.1.0，完成签名更新包下载、安装和重启；重启后 bundle 版本为 0.1.0，连接配置保留，更新菜单仍可用。
 - 手动检查更新反馈：应用菜单触发检查后，有更新继续打开下载弹窗；无更新改为弹窗提示“当前已是最新版本”，失败也显示结果。后台每日自动检查保持静默。
 - P0 SQL/SSH 修复：2026-07-13 已在真实 MySQL 上验证元数据语句、JOIN 重名列、顶层 LIMIT、截断止损和测试连接 host key 校验；当时 `just check` 与 4 个 integration test 通过。
-- v0.2 当前验证：`just check` 全绿，覆盖 workspace fmt/clippy、`db-driver` 26 个单测、`ssh-multihop` 8 个单测、`app_lib` 25 个单测、前端 74 个测试、TypeScript 与 Next.js 生产构建；`git diff --check` 通过。5 个真实 MySQL integration 与 4 个真实 PostgreSQL integration 先前已全绿；本轮未重跑真实数据库门禁。PostgreSQL 15/18 双端点仍留正式版兼容矩阵，当前单一本地实例不能替代。
+- v0.2 当前验证（2026-08-19 本轮）：`just check` 全绿，覆盖 workspace fmt/clippy、`db-driver` 27 个单测、`ssh-multihop` 8 个单测、`app_lib` 45 个单测、前端 90 个测试、TypeScript 与 Next.js 生产构建。真实 MySQL 5/5 与 PostgreSQL 4/4 integration 本轮已重跑全绿；本机 Tauri debug bundle + dmg + updater 签名产物构建成功。PostgreSQL 15/18 双端点仍留正式版兼容矩阵，当前单一本地实例不能替代。
 
 ## 已实现能力
 
@@ -33,6 +35,9 @@
 - UI：纯 CSS 拓扑图、database/schema/table/column 树、按需列元信息、手动对象刷新、数据库折叠状态与当前选择分离、react-virtuoso 结果表格。
 - Metadata cache：schema/table/column 使用 128 项、5 分钟 TTL 的进程内 LRU，按 connection/driver/database/schema/resource/table 完整隔离；重连、建库、成功 DDL 和手动刷新会失效。
 - SQL completion：按 driver 使用 MySQL/PostgreSQL dialect；已加载列进入 CodeMirror schema，提供 column/alias 及保守的 JOIN + ON 片段候选。
+- 凭据安全（FR-102）：可选主密码（Argon2id 19MiB/t=2/p=1 → AES-256-GCM v2 envelope），启动解锁/手动锁定/关闭/忘记密码重置；迁移 .bak + 原子替换 + 提交点，崩溃自动还原；解锁后可持久化 SSH passphrase（secrets.enc），删除连接同步清理。
+- SQL 历史（FR-106）：最近 100 条加密落盘 history.enc，含 driver/连接/库/schema/时间/成功状态，支持回填与清空；锁定不可读写。
+- 查询工作台（FR-109/107/111）：多 tab 独立 SQL/结果/query_id/取消/dirty；CSV/Excel 后端流式导出（NULL 与空串可区分）；列宽拖拽 + localStorage 持久化 + 恢复默认。
 - 发布：`v*` tag 全平台构建；预发布不生成 `latest.json`，正式版生成 stable-only updater manifest；手动检查更新无新版本或失败时显示结果弹窗。
 
 ## 已知代码 / 承诺边界
@@ -40,22 +45,23 @@
 - MySQL TLS 已接线 SSL 模式和证书路径，但真实 TLS / 双向证书环境尚未验收。
 - SSH keepalive 使用 russh 内置机制 + 轻量只读监控 task；运行期会统一上报 `lost`，监控不会额外发包或改变配置间隔。
 - SSH 运行期首跳 session、嵌套 transport channel 与 accept worker 故障均已接入 `lost` 事件；shutdown 与每跳原子标记分别抑制正常关闭误报和重复断链事件。
-- `connection_test` 已支持瞬时私钥 passphrase，但不会复用或写入正式连接的会话缓存；持久化 passphrase 仍留 Week 4 用户主密码方案。
+- `connection_test` 的 passphrase 仍为瞬时参数（不落盘、不进会话缓存）；正式连接的 passphrase 在启用主密码后可经 secrets.enc 持久化，否则仅会话缓存（Zeroizing）。
 - Tauri query error 使用 `{ key, line? }` 安全载荷；db-driver 只从后端原始错误提取正整数行号，CodeMirror 继续从本地化文案标记 gutter，原始数据库错误与 SQL 片段不进入 IPC。
 - PostgreSQL 当前只展开连接实际所在的 database；浏览其他 database 需新建目标连接。证书路径尚未传给 PostgreSQL driver，真实 Tauri 直连/1 跳 SSH 仍待 V2-T3.4 验收。
 
 ## 活跃文件
 
-- `crates/ssh-multihop/src/lib.rs`：N 跳隧道、session actor、russh keepalive、RTT/断链监控 task、host key verifier、公共错误模型。
-- `crates/db-driver/src/lib.rs`：公共 Driver/metadata 契约、MySQL 实现、共享 SQL guard、动态结果解码。
-- `crates/db-driver/src/postgres.rs`：PostgreSQL connect、metadata、query/RETURNING、control pool 取消。
-- `src-tauri/src/state.rs`：`ActiveDriver::{MySql, PostgreSql}` 与活跃连接/隧道生命周期注册表。
-- `src-tauri/src/commands/{connection,query}.rs`：连接打开/测试、passphrase、TOFU、查询与取消命令。
-- `src-tauri/src/config/{store,encryption,ssh_known_hosts}.rs`：加密连接配置与信任库。
-- `src/components/{connection-form,schema-browser,topology-graph}.tsx`：连接表单、SQL/结果区和拓扑。
-- `src/components/update-check-result-dialog.tsx`、`src/hooks/use-update-checker.ts`：手动检查更新结果弹窗与状态管理。
+- `src-tauri/src/security.rs`：主密码状态机、v1↔v2 迁移回滚、secrets map（FR-102）。
+- `src-tauri/src/config/{encryption,store,history,ssh_known_hosts}.rs`：v2 envelope/Argon2id KDF、连接配置与 SQL 历史加密存储、SSH 信任库。
+- `src-tauri/src/commands/{connection,query,security,history,export}.rs`：连接生命周期、查询与取消、主密码命令、历史命令、流式导出。
+- `src-tauri/src/state.rs`：`ActiveDriver::{MySql, PostgreSql}` 注册表 + security/history 注入。
+- `crates/ssh-multihop/src/lib.rs`：N 跳隧道、session actor、keepalive、RTT/断链监控、host key verifier。
+- `crates/db-driver/src/{lib,postgres}.rs`：Driver 契约、MySQL（含 TLS 错误分类）、PostgreSQL、SQL guard。
+- `src/stores/{session-store,security-store}.ts`：多 tab 查询工作台、主密码前端状态。
+- `src/components/{schema-browser,security-dialogs,history-panel,connection-dialogs,connection-form,topology-graph}.tsx`：tab 条与结果区、解锁/安全设置、历史面板、passphrase 记住选项、证书浏览、拓扑。
+- `src/lib/column-widths.ts`、`src/hooks/use-column-widths.ts`：列宽拖拽与 localStorage 持久化。
 - `.github/workflows/{ci,release}.yml`、`justfile`：质量检查、全平台发布、版本脚本。
-- `README.md`、`docs/{REQUIREMENTS,PLAN,ARCHITECTURE,ROADMAP,RELEASE_CHECKLIST}.md`、`memory-bank/*`：本轮对齐范围。
+- `README.md` / `README_EN.md` / `CONTRIBUTING.md`、`docs/*`、`memory-bank/*`：本轮对齐范围。
 
 ## 近期决策
 
@@ -87,23 +93,28 @@
 - `activeContext.md` 只保留当前状态；历史决策和已解决问题继续放 `progress.md`。
 - ignored 的 `docs/dogfooding-log.md` 继续只保存脱敏环境细节；完成状态以用户提交 `4f54f02` 为准，本轮不读取或改写该文件。
 
+- V2-T4.1 采用「集中 KDF 元信息 + 最小 envelope」：security.json 存 Argon2id 参数/盐/verifier，数据文件 envelope 只带 v/nonce/data；v1/v2 按文件嗅探，未启用主密码保持 v1 行为零变化。
+- zeroize 精确约束 =1.8.1（1.9 起 MSRV 1.85 会破坏项目 1.77.2 承诺）；argon2 0.5 / rust_xlsxwriter 0.83 / tauri-plugin-dialog 2.7 的 MSRV 与 license（均 MIT/Apache）已审计。
+- 多 tab 采用「表预览新开 tab、重连/建库保留 SQL 只复位执行态」语义；query 迟到守卫从单 query_id 升级为 tab-local query_id。
+- 导出重新执行当前 SQL 并在后端流式写文件（不经过前端序列化）；只允许只读 SQL；CSV NULL 字面量与加引号空串/"NULL" 文本严格区分。
+- V2-T7.4 决策保留现有公共契约（不新增 KILL QUERY 四状态/统一状态机），重审触发条件已记录到 progress.md。
+
 ## 下一步（按优先级）
 
-1. 完成 V2-T3.4：在真实 Tauri 应用中补验 PostgreSQL 直连、MySQL/PostgreSQL 各自 1 跳 SSH、连接切换与取消不串线，通过后关闭 V2-CP2。
-2. 确认 Week 4 安全方案：Argon2id v19（19 MiB / t=2 / p=1）派生 32 字节 key、AES-256-GCM v2 envelope、后端独立 secrets map 与可回滚原子迁移；确认后再改存储协议。
-3. 用真实多跳环境验证 T7.1 RTT 的数值/超时表现，并用真实中间跳断链关闭 T7.2 人工验收；随后按反馈完成 V2-T7.4 状态模型决策。
-4. 确认 Week 6 推进顺序：T6.1 加密 SQL 历史依赖 Week 4 主密码存储协议；未确认协议前只能先做不依赖持久化的 T6.2-T6.5。
-5. 准备真实 MySQL TLS 正反例环境，验收 CA、hostname 与客户端证书路径。
+1. V2-T3.4 人工验收：用 `target/debug/bundle` 的调试包补验 PostgreSQL 直连、双 driver 切换/取消不串线、各自 1 跳 SSH，通过后关闭 V2-CP2。
+2. V2-T4.3 人工验收：准备真实 TLS MySQL（含自签 CA 与双向证书），跑 Preferred/Required/Verify CA/Verify Identity 正反例。
+3. 真实多跳环境验收 T7.1 RTT 数值/超时与 T7.2 中间跳断链 lost → 重连闭环。
+4. Week 8：双 driver 0/1/3 跳 dogfooding（T8.1）→ ≥2 位试用者 1 周 RC（T8.2）→ `just release v0.2.0-rc1` 全平台下载验收（T8.4）→ P0/P1 清零后发布 v0.2.0。
+5. RC 前补 PostgreSQL 15.latest / 18.latest 双端点兼容回归。
 
 ## 阻塞 / 风险
 
-- **MySQL TLS 只完成接线**：真实 TLS/双向证书与错误 UX 未验收。
+- **MySQL TLS 真实验收仍缺环境**：错误分类 key 与证书选择 UX 已就绪，正反例需真实 TLS MySQL（V2-T8.1）。
 - **高级设置仅部分生效**：连接超时与 SSH keepalive 已接线；读取/写入超时、压缩、自动连接仍只持久化，不能描述成已生效。
 - **v0.2 范围约 98h**：必须执行 Week 6 降级规则，禁止为了完整 P2 挤压 driver、凭据和 TLS 安全门槛。
 - **PostgreSQL 版本矩阵未完成**：当前真实本地实例已通过后端契约，但 PostgreSQL 15.latest / 18.latest 双端点仍需在 RC 前分别回归。
 - **PostgreSQL 应用验收未完成**：自动门禁已覆盖 driver、AppState、commands 与前端状态，但真实 Tauri 直连/1 跳 SSH、切换和取消仍需人工验证。
 - **重连真实链路未验收**：自动门禁已覆盖资源清理边界、旧查询结果与旧 SSH 事件隔离；仍需真实中间跳断链后确认 lost → 重连 → connected 且无旧 task/event 泄漏。
 - **SSH RTT 真实链路未验收**：代码、事件/UI 回归与全量门禁已完成，但当前环境没有可控的真实多跳端点；累计 RTT 数值、2 秒超时和 direct-tcpip 并发仍需 RC 人工验收。
-- **Week 4 安全存储方案待确认**：候选 `argon2 0.5.3` 已在锁文件且官方 MSRV 为 Rust 1.65；`zeroize 1.9.0` 虽已是传递依赖，但官方 MSRV 为 1.85，高于项目声明 1.77.2，直接依赖时拟精确约束到兼容的 1.8.x 并重新验证依赖树。
 
 相关：[[progress]] · [[systemPatterns]]
