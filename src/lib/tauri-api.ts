@@ -115,8 +115,22 @@ export const ERROR_ZH: Record<string, string> = {
   "error.driver.schema_required": "请选择 PostgreSQL Schema",
   "error.driver.operation_not_supported": "当前数据库类型不支持该操作",
   "error.driver.not_implemented": "该数据库类型尚未接入",
+  "error.driver.tls_handshake_failed":
+    "TLS 握手失败：服务端可能未启用 SSL 或不支持当前 TLS 版本，可将 SSL 模式改为 Preferred 重试",
+  "error.driver.tls_verify_failed":
+    "证书校验失败：请检查 CA 证书路径、证书有效期，以及主机名是否与证书匹配",
   "error.connection.not_found": "连接配置不存在",
   "error.connection.not_open": "连接尚未打开",
+  "error.security.locked": "已锁定，请先输入主密码解锁",
+  "error.security.wrong_password": "主密码错误",
+  "error.security.empty_password": "主密码不能为空",
+  "error.security.already_enabled": "已启用主密码",
+  "error.security.not_enabled": "尚未启用主密码",
+  "error.security.unsupported_kdf": "主密码参数不被支持，请升级应用后重试",
+  "error.security.meta_corrupted": "主密码元信息已损坏，可通过重置重新开始",
+  "error.security.migration_failed": "加密迁移失败，原数据未被修改",
+  "error.security.master_required": "需先启用并解锁主密码才能保存 passphrase",
+  "error.export.io": "导出文件写入失败，请检查路径与磁盘权限",
 };
 
 /** 把后端返回的错误（可能是 i18n key）翻译成中文 */
@@ -233,9 +247,13 @@ export const connectionApi = {
       input,
       passphrase: passphrase ?? null,
     }),
-  /** 打开连接（建隧道 + 连接池）；passphrase 仅本次会话生效 */
-  open: (id: string, passphrase?: string) =>
-    invoke<string>("connection_open", { id, passphrase: passphrase ?? null }),
+  /** 打开连接（建隧道 + 连接池）；passphrase 仅本次会话生效，rememberPassphrase 需主密码已解锁 */
+  open: (id: string, passphrase?: string, rememberPassphrase?: boolean) =>
+    invoke<string>("connection_open", {
+      id,
+      passphrase: passphrase ?? null,
+      rememberPassphrase: rememberPassphrase ?? null,
+    }),
   /** 清理旧查询、连接池和隧道后重建连接；返回新 session 代号。 */
   reconnect: (id: string, expectedSessionId?: string, passphrase?: string) =>
     invoke<string>("connection_reconnect", {
@@ -294,6 +312,8 @@ export interface QueryOptions {
   queryId?: string;
   rowLimit?: number;
   allowWrite?: boolean;
+  /** 仅用于 SQL 历史元信息；PostgreSQL 传当前选中 schema */
+  schema?: string | null;
 }
 
 /** 新建 database 入参 */
@@ -335,6 +355,7 @@ export const dbApi = {
       queryId: options.queryId ?? null,
       rowLimit: options.rowLimit ?? null,
       allowWrite: options.allowWrite ?? false,
+      schema: options.schema ?? null,
     }),
   cancelQuery: (queryId: string) =>
     invoke<void>("db_query_cancel", { queryId }),
@@ -380,4 +401,62 @@ export interface HopRttPayload {
 export const tofuApi = {
   decide: (connectionId: string, hopIndex: number, accept: boolean) =>
     invoke<void>("ssh_tofu_decision", { connectionId, hopIndex, accept }),
+};
+
+// === 主密码安全（FR-102）===
+
+/** 主密码状态：disabled（未启用）/ locked（已启用待解锁）/ unlocked（已解锁） */
+export type SecurityStatus = "disabled" | "locked" | "unlocked";
+
+export interface SecurityStatusPayload {
+  status: SecurityStatus;
+  /** 仅主密码解锁后允许持久化 SSH 私钥 passphrase */
+  canPersistPassphrase: boolean;
+}
+
+export const securityApi = {
+  status: () => invoke<SecurityStatusPayload>("security_status"),
+  setup: (password: string) => invoke<void>("security_setup", { password }),
+  unlock: (password: string) => invoke<void>("security_unlock", { password }),
+  lock: () => invoke<void>("security_lock"),
+  disable: (password: string) => invoke<void>("security_disable", { password }),
+  /** 忘记主密码：删除全部加密数据（连接 / passphrase / SQL 历史），不可恢复 */
+  reset: () => invoke<void>("security_reset"),
+};
+
+// === SQL 历史（FR-106）===
+
+/** 单条 SQL 历史记录（后端加密落盘，最多保留 100 条） */
+export interface HistoryEntry {
+  id: string;
+  connectionId: string;
+  connectionName: string;
+  driver: string;
+  database: string;
+  schema: string | null;
+  sql: string;
+  executedAt: string;
+  success: boolean;
+}
+
+export const historyApi = {
+  list: () => invoke<HistoryEntry[]>("history_list"),
+  clear: () => invoke<void>("history_clear"),
+};
+
+// === 结果集导出（FR-107）===
+
+export type ExportFormat = "csv" | "xlsx";
+
+export interface ExportResult {
+  /** 实际写出的数据行数（不含表头） */
+  rows: number;
+  /** 结果集是否被 10 万行硬上限截断 */
+  truncated: boolean;
+}
+
+export const exportApi = {
+  /** 重新执行 SQL 并在后端流式写出文件；结果不经过前端序列化 */
+  query: (id: string, sql: string, format: ExportFormat, path: string) =>
+    invoke<ExportResult>("db_export_query", { id, sql, format, path }),
 };

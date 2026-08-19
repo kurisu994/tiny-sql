@@ -377,6 +377,62 @@ function Field({
   );
 }
 
+/** 证书文件选择字段（FR-103）：文本输入 + 「浏览」系统文件选择器。 */
+function FileField({
+  label,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  async function browse() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        directory: false,
+        multiple: false,
+        filters: [
+          { name: "证书 / 私钥", extensions: ["pem", "crt", "cer", "key", "der"] },
+          { name: "全部文件", extensions: ["*"] },
+        ],
+      });
+      if (typeof selected === "string") onChange(selected);
+    } catch {
+      // Web 预览环境无系统对话框，保留手动输入
+    }
+  }
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-neutral-600 dark:text-neutral-400">{label}</span>
+      <div className="flex gap-1">
+        <input
+          type="text"
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full rounded-md border border-neutral-300 px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-600 dark:bg-neutral-900"
+        />
+        <button
+          type="button"
+          onClick={browse}
+          disabled={disabled}
+          className="shrink-0 rounded-md border border-neutral-300 px-2 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+        >
+          浏览
+        </button>
+      </div>
+    </label>
+  );
+}
+
 /** SSL 配置区 —— v0.1 默认禁用；启用后传给 sqlx MySQL SSL mode。 */
 function SslSection({
   ssl,
@@ -407,19 +463,19 @@ function SslSection({
       </label>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Field
+        <FileField
           label="CA 证书路径"
           value={ssl.caPath}
           disabled={!enabled}
           onChange={(v) => set("caPath", v)}
         />
-        <Field
+        <FileField
           label="客户端证书路径"
           value={ssl.clientCertPath}
           disabled={!enabled}
           onChange={(v) => set("clientCertPath", v)}
         />
-        <Field
+        <FileField
           label="客户端私钥路径"
           value={ssl.clientKeyPath}
           disabled={!enabled}

@@ -14,6 +14,7 @@ import {
   type TofuRequestPayload,
 } from "@/lib/tauri-api";
 import { useSessionStore } from "@/stores/session-store";
+import { useSecurityStore } from "@/stores/security-store";
 
 /**
  * 连接相关的全局对话框 + 事件监听，挂一次即可：
@@ -130,21 +131,24 @@ function TofuDialog({
   );
 }
 
-/** 私钥 passphrase 输入弹窗（仅会话内存） */
+/** 私钥 passphrase 输入弹窗（默认仅会话内存；主密码解锁后可勾选持久化） */
 function PassphraseDialog({
   onSubmit,
   onCancel,
 }: {
-  onSubmit: (passphrase: string) => void;
+  onSubmit: (passphrase: string, remember: boolean) => void;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState("");
   const [show, setShow] = useState(false);
+  const [remember, setRemember] = useState(false);
+  const canPersist = useSecurityStore((s) => s.canPersistPassphrase);
   return (
     <Overlay>
       <h3 className="text-base font-semibold">输入私钥 passphrase</h3>
       <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        该 SSH 私钥已加密，请输入 passphrase（仅本次会话内存，不保存）。
+        该 SSH 私钥已加密，请输入 passphrase
+        {canPersist ? "（可选择加密保存，或仅本次会话内存）。" : "（仅本次会话内存，不保存）。"}
       </p>
       <div className="relative">
         <input
@@ -153,7 +157,7 @@ function PassphraseDialog({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") onSubmit(value);
+            if (e.key === "Enter") onSubmit(value, remember && canPersist);
           }}
           autoCapitalize="none"
           autoCorrect="off"
@@ -175,6 +179,17 @@ function PassphraseDialog({
           )}
         </button>
       </div>
+      {canPersist && (
+        <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          记住 passphrase（用主密码加密保存，下次免输入）
+        </label>
+      )}
       <div className="flex justify-end gap-2">
         <button
           onClick={onCancel}
@@ -183,7 +198,7 @@ function PassphraseDialog({
           取消
         </button>
         <button
-          onClick={() => onSubmit(value)}
+          onClick={() => onSubmit(value, remember && canPersist)}
           className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
         >
           确定
@@ -194,7 +209,7 @@ function PassphraseDialog({
 }
 
 /** 居中模态遮罩 */
-function Overlay({ children }: { children: React.ReactNode }) {
+export function Overlay({ children }: { children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="flex w-full max-w-md flex-col gap-3 rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-900">

@@ -1,7 +1,8 @@
 // 活跃连接会话状态（zustand）
 //
-// v0.1 同一时刻浏览一条已打开连接：管理连接打开/关闭、passphrase 弹窗、
-// schema/table 浏览与 keepalive 断开提示。
+// v0.2 起查询工作台为多 tab（FR-109）：SQL 文本、结果集、query_id、取消 token、
+// 表预览来源与 dirty state 全部按 tab 隔离；连接级状态（schema 树、拓扑、
+// passphrase 弹窗）仍由本 store 统一管理。
 
 import { create } from "zustand";
 
@@ -43,8 +44,75 @@ export interface TopologyHopStatus {
   rttMs: number | null;
 }
 
+/** 单个查询 tab 的完整独立状态（FR-109）。 */
+export interface QueryTab {
+  id: string;
+  title: string;
+  sqlText: string;
+  /** 创建/执行表预览时的初始 SQL；与 sqlText 不等即为 dirty */
+  initialSql: string;
+  rowSet: RowSet | null;
+  loadingData: boolean;
+  queryRunning: boolean;
+  /** 本 tab 正在执行的 query_id；取消只作用于该 token */
+  currentQueryId: string | null;
+  queryErrorMsg: string | null;
+  /** 表预览来源（底部状态栏展示用），自由 SQL 为 null */
+  selectedTable: string | null;
+}
+
+/** tab 是否有未执行的修改（关闭前需要确认）。 */
+export function isTabDirty(tab: QueryTab): boolean {
+  return tab.sqlText !== tab.initialSql;
+}
+
 function createQueryId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `q_${Date.now()}_${Math.random()}`;
+}
+
+let tabSerial = 0;
+let tabCounter = 0;
+
+function createTab(title?: string, sql = "SELECT 1"): QueryTab {
+  tabCounter += 1;
+  return {
+    id: globalThis.crypto?.randomUUID?.() ?? `tab_${Date.now()}_${tabSerial++}`,
+    title: title ?? `查询 ${tabCounter}`,
+    sqlText: sql,
+    initialSql: sql,
+    rowSet: null,
+    loadingData: false,
+    queryRunning: false,
+    currentQueryId: null,
+    queryErrorMsg: null,
+    selectedTable: null,
+  };
+}
+
+/** 打开连接后的初始 tab 组。 */
+function initialTabs(): { tabs: QueryTab[]; activeTabId: string } {
+  const tab = createTab();
+  return { tabs: [tab], activeTabId: tab.id };
+}
+
+/** 重连 / 建库后保留各 tab 的 SQL 文本，只复位执行态与结果（v0.1 行为延续）。 */
+function resetTabExecution(tabs: QueryTab[]): QueryTab[] {
+  return tabs.map((t) => ({
+    ...t,
+    rowSet: null,
+    loadingData: false,
+    queryRunning: false,
+    currentQueryId: null,
+    queryErrorMsg: null,
+  }));
+}
+
+/** 从 state 中取当前活跃 tab。 */
+export function selectActiveTab(s: {
+  tabs: QueryTab[];
+  activeTabId: string | null;
+}): QueryTab | null {
+  return s.tabs.find((t) => t.id === s.activeTabId) ?? null;
 }
 
 function metadataKey(
@@ -148,13 +216,11 @@ interface SessionState {
   columnsByTable: Record<string, ColumnMeta[]>;
   loadingColumns: boolean;
   refreshingMetadata: boolean;
-  selectedTable: string | null;
-  rowSet: RowSet | null;
+  /** schema 树加载（selectDb/selectSchema/createDatabase）指示 */
   loadingData: boolean;
-  sqlText: string;
-  queryRunning: boolean;
-  currentQueryId: string | null;
-  queryErrorMsg: string | null;
+  /** 查询 tab 列表与当前活跃 tab（FR-109） */
+  tabs: QueryTab[];
+  activeTabId: string | null;
   hopStatuses: Record<number, TopologyHopStatus>;
   /** keepalive 已断开的跳序号 */
   lostHops: number[];
@@ -163,10 +229,11 @@ interface SessionState {
     id: string,
     passphrase?: string,
     connection?: StoredConnection,
+    rememberPassphrase?: boolean,
   ) => Promise<void>;
   reconnect: (connection?: StoredConnection) => Promise<void>;
   close: () => Promise<void>;
-  submitPassphrase: (passphrase: string) => Promise<void>;
+  submitPassphrase: (passphrase: string, remember?: boolean) => Promise<void>;
   cancelPassphrase: () => void;
   selectDb: (db: string) => Promise<void>;
   toggleExpandedDb: (db: string) => void;
@@ -175,7 +242,13 @@ interface SessionState {
   toggleTableColumns: (table: string) => Promise<void>;
   refreshMetadata: () => Promise<void>;
   createDatabase: (id: string, input: CreateDatabaseInput) => Promise<void>;
+  /** 双击表：新开 tab 执行前 1000 行预览 */
   selectTable: (table: string) => Promise<void>;
+  /** 新建查询 tab 并激活 */
+  newTab: (sql?: string) => void;
+  /** 关闭 tab；正在执行的查询会先取消。dirty 确认由 UI 层完成 */
+  closeTab: (id: string) => Promise<void>;
+  setActiveTab: (id: string) => void;
   setSqlText: (sql: string) => void;
   executeSql: (
     sql: string,
@@ -185,6 +258,15 @@ interface SessionState {
   markHopStatus: (payload: HopStatusPayload) => void;
   markHopRtt: (payload: HopRttPayload) => void;
   markHopLost: (hopIndex: number) => void;
+}
+
+/** 用 patch 更新指定 tab。 */
+function patchTab(
+  tabs: QueryTab[],
+  id: string,
+  patch: Partial<QueryTab>,
+): QueryTab[] {
+  return tabs.map((t) => (t.id === id ? { ...t, ...patch } : t));
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -206,17 +288,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   columnsByTable: {},
   loadingColumns: false,
   refreshingMetadata: false,
-  selectedTable: null,
-  rowSet: null,
   loadingData: false,
-  sqlText: "SELECT 1",
-  queryRunning: false,
-  currentQueryId: null,
-  queryErrorMsg: null,
+  ...initialTabs(),
   hopStatuses: {},
   lostHops: [],
 
-  open: async (id, passphrase, connection) => {
+  open: async (id, passphrase, connection, rememberPassphrase) => {
     const requestEpoch = beginSessionRequest();
     invalidateMetadataRequests();
     const previousOpenId = get().openId;
@@ -231,9 +308,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       hopStatuses: initialHopStatuses(connection ?? get().activeConnection),
       passphraseFor: null,
       loadingData: false,
-      queryRunning: false,
-      currentQueryId: null,
-      queryErrorMsg: null,
+      ...initialTabs(),
     });
     let openedSessionId: string | null = null;
     try {
@@ -242,7 +317,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         metadataCache.clearConnection(previousOpenId);
         if (!isCurrentSessionRequest(requestEpoch)) return;
       }
-      openedSessionId = await connectionApi.open(id, passphrase);
+      openedSessionId = await connectionApi.open(id, passphrase, rememberPassphrase);
       if (!isCurrentSessionRequest(requestEpoch)) return;
       set({ openId: id, runtimeSessionId: openedSessionId });
       metadataCache.clearConnection(id);
@@ -265,12 +340,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         columnsByTable: {},
         loadingColumns: false,
         refreshingMetadata: false,
-        selectedTable: null,
-        rowSet: null,
         loadingData: false,
-        queryRunning: false,
-        currentQueryId: null,
-        queryErrorMsg: null,
+        ...initialTabs(),
         hopStatuses: connectedHopStatuses(connection ?? get().activeConnection),
       });
     } catch (e) {
@@ -318,12 +389,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       columnsByTable: {},
       loadingColumns: false,
       refreshingMetadata: false,
-      selectedTable: null,
-      rowSet: null,
       loadingData: false,
-      queryRunning: false,
-      currentQueryId: null,
-      queryErrorMsg: null,
+      tabs: resetTabExecution(get().tabs),
       hopStatuses: initialHopStatuses(current),
       lostHops: [],
     });
@@ -388,13 +455,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       columnsByTable: {},
       loadingColumns: false,
       refreshingMetadata: false,
-      selectedTable: null,
-      rowSet: null,
-      sqlText: "SELECT 1",
       loadingData: false,
-      queryRunning: false,
-      currentQueryId: null,
-      queryErrorMsg: null,
+      ...initialTabs(),
       hopStatuses: {},
       lostHops: [],
     });
@@ -408,9 +470,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  submitPassphrase: async (passphrase) => {
+  submitPassphrase: async (passphrase, remember) => {
     const { passphraseFor } = get();
-    if (passphraseFor) await get().open(passphraseFor, passphrase);
+    if (passphraseFor) await get().open(passphraseFor, passphrase, undefined, remember);
   },
 
   cancelPassphrase: () => set({ passphraseFor: null, status: "idle" }),
@@ -435,8 +497,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       columnsByTable: {},
       loadingColumns: false,
       refreshingMetadata: false,
-      selectedTable: null,
-      rowSet: null,
       loadingData: true,
     });
     try {
@@ -500,8 +560,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       columnsByTable: {},
       loadingColumns: false,
       refreshingMetadata: false,
-      selectedTable: null,
-      rowSet: null,
       loadingData: true,
     });
     try {
@@ -789,7 +847,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({
       loadingData: true,
       errorMsg: null,
-      queryErrorMsg: null,
     });
     try {
       await dbApi.createDatabase(id, {
@@ -813,9 +870,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         columnsByTable: {},
         loadingColumns: false,
         refreshingMetadata: false,
-        selectedTable: null,
-        rowSet: null,
         loadingData: false,
+        tabs: resetTabExecution(get().tabs),
       });
     } catch (e) {
       if (!isCurrentMetadataRequest(requestEpoch)) return;
@@ -831,104 +887,85 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const namespace = driver === "postgresql" ? selectedSchema : selectedDb;
     if (!namespace) return;
     const sql = `SELECT * FROM ${quoteIdent(namespace, driver)}.${quoteIdent(table, driver)}`;
-    const queryId = createQueryId();
-    set({
-      selectedTable: table,
-      loadingData: true,
-      queryRunning: true,
-      currentQueryId: queryId,
-      queryErrorMsg: null,
-      sqlText: sql,
+    // 双击表 = 新开 tab 执行预览（FR-109），不覆盖用户在其他 tab 的 SQL
+    const tab = createTab(table, sql);
+    set((s) => ({
+      tabs: [...s.tabs, tab],
+      activeTabId: tab.id,
+    }));
+    await runTabQuery(get, set, tab.id, sql, { rowLimit: 1000 }, table);
+  },
+
+  newTab: (sql) => {
+    const tab = createTab(undefined, sql);
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id }));
+  },
+
+  closeTab: async (id) => {
+    const tab = get().tabs.find((t) => t.id === id);
+    if (!tab) return;
+    // 关闭正在执行的 tab：先取消后端查询，本 tab 的迟到结果随 tab 移除自然失效
+    if (tab.currentQueryId) {
+      try {
+        await dbApi.cancelQuery(tab.currentQueryId);
+      } catch {
+        // 取消失败不阻塞关闭
+      }
+    }
+    set((s) => {
+      let tabs = s.tabs.filter((t) => t.id !== id);
+      let activeTabId = s.activeTabId;
+      if (tabs.length === 0) {
+        const fresh = createTab();
+        tabs = [fresh];
+        activeTabId = fresh.id;
+      } else if (activeTabId === id) {
+        activeTabId = tabs[tabs.length - 1].id;
+      }
+      return { tabs, activeTabId };
     });
-    try {
-      const rowSet = await dbApi.query(openId, sql, {
-        queryId,
-        rowLimit: 1000,
-      });
-      if (get().currentQueryId !== queryId) return;
-      set({
-        rowSet,
-        loadingData: false,
-        queryRunning: false,
-        currentQueryId: null,
-      });
-    } catch (e) {
-      if (get().currentQueryId !== queryId) return;
-      set({
-        errorMsg: translateError(e),
-        queryErrorMsg: translateError(e),
-        loadingData: false,
-        queryRunning: false,
-        currentQueryId: null,
-        rowSet: null,
-      });
+  },
+
+  setActiveTab: (id) => {
+    if (get().tabs.some((t) => t.id === id)) {
+      set({ activeTabId: id });
     }
   },
 
-  setSqlText: (sqlText) => set({ sqlText }),
+  setSqlText: (sql) => {
+    const { activeTabId } = get();
+    if (!activeTabId) return;
+    set((s) => ({ tabs: patchTab(s.tabs, activeTabId, { sqlText: sql }) }));
+  },
 
   executeSql: async (sql, options) => {
-    const { openId } = get();
-    if (!openId) return;
-    const queryId = createQueryId();
-    set({
-      sqlText: sql,
-      loadingData: true,
-      queryRunning: true,
-      currentQueryId: queryId,
-      queryErrorMsg: null,
-      rowSet: null,
+    const { activeTabId } = get();
+    if (!activeTabId) return;
+    await runTabQuery(get, set, activeTabId, sql, {
+      rowLimit: options?.rowLimit ?? 100000,
+      allowWrite: options?.allowWrite ?? false,
     });
-    try {
-      const rowSet = await dbApi.query(openId, sql, {
-        queryId,
-        rowLimit: options?.rowLimit ?? 100000,
-        allowWrite: options?.allowWrite ?? false,
-      });
-      if (get().currentQueryId !== queryId) return;
-      if (invalidatesMetadataCache(sql)) {
-        invalidateMetadataRequests();
-        metadataCache.clearConnection(openId);
-        set({
-          expandedTable: null,
-          tableColumns: [],
-          columnsByTable: {},
-          loadingColumns: false,
-        });
-      }
-      set({
-        rowSet,
-        loadingData: false,
-        queryRunning: false,
-        currentQueryId: null,
-      });
-    } catch (e) {
-      if (get().currentQueryId !== queryId) return;
-      set({
-        queryErrorMsg: translateError(e),
-        errorMsg: translateError(e),
-        loadingData: false,
-        queryRunning: false,
-        currentQueryId: null,
-      });
-    }
   },
 
   cancelQuery: async () => {
-    const { currentQueryId } = get();
-    if (!currentQueryId) return;
+    const tab = selectActiveTab(get());
+    if (!tab?.currentQueryId) return;
+    const queryId = tab.currentQueryId;
     try {
-      await dbApi.cancelQuery(currentQueryId);
+      await dbApi.cancelQuery(queryId);
     } catch {
       // 取消失败不阻塞 UI 停止等待；后端 query promise 会返回最终错误。
     }
-    if (get().currentQueryId !== currentQueryId) return;
-    set({
-      queryRunning: false,
-      loadingData: false,
-      currentQueryId: null,
-      queryErrorMsg: "SQL 已取消",
-    });
+    const current = get().tabs.find((t) => t.id === tab.id);
+    if (current?.currentQueryId !== queryId) return;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tab.id, {
+        queryRunning: false,
+        loadingData: false,
+        currentQueryId: null,
+        queryErrorMsg: "SQL 已取消",
+      }),
+    }));
   },
 
   markHopStatus: (payload) =>
@@ -999,3 +1036,80 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         : { lostHops: [...s.lostHops, hopIndex] },
     ),
 }));
+
+/** set/get 签名别名，供 tab 查询辅助函数使用。 */
+type Get = () => SessionState;
+type Set = (fn: (s: SessionState) => Partial<SessionState>) => void;
+
+/**
+ * 在指定 tab 上执行 SQL：query_id / 取消 token / 结果全部 tab 隔离。
+ * 迟到守卫：只有 tab 当前 query_id 仍匹配时才写回结果（T6.5 并发隔离）。
+ */
+async function runTabQuery(
+  get: Get,
+  set: Set,
+  tabId: string,
+  sql: string,
+  options: { rowLimit: number; allowWrite?: boolean },
+  selectedTable: string | null = null,
+): Promise<void> {
+  const openId = get().openId;
+  if (!openId) return;
+  const queryId = createQueryId();
+  const schema =
+    get().activeConnection?.driver === "postgresql"
+      ? get().selectedSchema
+      : null;
+  set((s) => ({
+    tabs: patchTab(s.tabs, tabId, {
+      sqlText: sql,
+      selectedTable,
+      loadingData: true,
+      queryRunning: true,
+      currentQueryId: queryId,
+      queryErrorMsg: null,
+      rowSet: null,
+    }),
+  }));
+  try {
+    const rowSet = await dbApi.query(openId, sql, {
+      queryId,
+      rowLimit: options.rowLimit,
+      allowWrite: options.allowWrite ?? false,
+      schema,
+    });
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || tab.currentQueryId !== queryId) return;
+    if (invalidatesMetadataCache(sql)) {
+      invalidateMetadataRequests();
+      metadataCache.clearConnection(openId);
+      set((s) => ({
+        expandedTable: null,
+        tableColumns: [],
+        columnsByTable: {},
+        loadingColumns: false,
+      }));
+    }
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        rowSet,
+        loadingData: false,
+        queryRunning: false,
+        currentQueryId: null,
+      }),
+    }));
+  } catch (e) {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab || tab.currentQueryId !== queryId) return;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        queryErrorMsg: translateError(e),
+        loadingData: false,
+        queryRunning: false,
+        currentQueryId: null,
+        rowSet: null,
+      }),
+      errorMsg: translateError(e),
+    }));
+  }
+}

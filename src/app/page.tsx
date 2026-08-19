@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, ShieldCheckIcon } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ConnectionDialogs } from "@/components/connection-dialogs";
 import { ConnectionForm } from "@/components/connection-form";
 import { CreateDatabaseDialog } from "@/components/create-database-dialog";
 import { SchemaBrowser } from "@/components/schema-browser";
+import {
+  SecuritySettingsDialog,
+  UnlockDialog,
+} from "@/components/security-dialogs";
 import { UpdateCheckResultDialog } from "@/components/update-check-result-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import {
@@ -24,6 +28,7 @@ import type { StoredConnection } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useConnectionStore } from "@/stores/connection-store";
+import { useSecurityStore } from "@/stores/security-store";
 import { useSessionStore } from "@/stores/session-store";
 
 /** 连接表单弹窗的状态：新建、编辑某条，或关闭 */
@@ -49,6 +54,10 @@ export default function Home() {
   const reconnectConnection = useSessionStore((s) => s.reconnect);
   const closeConnection = useSessionStore((s) => s.close);
   const confirm = useConfirmStore((s) => s.confirm);
+  const securityStatus = useSecurityStore((s) => s.status);
+  const securityInitialized = useSecurityStore((s) => s.initialized);
+  const refreshSecurity = useSecurityStore((s) => s.refresh);
+  const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
   const {
     updateInfo,
     checkError,
@@ -57,9 +66,16 @@ export default function Home() {
     dismissCheckResult,
   } = useUpdateChecker();
 
+  // 启动先拉取主密码状态；锁定期间不加载连接列表（后端同样会拒绝）
   useEffect(() => {
-    load();
-  }, [load]);
+    refreshSecurity();
+  }, [refreshSecurity]);
+
+  useEffect(() => {
+    if (securityInitialized && securityStatus !== "locked") {
+      load();
+    }
+  }, [securityInitialized, securityStatus, load]);
 
   const showingSession =
     activeConnection !== null &&
@@ -125,6 +141,10 @@ export default function Home() {
     <main className="flex h-screen">
       <ConnectionDialogs />
       <ConfirmDialog />
+      {securityStatus === "locked" && <UnlockDialog />}
+      {securityDialogOpen && (
+        <SecuritySettingsDialog onClose={() => setSecurityDialogOpen(false)} />
+      )}
       <UpdateDialog updateInfo={updateInfo} onDismiss={dismissUpdate} />
       <UpdateCheckResultDialog
         notice={checkNotice}
@@ -172,6 +192,24 @@ export default function Home() {
             />
           </h1>
           <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              title={
+                securityStatus === "unlocked"
+                  ? "安全设置（主密码已解锁）"
+                  : "安全设置"
+              }
+              onClick={() => setSecurityDialogOpen(true)}
+              className={
+                securityStatus === "unlocked"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : undefined
+              }
+            >
+              <ShieldCheckIcon data-icon="inline-start" />
+            </Button>
             <Button type="button" size="sm" onClick={startCreate}>
               <PlusIcon data-icon="inline-start" />
               新建

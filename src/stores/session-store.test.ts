@@ -7,9 +7,38 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { metadataCache } from "@/lib/metadata-cache";
 import type { DriverKind, StoredConnection } from "@/lib/tauri-api";
-import { useSessionStore } from "@/stores/session-store";
+import {
+  selectActiveTab,
+  useSessionStore,
+  type QueryTab,
+} from "@/stores/session-store";
 
 const mockInvoke = vi.mocked(invoke);
+
+/** 构造一个测试 tab（与 store 内部 createTab 同构） */
+function makeTab(overrides: Partial<QueryTab> = {}): QueryTab {
+  return {
+    id: "tab-1",
+    title: "查询 1",
+    sqlText: "SELECT 1",
+    initialSql: "SELECT 1",
+    rowSet: null,
+    loadingData: false,
+    queryRunning: false,
+    currentQueryId: null,
+    queryErrorMsg: null,
+    selectedTable: null,
+    ...overrides,
+  };
+}
+
+/** 当前活跃 tab（测试断言辅助） */
+function activeTab(): QueryTab {
+  const s = useSessionStore.getState();
+  const tab = selectActiveTab(s);
+  if (!tab) throw new Error("没有活跃 tab");
+  return tab;
+}
 
 function sampleConnection(driver: DriverKind): StoredConnection {
   return {
@@ -81,13 +110,9 @@ beforeEach(() => {
     columnsByTable: {},
     loadingColumns: false,
     refreshingMetadata: false,
-    selectedTable: null,
-    rowSet: null,
     loadingData: false,
-    sqlText: "SELECT 1",
-    queryRunning: false,
-    currentQueryId: null,
-    queryErrorMsg: null,
+    tabs: [makeTab()],
+    activeTabId: "tab-1",
     hopStatuses: {},
     lostHops: [],
   });
@@ -107,6 +132,7 @@ describe("session-store", () => {
     expect(mockInvoke).toHaveBeenCalledWith("connection_open", {
       id: "c1",
       passphrase: null,
+      rememberPassphrase: null,
     });
     expect(s.status).toBe("connected");
     expect(s.openId).toBe("c1");
@@ -129,10 +155,11 @@ describe("session-store", () => {
     expect(mockInvoke).toHaveBeenCalledWith("connection_open", {
       id: "c1",
       passphrase: "secret",
+      rememberPassphrase: null,
     });
   });
 
-  it("selectTable 用反引号包裹并交给后端 rowLimit=1000", async () => {
+  it("selectTable 新开 tab 用反引号包裹并交给后端 rowLimit=1000", async () => {
     useSessionStore.setState({ openId: "c1", selectedDb: "app" });
     routeInvoke({
       db_query: { columns: ["id"], rows: [["1"]], truncated: false },
@@ -144,8 +171,13 @@ describe("session-store", () => {
       queryId: expect.any(String),
       rowLimit: 1000,
       allowWrite: false,
+      schema: null,
     });
-    expect(useSessionStore.getState().rowSet?.rows).toHaveLength(1);
+    // 表预览在新 tab 中进行，不影响原 tab
+    const tab = activeTab();
+    expect(tab.title).toBe("user`s");
+    expect(tab.rowSet?.rows).toHaveLength(1);
+    expect(useSessionStore.getState().tabs).toHaveLength(2);
   });
 
   it("reconnect 清理旧查询状态并使用新 session 重新加载数据库", async () => {
@@ -155,9 +187,13 @@ describe("session-store", () => {
       runtimeSessionId: "session-old",
       activeConnection: connection,
       status: "connected",
-      sqlText: "SELECT * FROM users",
-      queryRunning: true,
-      currentQueryId: "q-old",
+      tabs: [
+        makeTab({
+          sqlText: "SELECT * FROM users",
+          queryRunning: true,
+          currentQueryId: "q-old",
+        }),
+      ],
       lostHops: [0],
     });
     routeInvoke({
@@ -176,10 +212,12 @@ describe("session-store", () => {
     expect(state.status).toBe("connected");
     expect(state.runtimeSessionId).toBe("session-new");
     expect(state.databases).toEqual([{ name: "app", isCurrent: true }]);
-    expect(state.currentQueryId).toBeNull();
-    expect(state.queryRunning).toBe(false);
     expect(state.lostHops).toEqual([]);
-    expect(state.sqlText).toBe("SELECT * FROM users");
+    // 重连后保留 SQL 文本，复位执行态
+    const tab = activeTab();
+    expect(tab.currentQueryId).toBeNull();
+    expect(tab.queryRunning).toBe(false);
+    expect(tab.sqlText).toBe("SELECT * FROM users");
   });
 
   it("切换连接前按 session 代号关闭旧连接", async () => {
@@ -320,8 +358,9 @@ describe("session-store", () => {
 
     const state = useSessionStore.getState();
     expect(state.runtimeSessionId).toBe("session-new");
-    expect(state.rowSet).toBeNull();
-    expect(state.queryErrorMsg).toBeNull();
+    // 旧 query_id 的迟到结果不得写回 tab（T6.5 隔离）
+    expect(activeTab().rowSet).toBeNull();
+    expect(activeTab().queryErrorMsg).toBeNull();
   });
 
   it("toggleExpandedDb 只收起当前 database，不重置当前表和结果", () => {
@@ -329,8 +368,12 @@ describe("session-store", () => {
       expandedDb: "app",
       selectedDb: "app",
       tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
-      selectedTable: "users",
-      rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+      tabs: [
+        makeTab({
+          selectedTable: "users",
+          rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+        }),
+      ],
       loadingData: true,
     });
 
@@ -342,8 +385,12 @@ describe("session-store", () => {
     expect(s.tables).toEqual([
       { name: "users", tableType: "BASE TABLE", rows: null, comment: null },
     ]);
-    expect(s.selectedTable).toBe("users");
-    expect(s.rowSet).toEqual({ columns: ["id"], rows: [["1"]], truncated: false });
+    expect(activeTab().selectedTable).toBe("users");
+    expect(activeTab().rowSet).toEqual({
+      columns: ["id"],
+      rows: [["1"]],
+      truncated: false,
+    });
     expect(s.loadingData).toBe(true);
   });
 
@@ -378,8 +425,12 @@ describe("session-store", () => {
       expandedDb: null,
       selectedDb: "app",
       tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
-      selectedTable: "users",
-      rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+      tabs: [
+        makeTab({
+          selectedTable: "users",
+          rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+        }),
+      ],
     });
 
     await useSessionStore.getState().selectDb("app");
@@ -388,18 +439,26 @@ describe("session-store", () => {
     expect(mockInvoke).not.toHaveBeenCalledWith("db_list_tables", expect.anything());
     expect(s.expandedDb).toBe("app");
     expect(s.selectedDb).toBe("app");
-    expect(s.selectedTable).toBe("users");
-    expect(s.rowSet).toEqual({ columns: ["id"], rows: [["1"]], truncated: false });
+    expect(activeTab().selectedTable).toBe("users");
+    expect(activeTab().rowSet).toEqual({
+      columns: ["id"],
+      rows: [["1"]],
+      truncated: false,
+    });
   });
 
-  it("selectDb 切换 database 时才重置表选择和结果", async () => {
+  it("selectDb 切换 database 不污染查询 tab（FR-109 工作台独立）", async () => {
     useSessionStore.setState({
       openId: "c1",
       expandedDb: "app",
       selectedDb: "app",
       tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
-      selectedTable: "users",
-      rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+      tabs: [
+        makeTab({
+          selectedTable: "users",
+          rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+        }),
+      ],
     });
     routeInvoke({
       db_list_tables: [{ name: "orders", tableType: "BASE TABLE", rows: null, comment: null }],
@@ -418,8 +477,9 @@ describe("session-store", () => {
     expect(s.tables).toEqual([
       { name: "orders", tableType: "BASE TABLE", rows: null, comment: null },
     ]);
-    expect(s.selectedTable).toBeNull();
-    expect(s.rowSet).toBeNull();
+    // 多 tab 工作台的 SQL 与结果独立于树的库切换
+    expect(activeTab().selectedTable).toBe("users");
+    expect(activeTab().rowSet).not.toBeNull();
   });
 
   it("PostgreSQL 按 database → schema → table 加载并使用双引号查询", async () => {
@@ -459,6 +519,7 @@ describe("session-store", () => {
       queryId: expect.any(String),
       rowLimit: 1000,
       allowWrite: false,
+      schema: "audit",
     });
   });
 
@@ -854,7 +915,11 @@ describe("session-store", () => {
       databases: [{ name: "app", isCurrent: true }],
       selectedDb: "app",
       tables: [{ name: "users", tableType: "BASE TABLE", rows: null, comment: null }],
-      rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+      tabs: [
+        makeTab({
+          rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+        }),
+      ],
     });
     routeInvoke({
       db_create_database: undefined,
@@ -883,7 +948,7 @@ describe("session-store", () => {
     ]);
     expect(s.selectedDb).toBe("new_db");
     expect(s.tables).toEqual([]);
-    expect(s.rowSet).toBeNull();
+    expect(activeTab().rowSet).toBeNull();
   });
 
   it("executeSql 使用 10w 默认上限并可取消 query", async () => {
@@ -900,6 +965,7 @@ describe("session-store", () => {
       queryId: expect.any(String),
       rowLimit: 100000,
       allowWrite: false,
+      schema: null,
     });
   });
 
@@ -908,5 +974,124 @@ describe("session-store", () => {
     useSessionStore.getState().markHopLost(1);
     useSessionStore.getState().markHopLost(0);
     expect(useSessionStore.getState().lostHops).toEqual([1, 0]);
+  });
+
+  // ===== FR-109 / T6.5：多 tab 并发与取消隔离 =====
+
+  /** 按 SQL 文本分发 db_query 的 deferred promise，模拟两个并发查询 */
+  function routeQueriesByText() {
+    const deferreds = new Map<string, { promise: Promise<unknown>; resolve: (v: unknown) => void }>();
+    mockInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "db_query") {
+        const sql = (args as { sql: string }).sql;
+        const d = deferred<unknown>();
+        deferreds.set(sql, d);
+        return d.promise;
+      }
+      return Promise.resolve(undefined);
+    });
+    return deferreds;
+  }
+
+  /** 取某次 db_query 调用实际使用的 queryId */
+  function queryIdOf(sql: string): string {
+    const call = mockInvoke.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "db_query" && (args as { sql: string }).sql === sql,
+    );
+    if (!call) throw new Error(`没有找到 ${sql} 的 db_query 调用`);
+    return (call[1] as { queryId: string }).queryId;
+  }
+
+  it("两个 tab 并发执行互不污染（T6.5）", async () => {
+    useSessionStore.setState({ openId: "c1" });
+    const queries = routeQueriesByText();
+
+    // tab-1 执行 A；新开 tab-2 执行 B
+    const pendingA = useSessionStore.getState().executeSql("SELECT A");
+    useSessionStore.getState().newTab();
+    const tabBId = useSessionStore.getState().activeTabId!;
+    const pendingB = useSessionStore.getState().executeSql("SELECT B");
+
+    expect(useSessionStore.getState().tabs).toHaveLength(2);
+    expect(useSessionStore.getState().tabs[0].queryRunning).toBe(true);
+    expect(useSessionStore.getState().tabs[1].queryRunning).toBe(true);
+
+    // A 先完成：只写回 A 的 tab
+    queries.get("SELECT A")!.resolve({ columns: ["a"], rows: [["1"]], truncated: false });
+    await pendingA;
+    let tabs = useSessionStore.getState().tabs;
+    expect(tabs[0].rowSet?.rows).toHaveLength(1);
+    expect(tabs[0].queryRunning).toBe(false);
+    expect(tabs[1].queryRunning).toBe(true);
+    expect(tabs[1].rowSet).toBeNull();
+
+    queries.get("SELECT B")!.resolve({ columns: ["b"], rows: [["2"]], truncated: false });
+    await pendingB;
+    tabs = useSessionStore.getState().tabs;
+    expect(tabs[1].rowSet?.rows).toHaveLength(1);
+    expect(useSessionStore.getState().activeTabId).toBe(tabBId);
+  });
+
+  it("取消 A tab 不影响 B tab（T6.5）", async () => {
+    useSessionStore.setState({ openId: "c1" });
+    const queries = routeQueriesByText();
+
+    const pendingA = useSessionStore.getState().executeSql("SELECT A");
+    useSessionStore.getState().newTab();
+    void useSessionStore.getState().executeSql("SELECT B");
+
+    // 回到 tab-1 取消 A
+    useSessionStore.getState().setActiveTab("tab-1");
+    await useSessionStore.getState().cancelQuery();
+
+    expect(mockInvoke).toHaveBeenCalledWith("db_query_cancel", {
+      queryId: queryIdOf("SELECT A"),
+    });
+    const tabs = useSessionStore.getState().tabs;
+    expect(tabs[0].queryRunning).toBe(false);
+    expect(tabs[0].queryErrorMsg).toBe("SQL 已取消");
+    expect(tabs[1].queryRunning).toBe(true);
+
+    // A 的 promise 迟到返回错误也不得覆盖 B
+    queries.get("SELECT A")!.resolve(Promise.resolve({ columns: [], rows: [], truncated: false }));
+    await pendingA;
+    expect(useSessionStore.getState().tabs[1].queryRunning).toBe(true);
+  });
+
+  it("关闭执行中的 tab 先取消后端查询，关闭最后一个 tab 自动补新 tab", async () => {
+    useSessionStore.setState({ openId: "c1" });
+    routeQueriesByText();
+
+    void useSessionStore.getState().executeSql("SELECT SLOW");
+    const runningId = useSessionStore.getState().activeTabId!;
+
+    await useSessionStore.getState().closeTab(runningId);
+
+    expect(mockInvoke).toHaveBeenCalledWith("db_query_cancel", {
+      queryId: queryIdOf("SELECT SLOW"),
+    });
+    const s = useSessionStore.getState();
+    expect(s.tabs).toHaveLength(1);
+    expect(s.tabs[0].id).not.toBe(runningId);
+    expect(s.tabs[0].queryRunning).toBe(false);
+  });
+
+  it("关闭非活跃 tab 不改变当前活跃 tab", async () => {
+    useSessionStore.setState({ openId: "c1" });
+    useSessionStore.getState().newTab("SELECT 2");
+    const activeBefore = useSessionStore.getState().activeTabId!;
+
+    await useSessionStore.getState().closeTab("tab-1");
+
+    const s = useSessionStore.getState();
+    expect(s.tabs).toHaveLength(1);
+    expect(s.activeTabId).toBe(activeBefore);
+  });
+
+  it("isTabDirty 跟随 sqlText 与 initialSql 的差异", async () => {
+    const { isTabDirty } = await import("@/stores/session-store");
+    expect(isTabDirty(makeTab())).toBe(false);
+    expect(isTabDirty(makeTab({ sqlText: "SELECT 2" }))).toBe(true);
   });
 });

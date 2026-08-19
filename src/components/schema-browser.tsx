@@ -1,25 +1,37 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
+import { PlusIcon, XIcon } from "lucide-react";
 
+import { HistoryPanel } from "@/components/history-panel";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
 import { TopologyGraph } from "@/components/topology-graph";
+import { useColumnWidths } from "@/hooks/use-column-widths";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
-import type {
-  ColumnMeta,
-  RowSet,
-  StoredConnection,
-  TableMeta,
+import {
+  exportApi,
+  translateError,
+  type ColumnMeta,
+  type ExportFormat,
+  type RowSet,
+  type StoredConnection,
+  type TableMeta,
 } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
-import { useSessionStore } from "@/stores/session-store";
+import {
+  isTabDirty,
+  selectActiveTab,
+  useSessionStore,
+  type QueryTab,
+} from "@/stores/session-store";
 
 /**
- * 已连接后的 schema 浏览：左侧 database/table 树，右侧选中表的前 1000 行。
+ * 已连接后的 schema 浏览：左侧 database/table 树，右侧多 tab 查询工作台。
  *
- * 结果表格用 react-virtuoso 虚拟滚动（表浏览 1000 行与 SQL 编辑器 10w 行共用）。
+ * 每个 tab 独立保存 SQL、结果集、query_id 与取消状态（FR-109）；
+ * 结果表格用 react-virtuoso 虚拟滚动，列宽可拖拽并持久化（FR-111）。
  */
 export function SchemaBrowser({ connection }: { connection: StoredConnection }) {
   const {
@@ -36,12 +48,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     columnsByTable,
     loadingColumns,
     refreshingMetadata,
-    selectedTable,
-    rowSet,
     loadingData,
-    sqlText,
-    queryRunning,
-    queryErrorMsg,
+    tabs,
+    activeTabId,
     hopStatuses,
     lostHops,
     errorMsg,
@@ -52,6 +61,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     toggleTableColumns,
     refreshMetadata,
     selectTable,
+    newTab,
+    closeTab,
+    setActiveTab,
     setSqlText,
     executeSql,
     cancelQuery,
@@ -59,6 +71,10 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     close,
   } = useSessionStore();
   const confirm = useConfirmStore((s) => s.confirm);
+  const activeTab = selectActiveTab({ tabs, activeTabId });
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
   const sqlNamespaces = useMemo(
     () =>
       connection.driver === "postgresql"
@@ -68,7 +84,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   );
 
   async function runSql() {
-    const sql = sqlText.trim();
+    const sql = activeTab?.sqlText.trim() ?? "";
     if (!sql) return;
     let allowWrite = false;
     if (needsWriteConfirmation(sql, connection.driver)) {
@@ -82,6 +98,52 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       if (!allowWrite) return;
     }
     await executeSql(sql, { rowLimit: 100000, allowWrite });
+  }
+
+  /** 关闭 tab：dirty 或执行中时先确认（FR-109 dirty state） */
+  async function closeTabWithConfirm(tab: QueryTab) {
+    if (isTabDirty(tab) || tab.queryRunning) {
+      const ok = await confirm({
+        title: "关闭查询",
+        message: tab.queryRunning
+          ? `「${tab.title}」正在执行查询，关闭将取消该查询。确定关闭？`
+          : `「${tab.title}」有未执行的修改，关闭后将丢失。确定关闭？`,
+        confirmText: "关闭",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    await closeTab(tab.id);
+  }
+
+  /** 导出当前 tab SQL 的结果集（后端重新执行并流式写文件，FR-107） */
+  async function exportResult(format: ExportFormat) {
+    const openId = useSessionStore.getState().openId;
+    if (!activeTab || !openId || exporting) return;
+    const sql = activeTab.sqlText.trim();
+    if (!sql) return;
+    if (needsWriteConfirmation(sql, connection.driver)) {
+      setExportMsg("仅支持导出只读查询结果");
+      return;
+    }
+    setExporting(true);
+    setExportMsg(null);
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const path = await save({
+        defaultPath: `export.${format}`,
+        filters: [{ name: format.toUpperCase(), extensions: [format] }],
+      });
+      if (!path) return;
+      const result = await exportApi.query(openId, sql, format, path);
+      setExportMsg(
+        `已导出 ${result.rows} 行${result.truncated ? "（结果受 10 万行上限截断）" : ""}`,
+      );
+    } catch (e) {
+      setExportMsg(translateError(e));
+    } finally {
+      setExporting(false);
+    }
   }
 
   const connected = status === "connected";
@@ -191,7 +253,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                   loadingColumns={loadingColumns}
                   expandedTable={expandedTable}
                   columns={tableColumns}
-                  selectedTable={selectedTable}
+                  selectedTable={activeTab?.selectedTable ?? null}
                   onToggleColumns={toggleTableColumns}
                   onSelect={selectTable}
                   paddingClass="pl-8"
@@ -230,7 +292,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                           loadingColumns={loadingColumns}
                           expandedTable={expandedTable}
                           columns={tableColumns}
-                          selectedTable={selectedTable}
+                          selectedTable={activeTab?.selectedTable ?? null}
                           onToggleColumns={toggleTableColumns}
                           onSelect={selectTable}
                           paddingClass="pl-12"
@@ -245,71 +307,185 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           ))}
         </aside>
 
-        {/* 右：SQL + 结果表格 */}
+        {/* 右：多 tab 查询工作台（FR-109） */}
         <section className="flex min-w-0 flex-1 flex-col">
+          {/* 查询 tab 条 */}
+          <div className="flex items-center gap-0.5 overflow-x-auto border-b border-neutral-200 px-2 pt-1.5 dark:border-neutral-800">
+            {tabs.map((tab) => (
+              <div
+                key={tab.id}
+                className={cn(
+                  "group flex max-w-40 items-center gap-1 rounded-t-md border border-b-0 border-neutral-200 px-2.5 py-1 text-xs dark:border-neutral-700",
+                  tab.id === activeTabId
+                    ? "bg-white font-medium dark:bg-neutral-900"
+                    : "bg-neutral-50 text-neutral-500 hover:bg-neutral-100 dark:bg-neutral-950 dark:hover:bg-neutral-800",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  title={tab.title}
+                  className="flex min-w-0 items-center gap-1"
+                >
+                  {(isTabDirty(tab) || tab.queryRunning) && (
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 shrink-0 rounded-full",
+                        tab.queryRunning ? "bg-blue-500" : "bg-amber-500",
+                      )}
+                      aria-label={tab.queryRunning ? "执行中" : "未执行修改"}
+                    />
+                  )}
+                  <span className="truncate">{tab.title}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => closeTabWithConfirm(tab)}
+                  aria-label={`关闭 ${tab.title}`}
+                  className="shrink-0 rounded p-0.5 text-neutral-300 hover:bg-neutral-200 hover:text-neutral-600 group-hover:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+                >
+                  <XIcon className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => newTab()}
+              disabled={!connected}
+              aria-label="新建查询"
+              title="新建查询 tab"
+              className="mb-0.5 ml-1 shrink-0 rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              <PlusIcon className="h-3.5 w-3.5" />
+            </button>
+            <div className="relative ml-auto shrink-0 pb-0.5 pr-1">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen((v) => !v)}
+                className="rounded px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                历史
+              </button>
+              {historyOpen && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-[28rem] max-w-[80vw]">
+                  <HistoryPanel
+                    onPick={(sql) => {
+                      setSqlText(sql);
+                      setHistoryOpen(false);
+                    }}
+                    onClose={() => setHistoryOpen(false)}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="border-b border-neutral-200 p-3 dark:border-neutral-800">
-            <SqlCodeEditor
-              value={sqlText}
-              onChange={setSqlText}
-              onRun={runSql}
-              disabled={!connected || queryRunning}
-              queryErrorMsg={queryErrorMsg}
-              driver={connection.driver}
-              namespaces={sqlNamespaces}
-              selectedNamespace={
-                connection.driver === "postgresql" ? selectedSchema : selectedDb
-              }
-              tables={tables}
-              columnsByTable={columnsByTable}
-            />
+            {activeTab && (
+              <SqlCodeEditor
+                value={activeTab.sqlText}
+                onChange={setSqlText}
+                onRun={runSql}
+                disabled={!connected || activeTab.queryRunning}
+                queryErrorMsg={activeTab.queryErrorMsg}
+                driver={connection.driver}
+                namespaces={sqlNamespaces}
+                selectedNamespace={
+                  connection.driver === "postgresql" ? selectedSchema : selectedDb
+                }
+                tables={tables}
+                columnsByTable={columnsByTable}
+              />
+            )}
             <div className="mt-2 flex items-center gap-2">
               <button
                 onClick={runSql}
-                disabled={!connected || queryRunning || sqlText.trim().length === 0}
+                disabled={
+                  !connected ||
+                  !activeTab ||
+                  activeTab.queryRunning ||
+                  activeTab.sqlText.trim().length === 0
+                }
                 className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 执行
               </button>
               <button
                 onClick={cancelQuery}
-                disabled={!queryRunning}
+                disabled={!activeTab?.queryRunning}
                 className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
               >
                 取消
               </button>
-              {queryRunning && (
+              {activeTab?.queryRunning && (
                 <span className="text-xs text-neutral-500">执行中…</span>
               )}
-              {rowSet?.truncated && (
-                <span className="ml-auto text-xs text-amber-600 dark:text-amber-300">
-                  已截断，请补充 LIMIT 缩小结果集
-                </span>
-              )}
+              <div className="ml-auto flex items-center gap-2">
+                {exportMsg && (
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {exportMsg}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => exportResult("csv")}
+                  disabled={
+                    !connected ||
+                    exporting ||
+                    !activeTab ||
+                    activeTab.queryRunning ||
+                    activeTab.sqlText.trim().length === 0
+                  }
+                  className="rounded-md border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+                >
+                  导出 CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportResult("xlsx")}
+                  disabled={
+                    !connected ||
+                    exporting ||
+                    !activeTab ||
+                    activeTab.queryRunning ||
+                    activeTab.sqlText.trim().length === 0
+                  }
+                  className="rounded-md border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+                >
+                  导出 Excel
+                </button>
+              </div>
             </div>
-            {queryErrorMsg && (
+            {activeTab?.queryErrorMsg && (
               <p className="mt-2 text-xs text-red-600 dark:text-red-300">
-                {queryErrorMsg}
+                {activeTab.queryErrorMsg}
               </p>
             )}
           </div>
 
           <div className="min-h-0 flex-1 overflow-hidden">
-            {!rowSet && !loadingData && (
+            {!activeTab?.rowSet && !activeTab?.loadingData && (
               <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-                {selectedTable ? "暂无结果" : "选择左侧表，或直接执行 SQL。"}
+                {activeTab?.selectedTable ? "暂无结果" : "选择左侧表，或直接执行 SQL。"}
               </div>
             )}
-            {loadingData && (
+            {activeTab?.loadingData && (
               <p className="p-4 text-sm text-neutral-500">加载中…</p>
             )}
-            {!loadingData && rowSet && <ResultTable rowSet={rowSet} />}
+            {!activeTab?.loadingData && activeTab?.rowSet && (
+              <ResultTable
+                rowSet={activeTab.rowSet}
+                connectionId={connection.id}
+                truncated={activeTab.rowSet.truncated}
+              />
+            )}
           </div>
-          {selectedTable && (
+          {activeTab?.selectedTable && (
             <div className="border-t border-neutral-200 px-3 py-1.5 text-xs text-neutral-500 dark:border-neutral-800">
               当前表：
               {connection.driver === "postgresql"
-                ? `${selectedDb}.${selectedSchema}.${selectedTable}`
-                : `${selectedDb}.${selectedTable}`}
+                ? `${selectedDb}.${selectedSchema}.${activeTab.selectedTable}`
+                : `${selectedDb}.${activeTab.selectedTable}`}
             </div>
           )}
         </section>
@@ -528,65 +704,107 @@ function TableTreeIcon({ active }: { active: boolean }) {
   );
 }
 
-/** 结果集表格（react-virtuoso 虚拟滚动，表头吸顶） */
-export function ResultTable({ rowSet }: { rowSet: RowSet }) {
+/** 结果集表格（react-virtuoso 虚拟滚动，表头吸顶，列宽可拖拽并持久化 FR-111） */
+export function ResultTable({
+  rowSet,
+  connectionId,
+  truncated,
+}: {
+  rowSet: RowSet;
+  connectionId: string;
+  truncated?: boolean;
+}) {
+  const { widthOf, customized, startResize, reset } = useColumnWidths(
+    connectionId,
+    rowSet.columns,
+  );
   if (rowSet.columns.length === 0) {
     return <p className="p-4 text-sm text-neutral-500">（空结果集）</p>;
   }
-  const gridTemplateColumns = `48px repeat(${rowSet.columns.length}, minmax(140px, 260px))`;
-  const minWidth = 48 + rowSet.columns.length * 160;
+  const gridTemplateColumns = `48px ${rowSet.columns
+    .map((_, i) => `${widthOf(i)}px`)
+    .join(" ")}`;
+  const minWidth =
+    48 + rowSet.columns.reduce((sum, _, i) => sum + widthOf(i), 0);
 
   return (
-    <div className="h-full overflow-x-auto">
-      <div className="flex h-full flex-col text-xs" style={{ minWidth }}>
-        <div
-          className="grid bg-neutral-100 dark:bg-neutral-800"
-          style={{ gridTemplateColumns }}
-        >
-          <div className="border-b border-neutral-200 px-2 py-1 text-right font-mono text-neutral-400 dark:border-neutral-700">
-            #
-          </div>
-          {rowSet.columns.map((c) => (
-            <div
-              key={c}
-              className="truncate border-b border-neutral-200 px-2 py-1 text-left font-medium dark:border-neutral-700"
-              title={c}
+    <div className="flex h-full flex-col">
+      {(truncated || customized) && (
+        <div className="flex items-center gap-2 border-b border-neutral-100 px-3 py-1 text-xs dark:border-neutral-800">
+          {truncated && (
+            <span className="text-amber-600 dark:text-amber-300">
+              已截断，请补充 LIMIT 缩小结果集
+            </span>
+          )}
+          {customized && (
+            <button
+              type="button"
+              onClick={reset}
+              className="ml-auto rounded px-1.5 py-0.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
             >
-              {c}
-            </div>
-          ))}
+              恢复默认列宽
+            </button>
+          )}
         </div>
-        {rowSet.rows.length === 0 ? (
-          <p className="p-4 text-sm text-neutral-500">（0 行）</p>
-        ) : (
-          <Virtuoso
-            className="min-h-0 flex-1"
-            data={rowSet.rows}
-            itemContent={(ri, row) => (
+      )}
+      <div className="min-h-0 flex-1 overflow-x-auto">
+        <div className="flex h-full flex-col text-xs" style={{ minWidth }}>
+          <div
+            className="grid bg-neutral-100 dark:bg-neutral-800"
+            style={{ gridTemplateColumns }}
+          >
+            <div className="border-b border-neutral-200 px-2 py-1 text-right font-mono text-neutral-400 dark:border-neutral-700">
+              #
+            </div>
+            {rowSet.columns.map((c, ci) => (
               <div
-                className="grid hover:bg-neutral-50 dark:hover:bg-neutral-900"
-                style={{ gridTemplateColumns }}
+                key={`${ci}-${c}`}
+                className="relative truncate border-b border-neutral-200 px-2 py-1 text-left font-medium dark:border-neutral-700"
+                title={c}
               >
-                <div className="border-b border-neutral-100 px-2 py-1 text-right font-mono text-neutral-400 dark:border-neutral-900">
-                  {ri + 1}
-                </div>
-                {row.map((cell, ci) => (
-                  <div
-                    key={ci}
-                    className="truncate border-b border-neutral-100 px-2 py-1 dark:border-neutral-900"
-                    title={cell ?? "NULL"}
-                  >
-                    {cell === null ? (
-                      <span className="italic text-neutral-400">NULL</span>
-                    ) : (
-                      cell
-                    )}
-                  </div>
-                ))}
+                {c}
+                <span
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={`拖拽调整 ${c} 列宽`}
+                  onMouseDown={(e) => startResize(ci, e)}
+                  className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize hover:bg-blue-400/60"
+                />
               </div>
-            )}
-          />
-        )}
+            ))}
+          </div>
+          {rowSet.rows.length === 0 ? (
+            <p className="p-4 text-sm text-neutral-500">（0 行）</p>
+          ) : (
+            <Virtuoso
+              className="min-h-0 flex-1"
+              data={rowSet.rows}
+              itemContent={(ri, row) => (
+                <div
+                  className="grid hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                  style={{ gridTemplateColumns }}
+                >
+                  <div className="border-b border-neutral-100 px-2 py-1 text-right font-mono text-neutral-400 dark:border-neutral-900">
+                    {ri + 1}
+                  </div>
+                  {row.map((cell, ci) => (
+                    <div
+                      key={ci}
+                      className="truncate border-b border-neutral-100 px-2 py-1 dark:border-neutral-900"
+                      title={cell ?? "NULL"}
+                    >
+                      {cell === null ? (
+                        <span className="italic text-neutral-400">NULL</span>
+                      ) : (
+                        cell
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
