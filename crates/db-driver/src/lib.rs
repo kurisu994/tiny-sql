@@ -46,6 +46,16 @@ pub enum DriverKind {
     PostgreSql,
 }
 
+impl DriverKind {
+    /// 与 serde 持久化值一致的稳定字符串（"mysql" / "postgresql"）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::MySql => "mysql",
+            Self::PostgreSql => "postgresql",
+        }
+    }
+}
+
 /// driver 错误 —— 每个变体对应一个稳定的前端 i18n key（NFR-041：key 只能加不能改名）
 #[derive(Debug, thiserror::Error)]
 pub enum DriverError {
@@ -67,6 +77,10 @@ pub enum DriverError {
     DatabaseSwitchRequired,
     #[error("error.driver.schema_required")]
     SchemaRequired,
+    #[error("error.driver.tls_handshake_failed")]
+    TlsHandshakeFailed(String),
+    #[error("error.driver.tls_verify_failed")]
+    TlsVerifyFailed(String),
 }
 
 impl DriverError {
@@ -89,7 +103,49 @@ impl DriverError {
             Self::InvalidIdentifier => "error.driver.invalid_identifier",
             Self::DatabaseSwitchRequired => "error.driver.database_switch_required",
             Self::SchemaRequired => "error.driver.schema_required",
+            Self::TlsHandshakeFailed(_) => "error.driver.tls_handshake_failed",
+            Self::TlsVerifyFailed(_) => "error.driver.tls_verify_failed",
         }
+    }
+}
+
+/// MySQL 连接失败按 SSL 模式细分出 TLS 专项 key（FR-103）：仅在用户显式启用
+/// TLS 时分类，避免把普通网络/认证错误误报为 TLS 问题。原始错误文本只留在
+/// 后端结构化字段，不随 i18n key 跨 IPC。
+fn classify_mysql_connect_error(detail: String, ssl_mode: MySqlTlsMode) -> DriverError {
+    if matches!(ssl_mode, MySqlTlsMode::Disabled) {
+        return DriverError::ConnectFailed(detail);
+    }
+    let lower = detail.to_ascii_lowercase();
+    // 证书/主机名验证失败：rustls 与 native-tls 的常见文案
+    const VERIFY_MARKERS: &[&str] = &[
+        "certificate verify failed",
+        "invalid peer certificate",
+        "unknown ca",
+        "certificate has expired",
+        "certificate is not yet valid",
+        "not valid for",
+        "hostname mismatch",
+        "cert expired",
+        "self signed certificate",
+        "self-signed certificate",
+    ];
+    if VERIFY_MARKERS.iter().any(|m| lower.contains(m)) {
+        return DriverError::TlsVerifyFailed(detail);
+    }
+    // 握手/协议层失败：服务端未启用 SSL、TLS 版本不兼容等
+    const HANDSHAKE_MARKERS: &[&str] = &["tls", "ssl", "handshake"];
+    if HANDSHAKE_MARKERS.iter().any(|m| lower.contains(m)) {
+        return DriverError::TlsHandshakeFailed(detail);
+    }
+    DriverError::ConnectFailed(detail)
+}
+
+/// 把 `connect_pool` 返回的连接错误按当前 SSL 模式重新分类为 TLS 专项 key。
+fn reclassify_tls(error: DriverError, ssl_mode: MySqlTlsMode) -> DriverError {
+    match error {
+        DriverError::ConnectFailed(detail) => classify_mysql_connect_error(detail, ssl_mode),
+        other => other,
     }
 }
 
@@ -382,8 +438,12 @@ impl MySqlDriver {
             opts = opts.ssl_client_key(path);
         }
 
-        let pool = connect_pool(opts.clone(), 5, settings.connect_timeout).await?;
-        let control_pool = connect_pool(opts, 1, settings.connect_timeout).await?;
+        let pool = connect_pool(opts.clone(), 5, settings.connect_timeout)
+            .await
+            .map_err(|e| reclassify_tls(e, settings.ssl_mode))?;
+        let control_pool = connect_pool(opts, 1, settings.connect_timeout)
+            .await
+            .map_err(|e| reclassify_tls(e, settings.ssl_mode))?;
 
         Ok(Self { pool, control_pool })
     }
@@ -1292,6 +1352,43 @@ mod tests {
                 schema: Some("audit".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn mysql_tls_errors_classify_into_actionable_keys() {
+        // 证书/主机名验证失败 → tls_verify_failed
+        let verify = classify_mysql_connect_error(
+            "error:0A000086:SSL routines::certificate verify failed".to_string(),
+            MySqlTlsMode::VerifyCa,
+        );
+        assert_eq!(verify.i18n_key(), "error.driver.tls_verify_failed");
+
+        let hostname = classify_mysql_connect_error(
+            "invalid peer certificate: NotValidForName".to_string(),
+            MySqlTlsMode::VerifyIdentity,
+        );
+        assert_eq!(hostname.i18n_key(), "error.driver.tls_verify_failed");
+
+        // 握手/协议失败 → tls_handshake_failed
+        let handshake = classify_mysql_connect_error(
+            "error:1408F10B:SSL routines:ssl3_get_record:wrong version number".to_string(),
+            MySqlTlsMode::Required,
+        );
+        assert_eq!(handshake.i18n_key(), "error.driver.tls_handshake_failed");
+
+        // 与 TLS 无关的错误即使启用 TLS 也保持通用 key
+        let auth = classify_mysql_connect_error(
+            "Access denied for user 'root'@'%'".to_string(),
+            MySqlTlsMode::Required,
+        );
+        assert_eq!(auth.i18n_key(), "error.driver.connect_failed");
+
+        // Disabled 模式永不分类为 TLS 问题
+        let plain = classify_mysql_connect_error(
+            "tls handshake error: disabled mode should not see this".to_string(),
+            MySqlTlsMode::Disabled,
+        );
+        assert_eq!(plain.i18n_key(), "error.driver.connect_failed");
     }
 
     #[test]
