@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+**本轮新增：PostgreSQL 跨 database 浏览的「一键切换」引导**——`selectDb`/`refreshMetadata` 捕获 `error.driver.database_switch_required` 时记录 `pendingDbSwitch`，错误横幅出现「切换到 <db>」按钮；点击后以 session 级 `databaseOverride` 走标准重连（`connection_reconnect` 新增可选参数，不落盘），成功后自动选中目标库。关闭后重新打开仍是保存配置里的原 database。前端 tsc + vitest（session-store 35、schema-browser 3）与 cargo clippy/test（45）全绿。
+
 **v0.2 全部代码事项已完成：Week 4 主密码加密/TLS 代码、Week 6 查询工作台（历史/多 tab/导出/列宽）本周落地，加上此前的 Week 1-3 多 driver、Week 5 schema intelligence、Week 7 RTT/重连/状态决策，v0.2 自动化门禁全绿。** 剩余均为真实环境/人工验收：V2-T3.4（PostgreSQL Tauri 直连/切换/取消/1 跳 SSH）、V2-T4.3（真实 TLS 正反例）、V2-T8.1/T8.2（双 driver dogfooding）、V2-T8.4（RC 全平台下载与发布）。
 
 本轮门禁事实：`just check` 全绿（app_lib 45、db-driver 27、ssh-multihop 8、前端 90 项测试、TypeScript、Next.js 生产构建）；真实 MySQL 5/5 与 PostgreSQL 4/4 integration 全绿；本机 Tauri debug bundle + dmg + updater 签名产物构建成功。
@@ -47,7 +49,7 @@
 - SSH 运行期首跳 session、嵌套 transport channel 与 accept worker 故障均已接入 `lost` 事件；shutdown 与每跳原子标记分别抑制正常关闭误报和重复断链事件。
 - `connection_test` 的 passphrase 仍为瞬时参数（不落盘、不进会话缓存）；正式连接的 passphrase 在启用主密码后可经 secrets.enc 持久化，否则仅会话缓存（Zeroizing）。
 - Tauri query error 使用 `{ key, line? }` 安全载荷；db-driver 只从后端原始错误提取正整数行号，CodeMirror 继续从本地化文案标记 gutter，原始数据库错误与 SQL 片段不进入 IPC。
-- PostgreSQL 当前只展开连接实际所在的 database；浏览其他 database 需新建目标连接。证书路径尚未传给 PostgreSQL driver，真实 Tauri 直连/1 跳 SSH 仍待 V2-T3.4 验收。
+- PostgreSQL 同一连接只展开当前 database；浏览其他 database 时错误横幅提供一键切换（session 级 override 重连，不落盘，重开仍是原库），不做隐式重连。证书路径尚未传给 PostgreSQL driver，真实 Tauri 直连/1 跳 SSH 仍待 V2-T3.4 验收。
 
 ## 活跃文件
 
@@ -75,7 +77,7 @@
 - V2-T1.1 采用对象安全的装箱 Future 契约，不新增 `async-trait`；取消通过 `CancellationToken` 进入通用 query 契约，连接创建和方言专属对象操作不进入 trait。
 - V2-T1.2 采用只读兼容迁移：旧记录缺 `driver` 时内存默认 MySQL，显式保存才升级密文；未知 driver 失败不覆盖文件。Week 3 已按该字段选择具体 driver，不允许未知值静默回退 MySQL。
 - PostgreSQL 显式连接不读取 `~/.pgpass`；integration 拆为 MySQL/PostgreSQL 独立命令，显式执行任一门禁时缺对应 URL 必须失败，避免假绿。
-- metadata 契约使用显式 `database + optional schema`；PostgreSQL 不能在同一连接切换 database，跨库请求返回稳定 key。当前 UI 只展开连接所在 database，跨库浏览需新建对应连接，不做隐式重连。
+- metadata 契约使用显式 `database + optional schema`；PostgreSQL 不能在同一连接切换 database，跨库请求返回稳定 key。跨库浏览通过横幅一键切换：`connection_reconnect` 接受 session 级 `databaseOverride`（不写回持久化配置，仍不做隐式重连），关闭重开后回到保存的原 database。
 - PostgreSQL 取消使用独立 control pool 调 `pg_cancel_backend`；取消或无服务端 LIMIT 的客户端截断后关闭执行连接，避免协议残留回池。MySQL JSON 同步改用 sqlx `JsonValue`，真实测试不再返回 `<unsupported>`。
 - SQL guard 按方言处理 PostgreSQL `TABLE`/`VALUES`、`OFFSET`/`FETCH` 与 dollar-quoted body；数据修改 CTE 仍需写确认，DML `RETURNING` 确认后返回结果行。
 - V2-CP1 三项历史承诺均以代码关闭：测试连接 passphrase 仅作瞬时参数；SSH 运行期断链按首跳/channel/accept worker 分类并去重；查询错误 IPC 只含稳定 key 与可选正整数行号。

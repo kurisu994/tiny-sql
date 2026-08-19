@@ -97,6 +97,8 @@ beforeEach(() => {
     activeConnection: null,
     status: "idle",
     errorMsg: null,
+    pendingDbSwitch: null,
+    switchedDatabase: null,
     passphraseFor: null,
     databases: [],
     expandedDb: null,
@@ -207,6 +209,7 @@ describe("session-store", () => {
       id: "c1",
       expectedSessionId: "session-old",
       passphrase: null,
+      databaseOverride: null,
     });
     const state = useSessionStore.getState();
     expect(state.status).toBe("connected");
@@ -521,6 +524,61 @@ describe("session-store", () => {
       allowWrite: false,
       schema: "audit",
     });
+  });
+
+  it("PostgreSQL 选中非当前 database 时给出切换引导", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      activeConnection: sampleConnection("postgresql"),
+    });
+    mockInvoke.mockRejectedValue("error.driver.database_switch_required");
+
+    await useSessionStore.getState().selectDb("cloudpivot");
+
+    const s = useSessionStore.getState();
+    expect(s.errorMsg).toBe("需要先切换到目标 PostgreSQL 数据库");
+    expect(s.pendingDbSwitch).toBe("cloudpivot");
+    expect(s.loadingData).toBe(false);
+  });
+
+  it("switchDatabase 以 session 级覆盖切库，不修改保存的连接配置", async () => {
+    const conn = sampleConnection("postgresql");
+    useSessionStore.setState({
+      openId: "c1",
+      runtimeSessionId: "session-1",
+      activeConnection: conn,
+      status: "connected",
+      errorMsg: "需要先切换到目标 PostgreSQL 数据库",
+      pendingDbSwitch: "cloudpivot",
+    });
+    routeInvoke({
+      connection_reconnect: "session-2",
+      db_list_databases: [{ name: "cloudpivot", isCurrent: true }],
+      db_list_schemas: [{ name: "public", isDefault: true }],
+    });
+
+    await useSessionStore.getState().switchDatabase();
+
+    // 不写回持久化配置，关闭后重新打开仍是原 database
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "connection_update",
+      expect.anything(),
+    );
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "connection_reconnect",
+      expect.objectContaining({ id: "c1", databaseOverride: "cloudpivot" }),
+    );
+    expect(mockInvoke).toHaveBeenCalledWith("db_list_schemas", {
+      id: "c1",
+      database: "cloudpivot",
+    });
+    const s = useSessionStore.getState();
+    expect(s.activeConnection?.database).toBe("app");
+    expect(s.switchedDatabase).toBe("cloudpivot");
+    expect(s.pendingDbSwitch).toBeNull();
+    expect(s.errorMsg).toBeNull();
+    expect(s.selectedDb).toBe("cloudpivot");
+    expect(s.schemas).toEqual([{ name: "public", isDefault: true }]);
   });
 
   it("MySQL 按需加载表列并保留完整元信息", async () => {

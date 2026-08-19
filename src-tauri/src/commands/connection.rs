@@ -321,6 +321,7 @@ pub async fn connection_open(
         &id,
         passphrase,
         remember_passphrase.unwrap_or(false),
+        None,
     )
     .await
 }
@@ -328,7 +329,8 @@ pub async fn connection_open(
 /// 手动重连：按连接取消旧查询，关闭旧 pool/tunnel，再建立一个新 session。
 ///
 /// `expected_session_id` 防止两个迟到的重连请求依次关闭彼此的新 session；不匹配时
-/// 直接返回当前 session，保持命令幂等。
+/// 直接返回当前 session，保持命令幂等。`database_override` 仅本次 session 生效
+///（PostgreSQL 一键切库），不写回持久化配置，重新打开仍是原 database。
 #[tauri::command]
 pub async fn connection_reconnect(
     app: AppHandle,
@@ -336,6 +338,7 @@ pub async fn connection_reconnect(
     id: String,
     expected_session_id: Option<String>,
     passphrase: Option<String>,
+    database_override: Option<String>,
 ) -> Result<String, String> {
     let lifecycle = state.connection_lifecycle(&id);
     let _lifecycle = lifecycle.lock().await;
@@ -355,16 +358,18 @@ pub async fn connection_reconnect(
         old.close().await;
     }
     // 重连不持久化新 passphrase（remember 语义只在显式 open 时生效）
-    open_connection_locked(&app, &state, &id, passphrase, false).await
+    open_connection_locked(&app, &state, &id, passphrase, false, database_override).await
 }
 
 /// 生命周期锁内建立并注册连接；调用方必须先持有 `connection_lifecycle`。
+/// `database_override` 只影响本次建立的连接池，不修改持久化配置。
 async fn open_connection_locked(
     app: &AppHandle,
     state: &State<'_, AppState>,
     id: &str,
     passphrase: Option<String>,
     remember_passphrase: bool,
+    database_override: Option<String>,
 ) -> Result<String, String> {
     let session_id = uuid::Uuid::new_v4().to_string();
 
@@ -437,13 +442,20 @@ async fn open_connection_locked(
         (conn.host.clone(), conn.port, None)
     };
 
+    // session 级 database 覆盖（PG 一键切库）优先于持久化配置，空串视为未覆盖
+    let database = database_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&conn.database);
+
     let driver = connect_database_driver(RuntimeDatabaseTarget {
         kind: conn.driver,
         host: &host,
         port,
         user: &conn.user,
         password: &conn.password,
-        database: &conn.database,
+        database,
         ssl: &conn.ssl,
         advanced: &conn.advanced,
     })

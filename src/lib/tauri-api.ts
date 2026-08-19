@@ -254,12 +254,18 @@ export const connectionApi = {
       passphrase: passphrase ?? null,
       rememberPassphrase: rememberPassphrase ?? null,
     }),
-  /** 清理旧查询、连接池和隧道后重建连接；返回新 session 代号。 */
-  reconnect: (id: string, expectedSessionId?: string, passphrase?: string) =>
+  /** 清理旧查询、连接池和隧道后重建连接；返回新 session 代号。databaseOverride 仅本次 session 生效，不落盘。 */
+  reconnect: (
+    id: string,
+    expectedSessionId?: string,
+    passphrase?: string,
+    databaseOverride?: string,
+  ) =>
     invoke<string>("connection_reconnect", {
       id,
       expectedSessionId: expectedSessionId ?? null,
       passphrase: passphrase ?? null,
+      databaseOverride: databaseOverride ?? null,
     }),
   /** 关闭指定 session；代号不匹配时后端幂等忽略迟到操作。 */
   close: (id: string, expectedSessionId?: string) =>

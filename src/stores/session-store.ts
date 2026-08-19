@@ -156,6 +156,11 @@ function isCurrentMetadataRequest(epoch: number): boolean {
   return epoch === metadataRequestEpoch;
 }
 
+/** 提取后端返回的 i18n 错误 key，用于识别需要特殊引导的错误。 */
+function errorKey(e: unknown): string {
+  return typeof e === "string" ? e : String(e);
+}
+
 function initialHopStatuses(
   connection?: StoredConnection | null,
 ): Record<number, TopologyHopStatus> {
@@ -199,6 +204,10 @@ interface SessionState {
   activeConnection: StoredConnection | null;
   status: Status;
   errorMsg: string | null;
+  /** PostgreSQL 选中了非当前 database 时的待切换目标（触发「一键切换」引导） */
+  pendingDbSwitch: string | null;
+  /** 本次 session 生效的 database 覆盖（PG 一键切库）；不写回持久化配置 */
+  switchedDatabase: string | null;
   /** 需要私钥 passphrase 时挂起的连接 id（触发弹窗） */
   passphraseFor: string | null;
   databases: DatabaseMeta[];
@@ -232,6 +241,8 @@ interface SessionState {
     rememberPassphrase?: boolean,
   ) => Promise<void>;
   reconnect: (connection?: StoredConnection) => Promise<void>;
+  /** 以 session 级覆盖切到 pendingDbSwitch 目标库（不改保存的连接配置） */
+  switchDatabase: () => Promise<void>;
   close: () => Promise<void>;
   submitPassphrase: (passphrase: string, remember?: boolean) => Promise<void>;
   cancelPassphrase: () => void;
@@ -275,6 +286,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeConnection: null,
   status: "idle",
   errorMsg: null,
+  pendingDbSwitch: null,
+  switchedDatabase: null,
   passphraseFor: null,
   databases: [],
   expandedDb: null,
@@ -304,6 +317,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       runtimeSessionId: null,
       status: "connecting",
       errorMsg: null,
+      pendingDbSwitch: null,
+      switchedDatabase: null,
       lostHops: [],
       hopStatuses: initialHopStatuses(connection ?? get().activeConnection),
       passphraseFor: null,
@@ -376,6 +391,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       activeConnection: current,
       status: "connecting",
       errorMsg: null,
+      pendingDbSwitch: null,
       passphraseFor: null,
       databases: [],
       expandedDb: null,
@@ -399,6 +415,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       openedSessionId = await connectionApi.reconnect(
         id,
         expectedSessionId ?? undefined,
+        undefined,
+        get().switchedDatabase ?? undefined,
       );
       if (!isCurrentSessionRequest(requestEpoch)) return;
       set({ runtimeSessionId: openedSessionId });
@@ -432,6 +450,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
+  // PostgreSQL 不能在同一条连接上切 database：以 session 级 override 走标准重连
+  // 重建连接池（不写回持久化配置，重新打开仍是原 database），成功后自动选中目标库。
+  switchDatabase: async () => {
+    const { openId, pendingDbSwitch } = get();
+    if (!openId || !pendingDbSwitch) return;
+    const target = pendingDbSwitch;
+    set({ pendingDbSwitch: null, errorMsg: null, switchedDatabase: target });
+    await get().reconnect();
+    if (get().status !== "connected" || get().openId !== openId) return;
+    await get().selectDb(target);
+  },
+
   close: async () => {
     invalidateSessionRequests();
     invalidateMetadataRequests();
@@ -442,6 +472,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       activeConnection: null,
       status: "idle",
       errorMsg: null,
+      pendingDbSwitch: null,
+      switchedDatabase: null,
       passphraseFor: null,
       databases: [],
       expandedDb: null,
@@ -507,14 +539,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         if (cached) {
           if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
             return;
-          set({ schemas: cached, loadingData: false });
+          set({ schemas: cached, loadingData: false, errorMsg: null, pendingDbSwitch: null });
           return;
         }
         const schemas = await dbApi.listSchemas(openId, db);
         if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
           return;
         metadataCache.set(key, schemas);
-        set({ schemas, loadingData: false });
+        set({ schemas, loadingData: false, errorMsg: null, pendingDbSwitch: null });
         return;
       }
       const key = metadataKey(openId, driver, db, null, "tables");
@@ -522,18 +554,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (cached) {
         if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
           return;
-        set({ tables: cached, loadingData: false });
+        set({ tables: cached, loadingData: false, errorMsg: null, pendingDbSwitch: null });
         return;
       }
       const tables = await dbApi.listTables(openId, db, null);
       if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
         return;
       metadataCache.set(key, tables);
-      set({ tables, loadingData: false });
+      set({ tables, loadingData: false, errorMsg: null, pendingDbSwitch: null });
     } catch (e) {
       if (!isCurrentMetadataRequest(requestEpoch) || get().selectedDb !== db)
         return;
-      set({ errorMsg: translateError(e), loadingData: false });
+      // PG 跨 database 访问给出「一键切换」引导，而不是只显示错误
+      set({
+        errorMsg: translateError(e),
+        pendingDbSwitch:
+          errorKey(e) === "error.driver.database_switch_required" ? db : null,
+        loadingData: false,
+      });
     }
   },
 
@@ -713,7 +751,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!openId || !activeConnection) return;
     const requestEpoch = beginMetadataRequest();
     if (!selectedDb) {
-      set({ refreshingMetadata: true, errorMsg: null });
+      set({ refreshingMetadata: true, errorMsg: null, pendingDbSwitch: null });
       try {
         const databases = await dbApi.listDatabases(openId);
         if (
@@ -748,6 +786,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       refreshingMetadata: true,
       loadingColumns: expandedTable !== null,
       errorMsg: null,
+      pendingDbSwitch: null,
     });
 
     try {
@@ -829,6 +868,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
       set({
         errorMsg: translateError(error),
+        pendingDbSwitch:
+          errorKey(error) === "error.driver.database_switch_required"
+            ? selectedDb
+            : null,
         refreshingMetadata: false,
         loadingColumns: false,
       });

@@ -54,12 +54,14 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     hopStatuses,
     lostHops,
     errorMsg,
+    pendingDbSwitch,
     selectDb,
     toggleExpandedDb,
     selectSchema,
     toggleExpandedSchema,
     toggleTableColumns,
     refreshMetadata,
+    switchDatabase,
     selectTable,
     newTab,
     closeTab,
@@ -203,8 +205,18 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         </div>
       )}
       {errorMsg && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-          {errorMsg}
+        <div className="flex items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+          <span>{errorMsg}</span>
+          {pendingDbSwitch && (
+            <button
+              type="button"
+              onClick={() => switchDatabase()}
+              disabled={status === "connecting"}
+              className="ml-auto shrink-0 rounded border border-amber-300 px-2 py-0.5 font-medium hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:hover:bg-amber-900"
+            >
+              切换到 {pendingDbSwitch}
+            </button>
+          )}
         </div>
       )}
 

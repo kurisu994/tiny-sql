@@ -173,6 +173,7 @@ describe("SchemaBrowser column tree", () => {
         id: "c1",
         expectedSessionId: "session-old",
         passphrase: null,
+        databaseOverride: null,
       }),
     );
     await waitFor(() =>

@@ -101,7 +101,7 @@ tiny-sql/
 
 **数据库（被连接的 PostgreSQL）**
 
-- database 与 schema 分层；`list_schemas/list_tables/list_columns` 只允许当前 database，跨 database 返回 `error.driver.database_switch_required`。当前应用要求为目标 database 新建连接，不做隐式重连。
+- database 与 schema 分层；`list_schemas/list_tables/list_columns` 只允许当前 database，跨 database 返回 `error.driver.database_switch_required`。UI 对该 key 给「一键切换」引导：`connection_reconnect` 带 session 级 `databaseOverride` 重建连接（不落盘），不做隐式重连。
 - 取消用独立 control pool 调 `pg_cancel_backend`；取消或无服务端 LIMIT 的客户端截断后关闭该执行连接，避免未消费协议消息回池。
 - PostgreSQL guard 独立处理 `TABLE` / `VALUES`、`OFFSET` / `FETCH`、dollar-quoted body 与数据修改 CTE；DML `RETURNING` 需写确认并返回结果行。
 
