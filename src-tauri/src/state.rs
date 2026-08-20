@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use crate::config::history::HistoryStore;
+use crate::config::recent_files::RecentFilesStore;
 use crate::config::ssh_known_hosts::SshKnownHostsStore;
 use crate::config::store::ConnectionStore;
 use crate::security::SecurityManager;
@@ -223,6 +224,8 @@ pub struct AppState {
     pub security: Arc<SecurityManager>,
     /// SQL 历史加密存储（FR-106）。
     pub history: HistoryStore,
+    /// 最近打开的 SQL 文件列表（FR-240，明文路径）。
+    pub recent_files: RecentFilesStore,
 }
 
 impl AppState {
@@ -231,6 +234,7 @@ impl AppState {
         known_hosts: SshKnownHostsStore,
         security: Arc<SecurityManager>,
         history: HistoryStore,
+        recent_files: RecentFilesStore,
     ) -> Self {
         Self {
             store: Mutex::new(store),
@@ -243,6 +247,7 @@ impl AppState {
             passphrases: Mutex::new(HashMap::new()),
             security,
             history,
+            recent_files,
         }
     }
 

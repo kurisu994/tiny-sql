@@ -7,5 +7,6 @@ pub mod export;
 pub mod history;
 pub mod query;
 pub mod security;
+pub mod sql_file;
 pub mod ssh_tofu;
 pub mod transaction;

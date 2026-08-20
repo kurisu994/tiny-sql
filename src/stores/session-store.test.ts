@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { metadataCache } from "@/lib/metadata-cache";
 import type { DriverKind, StoredConnection } from "@/lib/tauri-api";
 import {
+  isTabDirty,
   selectActiveTab,
   useSessionStore,
   type QueryTab,
@@ -33,6 +34,7 @@ function makeTab(overrides: Partial<QueryTab> = {}): QueryTab {
     multiResults: null,
     activeResultIndex: 0,
     lastErrorKey: null,
+    filePath: null,
     ...overrides,
   };
 }
@@ -305,6 +307,59 @@ describe("session-store", () => {
       "error.driver.write_requires_confirmation",
     );
     expect(activeTab().multiResults).toBeNull();
+  });
+
+  it("打开 SQL 文件建 tab 并记录最近文件；重复打开同路径复用 tab（FR-240）", async () => {
+    routeInvoke({
+      sql_file_read: "SELECT * FROM users",
+    });
+    expect(await useSessionStore.getState().openSqlFileFromPath("/tmp/a.sql")).toBe(true);
+    const tab = activeTab();
+    expect(tab.title).toBe("a.sql");
+    expect(tab.sqlText).toBe("SELECT * FROM users");
+    expect(tab.filePath).toBe("/tmp/a.sql");
+    expect(isTabDirty(tab)).toBe(false);
+    expect(mockInvoke).toHaveBeenCalledWith("sql_file_recent_touch", {
+      path: "/tmp/a.sql",
+    });
+
+    // 再次打开同一路径：激活已有 tab，不重复建
+    const tabCount = useSessionStore.getState().tabs.length;
+    await useSessionStore.getState().openSqlFileFromPath("/tmp/a.sql");
+    expect(useSessionStore.getState().tabs).toHaveLength(tabCount);
+  });
+
+  it("保存同步 initialSql 清除 dirty；外部修改返回 conflict（FR-240）", async () => {
+    routeInvoke({
+      sql_file_read: "SELECT 1",
+    });
+    await useSessionStore.getState().openSqlFileFromPath("/tmp/b.sql");
+    const tabId = activeTab().id;
+
+    // 修改后 dirty，保存后清除
+    useSessionStore.getState().setSqlText("SELECT 2");
+    expect(isTabDirty(activeTab())).toBe(true);
+    const saved = await useSessionStore.getState().saveTabToFile(tabId, "/tmp/b.sql");
+    expect(saved).toBe("saved");
+    expect(isTabDirty(activeTab())).toBe(false);
+    expect(mockInvoke).toHaveBeenCalledWith("sql_file_write", {
+      path: "/tmp/b.sql",
+      content: "SELECT 2",
+    });
+
+    // 磁盘内容被外部改动 → conflict；force 后保存成功
+    useSessionStore.getState().setSqlText("SELECT 3");
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "sql_file_read") return Promise.resolve("外部改动");
+      return Promise.resolve(undefined);
+    });
+    const conflict = await useSessionStore.getState().saveTabToFile(tabId, "/tmp/b.sql");
+    expect(conflict).toBe("conflict");
+    const forced = await useSessionStore
+      .getState()
+      .saveTabToFile(tabId, "/tmp/b.sql", { force: true });
+    expect(forced).toBe("saved");
+    expect(activeTab().initialSql).toBe("SELECT 3");
   });
 
   it("浏览 tab 筛选 / 排序 / 翻页都重置页码并重新查询（FR-242）", async () => {

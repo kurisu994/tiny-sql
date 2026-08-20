@@ -4,8 +4,10 @@
 //! - [`store`]：连接配置整体加密落盘（connections.enc）
 //! - [`history`]：SQL 历史整体加密落盘（history.enc，FR-106）
 //! - [`ssh_known_hosts`]：SSH 信任库（known_hosts.json，明文，TOFU 用）
+//! - [`recent_files`]：最近打开的 SQL 文件列表（recent_files.json，明文，FR-240）
 
 pub mod encryption;
 pub mod history;
+pub mod recent_files;
 pub mod ssh_known_hosts;
 pub mod store;

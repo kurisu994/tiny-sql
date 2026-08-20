@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { PlusIcon, XIcon } from "lucide-react";
 
@@ -12,11 +12,13 @@ import { useColumnWidths } from "@/hooks/use-column-widths";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
 import {
   exportApi,
+  sqlFileApi,
   translateError,
   type ColumnMeta,
   type ConstraintMeta,
   type ExportFormat,
   type IndexMeta,
+  type RecentFileEntry,
   type RowSet,
   type StoredConnection,
   type TableMeta,
@@ -77,6 +79,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     beginTransaction,
     commitTransaction,
     rollbackTransaction,
+    openSqlFileFromPath,
+    saveTabToFile,
     reconnect,
     close,
   } = useSessionStore();
@@ -84,9 +88,90 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const activeTab = selectActiveTab({ tabs, activeTabId });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [objectQuery, setObjectQuery] = useState("");
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [recentFiles, setRecentFiles] = useState<RecentFileEntry[]>([]);
+  const [fileMsg, setFileMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [formatting, setFormatting] = useState(false);
+  /** 打开 SQL 文件对话框（FR-240） */
+  async function openFileDialog() {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      title: "打开 SQL 文件",
+      filters: [{ name: "SQL", extensions: ["sql", "txt"] }],
+      multiple: false,
+    });
+    if (typeof selected === "string") {
+      const ok = await openSqlFileFromPath(selected);
+      setFileMsg(ok ? null : "文件不存在或无法读取");
+    }
+  }
+
+  /** 打开最近文件；失效时从列表移除并提示 */
+  async function openRecentFile(path: string) {
+    const ok = await openSqlFileFromPath(path);
+    if (!ok) {
+      setFileMsg("文件不存在或无法读取，已从最近文件移除");
+      setRecentFiles(await sqlFileApi.recentList().catch(() => []));
+    } else {
+      setFileMsg(null);
+    }
+  }
+
+  /** 保存当前 tab 到 SQL 文件；saveAs 强制另选路径。外部修改冲突时先确认 */
+  async function saveSqlTab(tab: QueryTab, saveAs = false) {
+    let path = tab.filePath;
+    if (saveAs || !path) {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const selected = await save({
+        title: saveAs ? "另存为" : "保存 SQL 文件",
+        defaultPath: `${tab.title.replace(/\.\w+$/, "")}.sql`,
+        filters: [{ name: "SQL", extensions: ["sql"] }],
+      });
+      if (!selected) return;
+      path = selected;
+    }
+    const result = await saveTabToFile(tab.id, path);
+    if (result === "conflict") {
+      const ok = await confirm({
+        title: "覆盖外部修改",
+        message: `「${path.split("/").pop()}」已被外部修改，保存将覆盖外部改动。继续？`,
+        confirmText: "覆盖保存",
+        danger: true,
+      });
+      if (!ok) return;
+      const retry = await saveTabToFile(tab.id, path, { force: true });
+      setFileMsg(retry === "saved" ? `已保存 ${path.split("/").pop()}` : "保存失败");
+      return;
+    }
+    setFileMsg(result === "saved" ? `已保存 ${path.split("/").pop()}` : "保存失败");
+  }
+
+  // 快捷键：⌘/Ctrl+S 保存当前 tab，⌘/Ctrl+O 打开 SQL 文件（FR-240）
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.key === "s") {
+        event.preventDefault();
+        const state = useSessionStore.getState();
+        const tab = selectActiveTab({
+          tabs: state.tabs,
+          activeTabId: state.activeTabId,
+        });
+        if (tab && !tab.browse) {
+          void saveSqlTab(tab);
+        }
+      } else if (event.key === "o") {
+        event.preventDefault();
+        void openFileDialog();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /** 展开目标表并清空搜索（对象搜索定位动作，FR-241） */
   function locateTable(table: string) {
     if (expandedTable !== table) {
@@ -595,6 +680,89 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               <PlusIcon className="h-3.5 w-3.5" />
             </button>
             <div className="relative ml-auto shrink-0 pb-0.5 pr-1">
+              {fileMsg && (
+                <span className="mr-2 text-xs text-neutral-500 dark:text-neutral-400">
+                  {fileMsg}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  const opening = !fileMenuOpen;
+                  setFileMenuOpen(opening);
+                  setHistoryOpen(false);
+                  if (opening) {
+                    setRecentFiles(await sqlFileApi.recentList().catch(() => []));
+                  }
+                }}
+                className="rounded px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                文件
+              </button>
+              {fileMenuOpen && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-80 max-w-[80vw] rounded-md border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      void openFileDialog();
+                    }}
+                    className="flex w-full items-center px-3 py-1.5 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  >
+                    打开 SQL 文件…
+                    <span className="ml-auto text-[10px] text-neutral-400">⌘O</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!activeTab || activeTab.browse != null}
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      if (activeTab) void saveSqlTab(activeTab);
+                    }}
+                    className="flex w-full items-center px-3 py-1.5 text-left text-xs hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                  >
+                    保存
+                    <span className="ml-auto text-[10px] text-neutral-400">⌘S</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!activeTab || activeTab.browse != null}
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      if (activeTab) void saveSqlTab(activeTab, true);
+                    }}
+                    className="flex w-full items-center px-3 py-1.5 text-left text-xs hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                  >
+                    另存为…
+                  </button>
+                  <div className="mx-3 my-1 border-t border-neutral-100 dark:border-neutral-800" />
+                  <p className="px-3 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+                    最近文件
+                  </p>
+                  {recentFiles.length === 0 && (
+                    <p className="px-3 py-1 text-xs text-neutral-400">（无）</p>
+                  )}
+                  {recentFiles.map((entry) => (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      title={entry.path}
+                      onClick={() => {
+                        setFileMenuOpen(false);
+                        void openRecentFile(entry.path);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      <span className="shrink-0">
+                        {entry.path.split("/").pop()}
+                      </span>
+                      <span className="min-w-0 truncate text-[10px] text-neutral-400">
+                        {entry.path}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => setHistoryOpen((v) => !v)}

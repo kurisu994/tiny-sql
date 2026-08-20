@@ -107,6 +107,7 @@ beforeEach(() => {
         multiResults: null,
         activeResultIndex: 0,
         lastErrorKey: null,
+        filePath: null,
       },
     ],
     activeTabId: "tab-1",

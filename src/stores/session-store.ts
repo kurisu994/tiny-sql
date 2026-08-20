@@ -31,6 +31,7 @@ import {
   type TableFilter,
   type TableMeta,
   type TableOrder,
+  sqlFileApi,
 } from "@/lib/tauri-api";
 
 /** 按 driver 方言引用标识符。 */
@@ -75,6 +76,8 @@ export interface QueryTab {
   activeResultIndex: number;
   /** 最近一次执行的错误 key（写确认重试等 UI 流程判断用） */
   lastErrorKey: string | null;
+  /** 关联的 SQL 文件路径（FR-240）；保存后 initialSql 同步为已保存内容 */
+  filePath: string | null;
 }
 
 /** tab 绑定的事务 session 状态（FR-244）。 */
@@ -128,6 +131,7 @@ function createTab(title?: string, sql = "SELECT 1"): QueryTab {
     multiResults: null,
     activeResultIndex: 0,
     lastErrorKey: null,
+    filePath: null,
   };
 }
 
@@ -443,6 +447,16 @@ interface SessionState {
   browseRefresh: (tabId: string) => Promise<void>;
   /** 多结果集：切换当前查看的结果下标（FR-243） */
   setActiveResultIndex: (tabId: string, index: number) => void;
+  /** 打开 SQL 文件为新 tab（FR-240）；已打开同路径 tab 时直接激活。
+   *  读取失败返回 false 并从最近文件移除（由 UI 决定是否提示）。 */
+  openSqlFileFromPath: (path: string) => Promise<boolean>;
+  /** 把 tab 内容保存到指定路径（FR-240）。
+   *  返回 "saved" / "conflict"（文件被外部修改且未 force）/ "failed"。 */
+  saveTabToFile: (
+    tabId: string,
+    path: string,
+    options?: { force?: boolean },
+  ) => Promise<"saved" | "conflict" | "failed">;
   markHopStatus: (payload: HopStatusPayload) => void;
   markHopRtt: (payload: HopRttPayload) => void;
   markHopLost: (hopIndex: number) => void;
@@ -1342,6 +1356,72 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((s) => ({
       tabs: patchTab(s.tabs, tabId, { activeResultIndex: index }),
     }));
+  },
+
+  openSqlFileFromPath: async (path) => {
+    // 已打开同路径 tab 时直接激活
+    const existing = get().tabs.find((t) => t.filePath === path);
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return true;
+    }
+    let content: string;
+    try {
+      content = await sqlFileApi.read(path);
+    } catch {
+      // 文件已失效：从最近文件移除，交给 UI 提示
+      try {
+        await sqlFileApi.recentRemove(path);
+      } catch {
+        // 忽略清理失败
+      }
+      return false;
+    }
+    const name = path.split("/").pop() ?? path;
+    const tab = createTab(name, content);
+    tab.filePath = path;
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id }));
+    try {
+      await sqlFileApi.recentTouch(path);
+    } catch {
+      // 最近文件记录失败不影响打开
+    }
+    return true;
+  },
+
+  saveTabToFile: async (tabId, path, options) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return "failed";
+    // 外部修改检测（FR-240）：磁盘内容与打开/上次保存时快照不一致即冲突
+    if (!options?.force && tab.filePath === path) {
+      let disk: string | null = null;
+      try {
+        disk = await sqlFileApi.read(path);
+      } catch {
+        disk = null; // 读不到按无冲突继续写（写本身会暴露权限错误）
+      }
+      if (disk !== null && disk !== tab.initialSql) {
+        return "conflict";
+      }
+    }
+    try {
+      await sqlFileApi.write(path, tab.sqlText);
+    } catch {
+      return "failed";
+    }
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        filePath: path,
+        initialSql: tab.sqlText,
+        title: path.split("/").pop() ?? tab.title,
+      }),
+    }));
+    try {
+      await sqlFileApi.recentTouch(path);
+    } catch {
+      // 最近文件记录失败不影响保存
+    }
+    return "saved";
   },
 
   markHopStatus: (payload) =>

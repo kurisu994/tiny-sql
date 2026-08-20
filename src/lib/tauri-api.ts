@@ -135,6 +135,9 @@ export const ERROR_ZH: Record<string, string> = {
   "error.security.migration_failed": "加密迁移失败，原数据未被修改",
   "error.security.master_required": "需先启用并解锁主密码才能保存 passphrase",
   "error.export.io": "导出文件写入失败，请检查路径与磁盘权限",
+  "error.sqlfile.read_failed": "SQL 文件读取失败，请检查路径与权限",
+  "error.sqlfile.write_failed": "SQL 文件写入失败，请检查路径与磁盘权限",
+  "error.sqlfile.too_large": "SQL 文件过大（超过 8MB），请拆分后打开",
 };
 
 /** 把后端返回的错误（可能是 i18n key）翻译成中文 */
@@ -494,7 +497,24 @@ export interface TxQueryResult {
   inTransaction: boolean;
 }
 
-/** 事务命令（FR-244）：每个事务 tab 对应一个独占 session */ 
+/** 最近文件记录（FR-240） */
+export interface RecentFileEntry {
+  path: string;
+  openedAt: string;
+}
+
+/** SQL 文件命令（FR-240）：后端读写，路径经系统对话框选择 */
+export const sqlFileApi = {
+  read: (path: string) => invoke<string>("sql_file_read", { path }),
+  write: (path: string, content: string) =>
+    invoke<void>("sql_file_write", { path, content }),
+  recentList: () => invoke<RecentFileEntry[]>("sql_file_recent_list"),
+  recentTouch: (path: string) =>
+    invoke<void>("sql_file_recent_touch", { path }),
+  recentRemove: (path: string) =>
+    invoke<void>("sql_file_recent_remove", { path }),
+};
+/** 事务命令（FR-244）：每个事务 tab 对应一个独占 session */
 export const transactionApi = {
   begin: (id: string) => invoke<string>("transaction_begin", { id }),
   query: (

@@ -78,8 +78,16 @@ pub fn run() {
                 .map_err(std::io::Error::other)?;
             let history =
                 config::history::HistoryStore::new(app_data_dir.clone(), security.clone());
+            let recent_files =
+                config::recent_files::RecentFilesStore::new(app_data_dir.clone());
             let known_hosts = config::ssh_known_hosts::SshKnownHostsStore::new(app_data_dir);
-            app.manage(state::AppState::new(store, known_hosts, security, history));
+            app.manage(state::AppState::new(
+                store,
+                known_hosts,
+                security,
+                history,
+                recent_files,
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -117,6 +125,11 @@ pub fn run() {
             commands::transaction::transaction_commit,
             commands::transaction::transaction_rollback,
             commands::transaction::transaction_close,
+            commands::sql_file::sql_file_read,
+            commands::sql_file::sql_file_write,
+            commands::sql_file::sql_file_recent_list,
+            commands::sql_file::sql_file_recent_touch,
+            commands::sql_file::sql_file_recent_remove,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
