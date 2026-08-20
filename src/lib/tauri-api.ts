@@ -119,6 +119,10 @@ export const ERROR_ZH: Record<string, string> = {
     "TLS 握手失败：服务端可能未启用 SSL 或不支持当前 TLS 版本，可将 SSL 模式改为 Preferred 重试",
   "error.driver.tls_verify_failed":
     "证书校验失败：请检查 CA 证书路径、证书有效期，以及主机名是否与证书匹配",
+  "error.driver.tx_requires_session":
+    "事务语句（BEGIN/COMMIT/ROLLBACK）请在事务 tab 中执行",
+  "error.driver.session_not_in_transaction": "当前没有进行中的事务",
+  "error.driver.session_broken": "事务会话已失效（连接已断开），未提交修改已回滚",
   "error.connection.not_found": "连接配置不存在",
   "error.connection.not_open": "连接尚未打开",
   "error.security.locked": "已锁定，请先输入主密码解锁",
@@ -365,6 +369,38 @@ export const dbApi = {
     }),
   cancelQuery: (queryId: string) =>
     invoke<void>("db_query_cancel", { queryId }),
+};
+
+/** 事务内查询的返回：结果集 + 最新事务状态（FR-244） */
+export interface TxQueryResult {
+  rowSet: RowSet;
+  inTransaction: boolean;
+}
+
+/** 事务命令（FR-244）：每个事务 tab 对应一个独占 session */ 
+export const transactionApi = {
+  begin: (id: string) => invoke<string>("transaction_begin", { id }),
+  query: (
+    id: string,
+    sessionId: string,
+    sql: string,
+    options: QueryOptions = {},
+  ) =>
+    invoke<TxQueryResult>("transaction_query", {
+      id,
+      sessionId,
+      sql,
+      queryId: options.queryId ?? null,
+      rowLimit: options.rowLimit ?? null,
+      allowWrite: options.allowWrite ?? false,
+      schema: options.schema ?? null,
+    }),
+  commit: (id: string, sessionId: string) =>
+    invoke<void>("transaction_commit", { id, sessionId }),
+  rollback: (id: string, sessionId: string) =>
+    invoke<void>("transaction_rollback", { id, sessionId }),
+  close: (id: string, sessionId: string) =>
+    invoke<void>("transaction_close", { id, sessionId }),
 };
 
 // === SSH TOFU / 隧道事件 ===

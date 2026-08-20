@@ -7,7 +7,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use bigdecimal::BigDecimal;
-use db_driver::{DriverError, MetadataScope, PostgresDriver, QueryOptions, QUERY_RESULT_LIMIT};
+use db_driver::{Driver, DriverError, MetadataScope, PostgresDriver, QueryOptions, QUERY_RESULT_LIMIT};
 use tokio_util::sync::CancellationToken;
 
 fn postgres_url() -> String {
@@ -169,5 +169,165 @@ async fn postgres_cancel_long_query_returns_query_cancelled() {
         .expect("query task 不应 panic");
     assert!(matches!(result, Err(DriverError::QueryCancelled)));
     assert_eq!(driver.ping().await.expect("取消后连接池应继续可用"), 1);
+    driver.close().await;
+}
+
+// === FR-244 独占 session 与可靠事务 ===
+
+fn write_opts() -> QueryOptions {
+    QueryOptions {
+        row_limit: 100,
+        allow_write: true,
+    }
+}
+
+fn read_opts() -> QueryOptions {
+    QueryOptions {
+        row_limit: 100,
+        allow_write: false,
+    }
+}
+
+async fn count_probe(driver: &PostgresDriver) -> String {
+    driver
+        .query("SELECT COUNT(*) FROM tx_session_probe")
+        .await
+        .expect("COUNT 查询失败")
+        .rows[0][0]
+        .clone()
+        .expect("COUNT 不应为 NULL")
+}
+
+/// pool 路径必须拒绝事务控制语句，防事务状态泄漏给下一个借用者。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_pool_rejects_tx_control_statements() {
+    let driver = connect().await;
+    for sql in ["BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT sp1"] {
+        let error = driver
+            .query_with_options(sql, write_opts(), CancellationToken::new())
+            .await
+            .expect_err("pool 路径必须拒绝事务控制语句");
+        assert!(
+            matches!(error, DriverError::TxRequiresSession),
+            "{sql} 应返回 TxRequiresSession，实际: {error:?}"
+        );
+    }
+    driver.close().await;
+}
+
+/// session 全流程：同连接证明、回滚、未提交 close 自动回滚、提交生效、aborted 恢复。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_session_pins_connection_and_handles_aborted() {
+    let driver = connect().await;
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_session_probe",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理旧表失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_session_probe (id INT PRIMARY KEY)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建表失败");
+
+    // 同一连接证明：session 内两次 pg_backend_pid() 必须一致
+    let mut session = driver.begin_session().await.expect("begin_session 失败");
+    assert!(session.in_transaction());
+    let first = session
+        .query("SELECT pg_backend_pid()", read_opts(), CancellationToken::new())
+        .await
+        .expect("session 查询失败");
+    let second = session
+        .query("SELECT pg_backend_pid()", read_opts(), CancellationToken::new())
+        .await
+        .expect("session 查询失败");
+    assert_eq!(
+        first.rows[0][0], second.rows[0][0],
+        "session 内所有语句必须落同一物理连接"
+    );
+
+    // 事务内写入 → ROLLBACK → 表仍为空
+    session
+        .query(
+            "INSERT INTO tx_session_probe VALUES (1)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("事务内写入失败");
+    session.rollback().await.expect("回滚失败");
+    assert!(!session.in_transaction());
+    assert_eq!(count_probe(&driver).await, "0", "回滚后表必须为空");
+
+    // PG 特有：事务内出错进入 aborted，后续语句报错；ROLLBACK 后恢复可用
+    session
+        .query("BEGIN", read_opts(), CancellationToken::new())
+        .await
+        .expect("手写 BEGIN 应允许且免写确认");
+    assert!(session.in_transaction());
+    let aborted = session
+        .query("SELECT * FROM table_not_exists_12345", read_opts(), CancellationToken::new())
+        .await
+        .expect_err("不存在的表必须报错");
+    assert!(matches!(aborted, DriverError::QueryFailed(_)));
+    assert!(
+        session.in_transaction(),
+        "aborted 事务仍应标记为进行中（待 ROLLBACK 恢复）"
+    );
+    let still_aborted = session
+        .query("SELECT 1", read_opts(), CancellationToken::new())
+        .await
+        .expect_err("aborted 事务内任何语句都应报 QueryFailed");
+    assert!(matches!(still_aborted, DriverError::QueryFailed(_)));
+    session
+        .rollback()
+        .await
+        .expect("ROLLBACK 应能恢复 aborted 事务");
+    assert!(!session.in_transaction());
+    session.close().await;
+
+    // 事务内写入 → close（未提交）→ 自动回滚
+    let mut session = driver.begin_session().await.expect("begin_session 失败");
+    session
+        .query(
+            "INSERT INTO tx_session_probe VALUES (2)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("事务内写入失败");
+    session.close().await;
+    assert_eq!(count_probe(&driver).await, "0", "close 未提交必须回滚");
+
+    // 事务内写入 → COMMIT → 生效
+    let mut session = driver.begin_session().await.expect("begin_session 失败");
+    session
+        .query(
+            "INSERT INTO tx_session_probe VALUES (3)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("事务内写入失败");
+    session.commit().await.expect("提交失败");
+    assert_eq!(count_probe(&driver).await, "1", "提交后必须可见");
+    session.close().await;
+
+    driver
+        .query_with_options(
+            "DROP TABLE tx_session_probe",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
     driver.close().await;
 }

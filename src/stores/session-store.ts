@@ -15,6 +15,7 @@ import { invalidatesMetadataCache } from "@/lib/sql-guard";
 import {
   connectionApi,
   dbApi,
+  transactionApi,
   translateError,
   type CreateDatabaseInput,
   type ColumnMeta,
@@ -59,6 +60,15 @@ export interface QueryTab {
   queryErrorMsg: string | null;
   /** 表预览来源（底部状态栏展示用），自由 SQL 为 null */
   selectedTable: string | null;
+  /** 事务 session（FR-244）：存在时本 tab 所有语句走绑定同一物理连接的独占 session */
+  transaction: TabTransaction | null;
+}
+
+/** tab 绑定的事务 session 状态（FR-244）。 */
+export interface TabTransaction {
+  sessionId: string;
+  /** 后端跟踪的事务开关（含 PG aborted 状态）；用户手写 COMMIT/ROLLBACK 后同步 */
+  inTransaction: boolean;
 }
 
 /** tab 是否有未执行的修改（关闭前需要确认）。 */
@@ -86,6 +96,7 @@ function createTab(title?: string, sql = "SELECT 1"): QueryTab {
     currentQueryId: null,
     queryErrorMsg: null,
     selectedTable: null,
+    transaction: null,
   };
 }
 
@@ -95,7 +106,8 @@ function initialTabs(): { tabs: QueryTab[]; activeTabId: string } {
   return { tabs: [tab], activeTabId: tab.id };
 }
 
-/** 重连 / 建库后保留各 tab 的 SQL 文本，只复位执行态与结果（v0.1 行为延续）。 */
+/** 重连 / 建库后保留各 tab 的 SQL 文本，只复位执行态与结果（v0.1 行为延续）。
+ *  事务 session 随旧连接消亡（后端统一 close 回滚），前端状态一并清除。 */
 function resetTabExecution(tabs: QueryTab[]): QueryTab[] {
   return tabs.map((t) => ({
     ...t,
@@ -104,6 +116,7 @@ function resetTabExecution(tabs: QueryTab[]): QueryTab[] {
     queryRunning: false,
     currentQueryId: null,
     queryErrorMsg: null,
+    transaction: null,
   }));
 }
 
@@ -159,6 +172,26 @@ function isCurrentMetadataRequest(epoch: number): boolean {
 /** 提取后端返回的 i18n 错误 key，用于识别需要特殊引导的错误。 */
 function errorKey(e: unknown): string {
   return typeof e === "string" ? e : String(e);
+}
+
+/** 判断错误是否为事务 session 失效（断链 / 重连导致的 session_broken）。 */
+function isSessionBrokenError(e: unknown): boolean {
+  if (typeof e === "object" && e !== null && "key" in e) {
+    return Reflect.get(e, "key") === "error.driver.session_broken";
+  }
+  return e === "error.driver.session_broken";
+}
+
+/** 静默关闭事务 session：close 幂等，失败（连接已断）不影响本地状态清理。 */
+async function safeCloseSession(
+  openId: string,
+  sessionId: string,
+): Promise<void> {
+  try {
+    await transactionApi.close(openId, sessionId);
+  } catch {
+    // session 可能已随连接消亡，忽略
+  }
 }
 
 function initialHopStatuses(
@@ -266,6 +299,14 @@ interface SessionState {
     options?: { rowLimit?: number; allowWrite?: boolean },
   ) => Promise<void>;
   cancelQuery: () => Promise<void>;
+  /** 在当前 tab 开启事务（FR-244）：建立独占 session，后续语句固定同一物理连接 */
+  beginTransaction: () => Promise<void>;
+  /** 提交当前 tab 事务 */
+  commitTransaction: () => Promise<void>;
+  /** 回滚当前 tab 事务 */
+  rollbackTransaction: () => Promise<void>;
+  /** 结束当前 tab 事务 session（未提交自动回滚），回到普通查询模式 */
+  endTransaction: () => Promise<void>;
   markHopStatus: (payload: HopStatusPayload) => void;
   markHopRtt: (payload: HopRttPayload) => void;
   markHopLost: (hopIndex: number) => void;
@@ -963,6 +1004,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         // 取消失败不阻塞关闭
       }
     }
+    // 关闭事务 tab：结束 session，未提交事务由后端自动回滚（FR-244）
+    const openId = get().openId;
+    if (tab.transaction && openId) {
+      try {
+        await transactionApi.close(openId, tab.transaction.sessionId);
+      } catch {
+        // session 可能已随连接消亡，忽略
+      }
+    }
     set((s) => {
       let tabs = s.tabs.filter((t) => t.id !== id);
       let activeTabId = s.activeTabId;
@@ -1016,6 +1066,94 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         currentQueryId: null,
         queryErrorMsg: "SQL 已取消",
       }),
+    }));
+  },
+
+  beginTransaction: async () => {
+    const openId = get().openId;
+    const tab = selectActiveTab(get());
+    if (!openId || !tab || tab.transaction) return;
+    try {
+      const sessionId = await transactionApi.begin(openId);
+      set((s) => ({
+        tabs: patchTab(s.tabs, tab.id, {
+          transaction: { sessionId, inTransaction: true },
+          queryErrorMsg: null,
+        }),
+      }));
+    } catch (e) {
+      set((s) => ({
+        tabs: patchTab(s.tabs, tab.id, {
+          queryErrorMsg: translateError(e),
+        }),
+      }));
+    }
+  },
+
+  commitTransaction: async () => {
+    const openId = get().openId;
+    const tab = selectActiveTab(get());
+    const tx = tab?.transaction;
+    if (!openId || !tab || !tx || !tx.inTransaction) return;
+    try {
+      await transactionApi.commit(openId, tx.sessionId);
+      // 一次性事务模型：提交成功后结束 session，回到普通查询模式
+      await safeCloseSession(openId, tx.sessionId);
+      set((s) => ({
+        tabs: patchTab(s.tabs, tab.id, {
+          transaction: null,
+          queryErrorMsg: null,
+        }),
+      }));
+    } catch (e) {
+      // commit 失败后端已保守销毁连接（事务由服务端回滚），本地同步清理
+      await safeCloseSession(openId, tx.sessionId);
+      set((s) => ({
+        tabs: patchTab(s.tabs, tab.id, {
+          queryErrorMsg: translateError(e),
+          transaction: null,
+        }),
+      }));
+    }
+  },
+
+  rollbackTransaction: async () => {
+    const openId = get().openId;
+    const tab = selectActiveTab(get());
+    const tx = tab?.transaction;
+    if (!openId || !tab || !tx || !tx.inTransaction) return;
+    try {
+      await transactionApi.rollback(openId, tx.sessionId);
+      await safeCloseSession(openId, tx.sessionId);
+      set((s) => ({
+        tabs: patchTab(s.tabs, tab.id, {
+          transaction: null,
+          queryErrorMsg: null,
+        }),
+      }));
+    } catch (e) {
+      await safeCloseSession(openId, tx.sessionId);
+      set((s) => ({
+        tabs: patchTab(s.tabs, tab.id, {
+          queryErrorMsg: translateError(e),
+          transaction: null,
+        }),
+      }));
+    }
+  },
+
+  endTransaction: async () => {
+    const openId = get().openId;
+    const tab = selectActiveTab(get());
+    const tx = tab?.transaction;
+    if (!openId || !tab || !tx) return;
+    try {
+      await transactionApi.close(openId, tx.sessionId);
+    } catch {
+      // close 幂等；session 已随连接消亡时忽略
+    }
+    set((s) => ({
+      tabs: patchTab(s.tabs, tab.id, { transaction: null }),
     }));
   },
 
@@ -1123,12 +1261,27 @@ async function runTabQuery(
     }),
   }));
   try {
-    const rowSet = await dbApi.query(openId, sql, {
-      queryId,
-      rowLimit: options.rowLimit,
-      allowWrite: options.allowWrite ?? false,
-      schema,
-    });
+    // 事务 tab 走独占 session（同一物理连接）；普通 tab 走 pool 路径
+    const tx = get().tabs.find((t) => t.id === tabId)?.transaction ?? null;
+    let rowSet: RowSet;
+    let inTransaction: boolean | null = null;
+    if (tx) {
+      const result = await transactionApi.query(openId, tx.sessionId, sql, {
+        queryId,
+        rowLimit: options.rowLimit,
+        allowWrite: options.allowWrite ?? false,
+        schema,
+      });
+      rowSet = result.rowSet;
+      inTransaction = result.inTransaction;
+    } else {
+      rowSet = await dbApi.query(openId, sql, {
+        queryId,
+        rowLimit: options.rowLimit,
+        allowWrite: options.allowWrite ?? false,
+        schema,
+      });
+    }
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || tab.currentQueryId !== queryId) return;
     if (invalidatesMetadataCache(sql)) {
@@ -1147,6 +1300,11 @@ async function runTabQuery(
         loadingData: false,
         queryRunning: false,
         currentQueryId: null,
+        // 用户手写 COMMIT/ROLLBACK 后同步后端跟踪的事务状态
+        transaction:
+          inTransaction !== null && tab.transaction
+            ? { ...tab.transaction, inTransaction }
+            : tab.transaction,
       }),
     }));
   } catch (e) {
@@ -1159,6 +1317,8 @@ async function runTabQuery(
         queryRunning: false,
         currentQueryId: null,
         rowSet: null,
+        // session 失效（断链等）：清除事务状态，未提交已由服务端回滚
+        transaction: isSessionBrokenError(e) ? null : tab.transaction,
       }),
       errorMsg: translateError(e),
     }));

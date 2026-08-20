@@ -108,6 +108,11 @@ pub fn run() {
             commands::history::history_list,
             commands::history::history_clear,
             commands::export::db_export_query,
+            commands::transaction::transaction_begin,
+            commands::transaction::transaction_query,
+            commands::transaction::transaction_commit,
+            commands::transaction::transaction_rollback,
+            commands::transaction::transaction_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

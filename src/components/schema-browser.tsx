@@ -69,6 +69,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     setSqlText,
     executeSql,
     cancelQuery,
+    beginTransaction,
+    commitTransaction,
+    rollbackTransaction,
     reconnect,
     close,
   } = useSessionStore();
@@ -102,14 +105,17 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     await executeSql(sql, { rowLimit: 100000, allowWrite });
   }
 
-  /** 关闭 tab：dirty 或执行中时先确认（FR-109 dirty state） */
+  /** 关闭 tab：dirty、执行中或有未提交事务时先确认（FR-109 / FR-244） */
   async function closeTabWithConfirm(tab: QueryTab) {
-    if (isTabDirty(tab) || tab.queryRunning) {
+    const txOpen = tab.transaction?.inTransaction ?? false;
+    if (isTabDirty(tab) || tab.queryRunning || txOpen) {
       const ok = await confirm({
         title: "关闭查询",
         message: tab.queryRunning
           ? `「${tab.title}」正在执行查询，关闭将取消该查询。确定关闭？`
-          : `「${tab.title}」有未执行的修改，关闭后将丢失。确定关闭？`,
+          : txOpen
+            ? `「${tab.title}」有未提交的事务，关闭将回滚全部未提交修改。确定关闭？`
+            : `「${tab.title}」有未执行的修改，关闭后将丢失。确定关闭？`,
         confirmText: "关闭",
         danger: true,
       });
@@ -348,6 +354,13 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                       aria-label={tab.queryRunning ? "执行中" : "未执行修改"}
                     />
                   )}
+                  {tab.transaction?.inTransaction && (
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500"
+                      aria-label="事务进行中"
+                      title="事务进行中"
+                    />
+                  )}
                   <span className="truncate">{tab.title}</span>
                 </button>
                 <button
@@ -431,6 +444,39 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               </button>
               {activeTab?.queryRunning && (
                 <span className="text-xs text-neutral-500">执行中…</span>
+              )}
+              {activeTab?.transaction?.inTransaction ? (
+                <div className="flex items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 dark:border-violet-900 dark:bg-violet-950/40">
+                  <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
+                    事务进行中
+                  </span>
+                  <button
+                    type="button"
+                    onClick={commitTransaction}
+                    disabled={!connected || activeTab.queryRunning}
+                    className="rounded bg-violet-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    提交
+                  </button>
+                  <button
+                    type="button"
+                    onClick={rollbackTransaction}
+                    disabled={!connected || activeTab.queryRunning}
+                    className="rounded border border-violet-300 px-2 py-0.5 text-xs text-violet-700 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-900/50"
+                  >
+                    回滚
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={beginTransaction}
+                  disabled={!connected || !activeTab || activeTab.queryRunning}
+                  title="开启事务：本 tab 后续 SQL 固定同一连接执行，提交或回滚后自动结束"
+                  className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+                >
+                  开始事务
+                </button>
               )}
               <div className="ml-auto flex items-center gap-2">
                 {exportMsg && (

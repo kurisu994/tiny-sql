@@ -157,3 +157,194 @@ async fn cancel_long_query_returns_query_cancelled() {
     );
     driver.close().await;
 }
+
+// === FR-244 独占 session 与可靠事务 ===
+
+fn write_opts() -> QueryOptions {
+    QueryOptions {
+        row_limit: 100,
+        allow_write: true,
+    }
+}
+
+fn read_opts() -> QueryOptions {
+    QueryOptions {
+        row_limit: 100,
+        allow_write: false,
+    }
+}
+
+async fn count_probe(driver: &MySqlDriver) -> String {
+    driver
+        .query("SELECT COUNT(*) FROM tx_session_probe")
+        .await
+        .expect("COUNT 查询失败")
+        .rows[0][0]
+        .clone()
+        .expect("COUNT 不应为 NULL")
+}
+
+/// pool 路径必须拒绝事务控制语句，防事务状态泄漏给下一个借用者。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn pool_rejects_tx_control_statements() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    for sql in ["BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT sp1"] {
+        let error = driver
+            .query_with_options(sql, write_opts(), CancellationToken::new())
+            .await
+            .expect_err("pool 路径必须拒绝事务控制语句");
+        assert!(
+            matches!(error, DriverError::TxRequiresSession),
+            "{sql} 应返回 TxRequiresSession，实际: {error:?}"
+        );
+    }
+    driver.close().await;
+}
+
+/// session 全流程：同连接证明、回滚、未提交 close 自动回滚、提交生效。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn session_pins_connection_and_commits_or_rolls_back() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_session_probe",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理旧表失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_session_probe (id INT PRIMARY KEY)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建表失败");
+
+    // 同一连接证明：session 内两次 CONNECTION_ID() 必须一致
+    let mut session = driver.begin_session().await.expect("begin_session 失败");
+    assert!(session.in_transaction());
+    let first = session
+        .query("SELECT CONNECTION_ID()", read_opts(), CancellationToken::new())
+        .await
+        .expect("session 查询失败");
+    let second = session
+        .query("SELECT CONNECTION_ID()", read_opts(), CancellationToken::new())
+        .await
+        .expect("session 查询失败");
+    assert_eq!(
+        first.rows[0][0], second.rows[0][0],
+        "session 内所有语句必须落同一物理连接"
+    );
+
+    // 事务内写入 → ROLLBACK → 表仍为空
+    session
+        .query(
+            "INSERT INTO tx_session_probe VALUES (1)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("事务内写入失败");
+    session.rollback().await.expect("回滚失败");
+    assert!(!session.in_transaction());
+    assert_eq!(count_probe(&driver).await, "0", "回滚后表必须为空");
+    session.close().await;
+
+    // 事务内写入 → close（未提交）→ 自动回滚
+    let mut session = driver.begin_session().await.expect("begin_session 失败");
+    session
+        .query(
+            "INSERT INTO tx_session_probe VALUES (2)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("事务内写入失败");
+    session.close().await;
+    assert_eq!(count_probe(&driver).await, "0", "close 未提交必须回滚");
+
+    // 事务内写入 → COMMIT → 生效
+    let mut session = driver.begin_session().await.expect("begin_session 失败");
+    session
+        .query(
+            "INSERT INTO tx_session_probe VALUES (3)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("事务内写入失败");
+    session.commit().await.expect("提交失败");
+    assert!(!session.in_transaction());
+    assert_eq!(count_probe(&driver).await, "1", "提交后必须可见");
+
+    // 无事务时 commit / rollback 返回稳定错误
+    let missing = session.commit().await.expect_err("无事务 commit 必须报错");
+    assert!(matches!(missing, DriverError::SessionNotInTransaction));
+    let missing = session.rollback().await.expect_err("无事务 rollback 必须报错");
+    assert!(matches!(missing, DriverError::SessionNotInTransaction));
+    session.close().await;
+
+    driver
+        .query_with_options(
+            "DROP TABLE tx_session_probe",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver.close().await;
+}
+
+/// 未经 close 直接 drop 的 session：后台清理必须回滚未提交事务。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn session_drop_rolls_back_uncommitted() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_session_probe_drop",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理旧表失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_session_probe_drop (id INT PRIMARY KEY)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建表失败");
+
+    let mut session = driver.begin_session().await.expect("begin_session 失败");
+    session
+        .query(
+            "INSERT INTO tx_session_probe_drop VALUES (4)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("事务内写入失败");
+    drop(session);
+    // 等后台 RESET CONNECTION 清理完成
+    sleep(Duration::from_millis(800)).await;
+    assert_eq!(count_probe(&driver).await, "0", "drop 未提交必须回滚");
+
+    driver
+        .query_with_options(
+            "DROP TABLE tx_session_probe_drop",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver.close().await;
+}

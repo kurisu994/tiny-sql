@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use db_driver::{
-    ColumnMeta, DatabaseMeta, Driver, DriverCloseFuture, DriverFuture, DriverKind, MetadataScope,
-    MySqlDriver, PostgresDriver, QueryOptions, RowSet, SchemaMeta, TableMeta,
+    ColumnMeta, DatabaseMeta, Driver, DriverCloseFuture, DriverFuture, DriverKind, DriverSession,
+    MetadataScope, MySqlDriver, PostgresDriver, QueryOptions, RowSet, SchemaMeta, TableMeta,
 };
 use ssh_multihop::SshTunnel;
 use tokio::sync::Mutex as AsyncMutex;
@@ -97,6 +97,13 @@ impl Driver for ActiveDriver {
         }
     }
 
+    fn begin_session(&self) -> DriverFuture<'_, Box<dyn DriverSession>> {
+        match self {
+            Self::MySql(driver) => Driver::begin_session(driver),
+            Self::PostgreSql(driver) => Driver::begin_session(driver),
+        }
+    }
+
     fn close(&self) -> DriverCloseFuture<'_> {
         match self {
             Self::MySql(driver) => Driver::close(driver),
@@ -124,6 +131,13 @@ pub struct ActiveQuery {
     pub cancel_token: CancellationToken,
 }
 
+/// 一个活跃事务 session（FR-244）：绑定 connection_id 下某条物理连接。
+/// 外层 Arc + 锁保证同一 session 语句串行；连接关闭 / 重连时统一 close（自动回滚）。
+pub struct ActiveSession {
+    pub connection_id: String,
+    pub session: tokio::sync::Mutex<Box<dyn DriverSession>>,
+}
+
 impl OpenConnection {
     /// 干净关闭：先 await 关闭连接池，再 drop 隧道（满足「先 pool 后 tunnel」）。
     pub async fn close(self) {
@@ -142,6 +156,8 @@ pub struct AppState {
     connection_lifecycles: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     /// 正在执行的 query：query_id → 连接边界与 cancel token。
     pub queries: AsyncMutex<HashMap<String, ActiveQuery>>,
+    /// 活跃事务 session：session_id → session 句柄（FR-244）。
+    pub sessions: AsyncMutex<HashMap<String, std::sync::Arc<ActiveSession>>>,
     /// SSH known_hosts 信任库（TOFU）。
     pub known_hosts: Arc<SshKnownHostsStore>,
     /// TOFU 决策管理器（前端弹窗回调通道）。
@@ -167,6 +183,7 @@ impl AppState {
             connections: AsyncMutex::new(HashMap::new()),
             connection_lifecycles: Mutex::new(HashMap::new()),
             queries: AsyncMutex::new(HashMap::new()),
+            sessions: AsyncMutex::new(HashMap::new()),
             known_hosts: Arc::new(known_hosts),
             tofu: Arc::new(SshTofuManager::default()),
             passphrases: Mutex::new(HashMap::new()),

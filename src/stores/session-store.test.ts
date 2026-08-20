@@ -28,6 +28,7 @@ function makeTab(overrides: Partial<QueryTab> = {}): QueryTab {
     currentQueryId: null,
     queryErrorMsg: null,
     selectedTable: null,
+    transaction: null,
     ...overrides,
   };
 }
@@ -140,6 +141,94 @@ describe("session-store", () => {
     expect(s.openId).toBe("c1");
     expect(s.runtimeSessionId).toBe("session-1");
     expect(s.databases).toHaveLength(2);
+  });
+
+  it("事务 tab 通过独占 session 执行并在提交后自动结束 session（FR-244）", async () => {
+    routeInvoke({
+      connection_open: "session-1",
+      db_list_databases: [],
+      transaction_begin: "tx-1",
+      transaction_query: {
+        rowSet: { columns: ["n"], rows: [["1"]], truncated: false },
+        inTransaction: true,
+      },
+    });
+    await useSessionStore.getState().open("c1");
+    await useSessionStore.getState().beginTransaction();
+    expect(activeTab().transaction).toEqual({
+      sessionId: "tx-1",
+      inTransaction: true,
+    });
+
+    await useSessionStore.getState().executeSql("SELECT 1");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "transaction_query",
+      expect.objectContaining({ id: "c1", sessionId: "tx-1" }),
+    );
+    expect(activeTab().rowSet?.rows).toEqual([["1"]]);
+
+    await useSessionStore.getState().commitTransaction();
+    expect(mockInvoke).toHaveBeenCalledWith("transaction_commit", {
+      id: "c1",
+      sessionId: "tx-1",
+    });
+    // 一次性事务模型：提交后自动关闭 session，回到普通模式
+    expect(mockInvoke).toHaveBeenCalledWith("transaction_close", {
+      id: "c1",
+      sessionId: "tx-1",
+    });
+    expect(activeTab().transaction).toBeNull();
+  });
+
+  it("回滚后自动结束 session", async () => {
+    routeInvoke({
+      connection_open: "session-1",
+      db_list_databases: [],
+      transaction_begin: "tx-1",
+    });
+    await useSessionStore.getState().open("c1");
+    await useSessionStore.getState().beginTransaction();
+    await useSessionStore.getState().rollbackTransaction();
+    expect(mockInvoke).toHaveBeenCalledWith("transaction_rollback", {
+      id: "c1",
+      sessionId: "tx-1",
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("transaction_close", {
+      id: "c1",
+      sessionId: "tx-1",
+    });
+    expect(activeTab().transaction).toBeNull();
+  });
+
+  it("session 失效错误清除 tab 事务状态并提示", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "connection_open") return Promise.resolve("session-1");
+      if (cmd === "transaction_begin") return Promise.resolve("tx-1");
+      if (cmd === "transaction_query") {
+        return Promise.reject({ key: "error.driver.session_broken", line: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    await useSessionStore.getState().open("c1");
+    await useSessionStore.getState().beginTransaction();
+    await useSessionStore.getState().executeSql("SELECT 1");
+    expect(activeTab().transaction).toBeNull();
+    expect(activeTab().queryErrorMsg).toContain("事务会话已失效");
+  });
+
+  it("关闭事务 tab 先结束后端 session（未提交自动回滚）", async () => {
+    routeInvoke({
+      connection_open: "session-1",
+      db_list_databases: [],
+      transaction_begin: "tx-1",
+    });
+    await useSessionStore.getState().open("c1");
+    await useSessionStore.getState().beginTransaction();
+    await useSessionStore.getState().closeTab(activeTab().id);
+    expect(mockInvoke).toHaveBeenCalledWith("transaction_close", {
+      id: "c1",
+      sessionId: "tx-1",
+    });
   });
 
   it("私钥 passphrase 错误时触发弹窗而非报错", async () => {

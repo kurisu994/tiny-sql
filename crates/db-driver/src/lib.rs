@@ -24,8 +24,10 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 mod postgres;
+mod session;
 
 pub use postgres::{PostgresConnectSettings, PostgresDriver};
+pub use session::DriverSession;
 
 /// 表浏览默认服务端行数上限（FR-021）。
 pub const TABLE_PREVIEW_LIMIT: usize = 1_000;
@@ -81,6 +83,12 @@ pub enum DriverError {
     TlsHandshakeFailed(String),
     #[error("error.driver.tls_verify_failed")]
     TlsVerifyFailed(String),
+    #[error("error.driver.tx_requires_session")]
+    TxRequiresSession,
+    #[error("error.driver.session_not_in_transaction")]
+    SessionNotInTransaction,
+    #[error("error.driver.session_broken")]
+    SessionBroken,
 }
 
 impl DriverError {
@@ -105,6 +113,9 @@ impl DriverError {
             Self::SchemaRequired => "error.driver.schema_required",
             Self::TlsHandshakeFailed(_) => "error.driver.tls_handshake_failed",
             Self::TlsVerifyFailed(_) => "error.driver.tls_verify_failed",
+            Self::TxRequiresSession => "error.driver.tx_requires_session",
+            Self::SessionNotInTransaction => "error.driver.session_not_in_transaction",
+            Self::SessionBroken => "error.driver.session_broken",
         }
     }
 }
@@ -319,6 +330,12 @@ pub trait Driver: Send + Sync {
         options: QueryOptions,
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, RowSet>;
+
+    /// 获取绑定单条物理连接的独占 session（FR-244）。
+    ///
+    /// session 建立时已执行 BEGIN；`close` / `Drop` 时未提交事务自动回滚。
+    /// 普通查询继续走 `query` 的 pool 路径，两者互不影响。
+    fn begin_session(&self) -> DriverFuture<'_, Box<dyn DriverSession>>;
 
     /// 幂等关闭 driver 持有的连接资源。
     fn close(&self) -> DriverCloseFuture<'_>;
@@ -605,6 +622,11 @@ impl MySqlDriver {
             return Err(DriverError::QueryCancelled);
         }
         let prepared = prepare_query_sql(sql, options)?;
+        // 事务控制语句在 pool 连接上执行会把事务状态泄漏给下一个借用者（FR-244），
+        // 必须走 begin_session 的独占连接
+        if matches!(prepared.kind, PreparedSqlKind::TxControl(_)) {
+            return Err(DriverError::TxRequiresSession);
+        }
         let mut conn = self
             .pool
             .acquire()
@@ -634,6 +656,7 @@ impl MySqlDriver {
                 self.execute_write(&prepared.sql, &mut conn, mysql_thread_id, cancel_token)
                     .await
             }
+            PreparedSqlKind::TxControl(_) => unreachable!("TxControl 已在 prepare 后拒绝"),
         }
     }
 
@@ -786,8 +809,183 @@ impl Driver for MySqlDriver {
         ))
     }
 
+    fn begin_session(&self) -> DriverFuture<'_, Box<dyn DriverSession>> {
+        Box::pin(async move {
+            Ok(Box::new(MySqlSession::begin(self.clone()).await?) as Box<dyn DriverSession>)
+        })
+    }
+
     fn close(&self) -> DriverCloseFuture<'_> {
         Box::pin(MySqlDriver::close(self))
+    }
+}
+
+/// MySQL 独占 session：BEGIN 后所有语句固定同一物理连接（FR-244）。
+///
+/// 取消与截断止损沿用 `KILL QUERY`（只杀当前语句，事务保留）。
+/// session 结束时用 `RESET CONNECTION`（MySQL 5.7.3+）一次性清理未提交事务、
+/// `USE` 切换、用户变量等全部会话状态再归还 pool；清理失败则 `close_on_drop`
+/// 销毁连接，由服务端在连接关闭时兜底回滚。
+pub struct MySqlSession {
+    driver: MySqlDriver,
+    conn: Option<sqlx::pool::PoolConnection<sqlx::MySql>>,
+    mysql_thread_id: u64,
+    in_transaction: bool,
+}
+
+impl MySqlSession {
+    /// 从主 pool 取一条连接并开启事务。
+    async fn begin(driver: MySqlDriver) -> Result<Self, DriverError> {
+        let mut conn = driver
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        let mysql_thread_id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        // 事务/会话管理语句走 text protocol：MySQL 预处理协议不支持（1295 ER_UNSUPPORTED_PS）
+        conn.execute(sqlx::raw_sql("START TRANSACTION"))
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        Ok(Self {
+            driver,
+            conn: Some(conn),
+            mysql_thread_id,
+            in_transaction: true,
+        })
+    }
+
+    /// 归还 pool 前尽力清理会话状态；失败销毁连接（服务端兜底回滚）。
+    async fn cleanup(mut conn: sqlx::pool::PoolConnection<sqlx::MySql>) {
+        let reset = timeout(CONTROL_QUERY_TIMEOUT, async {
+            conn.execute(sqlx::raw_sql("RESET CONNECTION")).await
+        })
+        .await;
+        if !matches!(reset, Ok(Ok(_))) {
+            conn.close_on_drop();
+        }
+    }
+
+    /// commit / rollback 的公共路径；失败时销毁连接，杜绝「前端以为已提交
+    /// 而后端未提交」的中间态——事务最终状态只能是已提交或已回滚。
+    async fn finish_tx(&mut self, stmt: &'static str) -> Result<(), DriverError> {
+        if !self.in_transaction {
+            return Err(DriverError::SessionNotInTransaction);
+        }
+        let Some(conn) = self.conn.as_mut() else {
+            return Err(DriverError::SessionBroken);
+        };
+        match conn.execute(sqlx::raw_sql(stmt)).await {
+            Ok(_) => {
+                self.in_transaction = false;
+                Ok(())
+            }
+            Err(error) => {
+                self.in_transaction = false;
+                if let Some(mut conn) = self.conn.take() {
+                    conn.close_on_drop();
+                }
+                Err(query_failed(error))
+            }
+        }
+    }
+}
+
+impl DriverSession for MySqlSession {
+    fn query<'a>(
+        &'a mut self,
+        sql: &'a str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, RowSet> {
+        Box::pin(async move {
+            if cancel_token.is_cancelled() {
+                return Err(DriverError::QueryCancelled);
+            }
+            let prepared = prepare_query_sql(sql, options)?;
+            let Some(conn) = self.conn.as_mut() else {
+                return Err(DriverError::SessionBroken);
+            };
+            match prepared.kind {
+                PreparedSqlKind::Read {
+                    limit,
+                    server_capped,
+                } => {
+                    self.driver
+                        .fetch_read_rows(
+                            &prepared.sql,
+                            limit,
+                            server_capped,
+                            conn,
+                            self.mysql_thread_id,
+                            cancel_token,
+                        )
+                        .await
+                }
+                PreparedSqlKind::Write => {
+                    self.driver
+                        .execute_write(&prepared.sql, conn, self.mysql_thread_id, cancel_token)
+                        .await
+                }
+                PreparedSqlKind::TxControl(tx) => {
+                    // 事务控制语句走 text protocol（MySQL 预处理协议不支持），
+                    // 执行很快，取消窗口可忽略
+                    let result = conn
+                        .execute(sqlx::raw_sql(&prepared.sql))
+                        .await
+                        .map_err(query_failed)?;
+                    match tx {
+                        TxControl::Begin => self.in_transaction = true,
+                        TxControl::Commit | TxControl::Rollback => self.in_transaction = false,
+                        TxControl::Neutral => {}
+                    }
+                    Ok(RowSet {
+                        columns: vec!["affected_rows".to_string()],
+                        rows: vec![vec![Some(result.rows_affected().to_string())]],
+                        truncated: false,
+                    })
+                }
+            }
+        })
+    }
+
+    fn commit(&mut self) -> DriverFuture<'_, ()> {
+        Box::pin(self.finish_tx("COMMIT"))
+    }
+
+    fn rollback(&mut self) -> DriverFuture<'_, ()> {
+        Box::pin(self.finish_tx("ROLLBACK"))
+    }
+
+    fn close(&mut self) -> DriverCloseFuture<'_> {
+        Box::pin(async move {
+            self.in_transaction = false;
+            if let Some(conn) = self.conn.take() {
+                Self::cleanup(conn).await;
+            }
+        })
+    }
+
+    fn in_transaction(&self) -> bool {
+        self.in_transaction
+    }
+}
+
+impl Drop for MySqlSession {
+    fn drop(&mut self) {
+        let Some(conn) = self.conn.take() else {
+            return;
+        };
+        // 未经 close 的 session（如连接整体断开时）：后台尽力清理后归还，
+        // 无 tokio runtime 时直接销毁连接，服务端兜底回滚未提交事务
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(Self::cleanup(conn));
+        } else {
+            let mut conn = conn;
+            conn.close_on_drop();
+        }
     }
 }
 
@@ -895,6 +1093,50 @@ enum PreparedSqlKind {
         server_capped: bool,
     },
     Write,
+    /// 事务控制语句（BEGIN / COMMIT / ROLLBACK / SAVEPOINT 等）。
+    /// 只允许在独占 session 上执行（FR-244）：pool 路径执行会把事务状态泄漏给
+    /// 下一个借用者，因此直接拒绝；session 路径执行后按 [`TxControl`] 更新事务状态。
+    TxControl(TxControl),
+}
+
+/// 事务控制语句对 session 事务状态的影响。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TxControl {
+    /// BEGIN / START TRANSACTION：开启事务（MySQL 嵌套 BEGIN 隐式提交后重开，状态仍是在事务中）。
+    Begin,
+    /// COMMIT：事务结束。
+    Commit,
+    /// ROLLBACK（不含 ROLLBACK TO SAVEPOINT）：事务结束。
+    Rollback,
+    /// SAVEPOINT / RELEASE / ROLLBACK TO SAVEPOINT：不改变事务开关状态。
+    Neutral,
+}
+
+/// 识别事务控制语句（FR-244）。`tokens` 是已消毒语句的 token 序列（大写）。
+fn classify_tx_control(tokens: &[String]) -> Option<TxControl> {
+    let first = tokens.first()?.as_str();
+    let second = tokens.get(1).map(String::as_str);
+    match first {
+        "BEGIN" => Some(TxControl::Begin),
+        // START TRANSACTION / START TRANSACTION READ WRITE 等
+        "START" if second == Some("TRANSACTION") => Some(TxControl::Begin),
+        "COMMIT" | "ROLLBACK" => {
+            // AND CHAIN：提交/回滚后立即开启新事务，净效果仍在事务中
+            let and_chain = second == Some("AND")
+                && tokens.get(2).map(String::as_str) == Some("CHAIN");
+            if and_chain {
+                return Some(TxControl::Begin);
+            }
+            match (first, second) {
+                ("COMMIT", _) => Some(TxControl::Commit),
+                // ROLLBACK TO SAVEPOINT 不结束事务
+                ("ROLLBACK", Some("TO")) => Some(TxControl::Neutral),
+                _ => Some(TxControl::Rollback),
+            }
+        }
+        "SAVEPOINT" | "RELEASE" => Some(TxControl::Neutral),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1011,6 +1253,12 @@ fn prepare_query_sql_for_dialect(
                 limit,
                 server_capped: false,
             },
+        })
+    } else if let Some(tx) = classify_tx_control(&tokens) {
+        // 事务控制语句不修改数据，免写确认；能否执行由 pool（拒绝）/ session（允许）路径分别决定
+        Ok(PreparedSql {
+            sql: stmt,
+            kind: PreparedSqlKind::TxControl(tx),
         })
     } else {
         if !options.allow_write {
@@ -1319,6 +1567,55 @@ pub async fn ping_select_1(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tx_control_statements_are_classified_without_write_confirmation() {
+        let options = QueryOptions::default();
+        let cases: &[(&str, TxControl)] = &[
+            ("BEGIN", TxControl::Begin),
+            ("begin", TxControl::Begin),
+            ("START TRANSACTION", TxControl::Begin),
+            ("START TRANSACTION READ WRITE", TxControl::Begin),
+            ("COMMIT", TxControl::Commit),
+            ("COMMIT AND NO CHAIN", TxControl::Commit),
+            ("COMMIT AND CHAIN", TxControl::Begin),
+            ("ROLLBACK", TxControl::Rollback),
+            ("ROLLBACK AND CHAIN", TxControl::Begin),
+            ("-- 先注释\nROLLBACK", TxControl::Rollback),
+            ("ROLLBACK TO SAVEPOINT sp1", TxControl::Neutral),
+            ("SAVEPOINT sp1", TxControl::Neutral),
+            ("RELEASE SAVEPOINT sp1", TxControl::Neutral),
+        ];
+        for (sql, expected) in cases {
+            let prepared = prepare_query_sql(sql, options).unwrap_or_else(|e| panic!("{sql} 应通过 guard: {e:?}"));
+            assert!(
+                matches!(prepared.kind, PreparedSqlKind::TxControl(tx) if tx == *expected),
+                "{sql} 应识别为 TxControl::{expected:?}"
+            );
+            let prepared_pg = prepare_query_sql_for_dialect(sql, options, SqlDialect::PostgreSql)
+                .unwrap_or_else(|e| panic!("PG: {sql} 应通过 guard: {e:?}"));
+            assert!(
+                matches!(prepared_pg.kind, PreparedSqlKind::TxControl(tx) if tx == *expected),
+                "PG: {sql} 应识别为 TxControl::{expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tx_keywords_inside_literals_are_not_tx_control() {
+        let options = QueryOptions::default();
+        // 字符串 / 注释里的 BEGIN 不触发事务控制分类
+        let prepared = prepare_query_sql("SELECT 'BEGIN'", options).expect("字面量应忽略");
+        assert!(matches!(prepared.kind, PreparedSqlKind::Read { .. }));
+        let prepared = prepare_query_sql("SELECT 1 /* COMMIT */", options).expect("注释应忽略");
+        assert!(matches!(prepared.kind, PreparedSqlKind::Read { .. }));
+    }
+
+    #[test]
+    fn session_trait_is_object_safe() {
+        fn accept_session_object(_session: &dyn DriverSession) {}
+        let _object_safe_check: fn(&dyn DriverSession) = accept_session_object;
+    }
 
     #[test]
     fn mysql_driver_implements_object_safe_driver_contract() {

@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter, State};
 use zeroize::Zeroizing;
 
 use crate::config::store::{self, AdvancedConfig, SshConfig, SslConfig, StoredConnection};
-use crate::state::{ActiveDriver, ActiveQuery, AppState, OpenConnection};
+use crate::state::{ActiveDriver, ActiveQuery, ActiveSession, AppState, OpenConnection};
 
 /// 前端传入的连接配置（create / test 用，不含 id 与 last_used_at）
 #[derive(Debug, Deserialize)]
@@ -354,6 +354,7 @@ pub async fn connection_reconnect(
         connections.remove(&id)
     };
     cancel_connection_queries(&state.queries, &id).await;
+    close_connection_sessions(&state.sessions, &id).await;
     if let Some(old) = old {
         old.close().await;
     }
@@ -514,6 +515,7 @@ pub async fn connection_close(
         connections.remove(&id)
     };
     cancel_connection_queries(&state.queries, &id).await;
+    close_connection_sessions(&state.sessions, &id).await;
     if let Some(conn) = conn {
         conn.close().await;
     }
@@ -524,6 +526,28 @@ fn expected_session_matches(current_session_id: &str, expected_session_id: Optio
     expected_session_id
         .map(|expected| expected == current_session_id)
         .unwrap_or(true)
+}
+
+/// 关闭并移除一条连接名下的全部事务 session（FR-244）：未提交事务随 close 回滚。
+/// 与 `cancel_connection_queries` 一样在 close/reconnect 的生命周期锁内调用。
+async fn close_connection_sessions(
+    sessions: &tokio::sync::Mutex<HashMap<String, std::sync::Arc<ActiveSession>>>,
+    connection_id: &str,
+) -> usize {
+    let doomed: Vec<std::sync::Arc<ActiveSession>> = {
+        let mut sessions = sessions.lock().await;
+        let keys: Vec<String> = sessions
+            .iter()
+            .filter(|(_, session)| session.connection_id == connection_id)
+            .map(|(key, _)| key.clone())
+            .collect();
+        keys.iter().filter_map(|key| sessions.remove(key)).collect()
+    };
+    let count = doomed.len();
+    for session in doomed {
+        session.session.lock().await.close().await;
+    }
+    count
 }
 
 /// 取消并移除一条连接名下的全部执行中查询。

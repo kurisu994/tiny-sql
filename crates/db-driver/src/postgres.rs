@@ -15,6 +15,22 @@ pub struct PostgresConnectSettings {
     pub connect_timeout: Option<Duration>,
 }
 
+/// `fetch_rows` 的返回：结果集外加连接污染标记。
+struct FetchOutcome {
+    row_set: RowSet,
+    /// 是否发生过客户端截断（连接上可能有未消费的行流残留）。
+    conn_dirty: bool,
+}
+
+/// 连接被污染（取消 / 客户端截断留下未消费行流）时的处置策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirtyConnPolicy {
+    /// pool 路径：直接销毁连接，避免协议残留回池。
+    Discard,
+    /// session 路径：保留连接（事务绑死在这条连接上），由 session 验证后决定。
+    Keep,
+}
+
 /// PostgreSQL driver。
 ///
 /// 主连接池负责业务查询；独立 control pool 通过 `pg_cancel_backend` 取消服务端
@@ -263,6 +279,10 @@ impl PostgresDriver {
             return Err(DriverError::QueryCancelled);
         }
         let prepared = prepare_query_sql_for_dialect(sql, options, SqlDialect::PostgreSql)?;
+        // 同 MySQL：事务控制语句必须走独占 session，禁止泄漏到 pool 连接（FR-244）
+        if matches!(prepared.kind, PreparedSqlKind::TxControl(_)) {
+            return Err(DriverError::TxRequiresSession);
+        }
         let mut conn = self.pool.acquire().await.map_err(query_failed)?;
         let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
             .fetch_one(&mut *conn)
@@ -285,14 +305,22 @@ impl PostgresDriver {
                     &mut conn,
                     backend_pid,
                     cancel_token,
+                    DirtyConnPolicy::Discard,
                 )
                 .await
+                .map(|outcome| outcome.row_set)
             }
             PreparedSqlKind::Write => {
                 let columns = describe_columns(&mut conn, &prepared.sql).await?;
                 if columns.is_empty() {
-                    self.execute_write(&prepared.sql, &mut conn, backend_pid, cancel_token)
-                        .await
+                    self.execute_write(
+                        &prepared.sql,
+                        &mut conn,
+                        backend_pid,
+                        cancel_token,
+                        DirtyConnPolicy::Discard,
+                    )
+                    .await
                 } else {
                     // PostgreSQL DML ... RETURNING 既需要写确认，也应把结果行返回给用户。
                     self.fetch_rows(
@@ -305,10 +333,13 @@ impl PostgresDriver {
                         &mut conn,
                         backend_pid,
                         cancel_token,
+                        DirtyConnPolicy::Discard,
                     )
                     .await
+                    .map(|outcome| outcome.row_set)
                 }
             }
+            PreparedSqlKind::TxControl(_) => unreachable!("TxControl 已在 prepare 后拒绝"),
         }
     }
 
@@ -320,7 +351,8 @@ impl PostgresDriver {
         conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
         backend_pid: i32,
         cancel_token: CancellationToken,
-    ) -> Result<RowSet, DriverError> {
+        dirty_policy: DirtyConnPolicy,
+    ) -> Result<FetchOutcome, DriverError> {
         let mut rows = sqlx::query(sql).fetch(&mut **conn);
         let mut data: Vec<Vec<Option<String>>> = Vec::new();
         let mut truncated = false;
@@ -331,7 +363,9 @@ impl PostgresDriver {
                 _ = cancel_token.cancelled() => {
                     drop(rows);
                     self.cancel_backend(backend_pid).await;
-                    conn.close_on_drop();
+                    if dirty_policy == DirtyConnPolicy::Discard {
+                        conn.close_on_drop();
+                    }
                     return Err(DriverError::QueryCancelled);
                 }
                 row = rows.try_next() => {
@@ -339,7 +373,9 @@ impl PostgresDriver {
                         Ok(row) => row,
                         Err(_) if cancel_token.is_cancelled() => {
                             drop(rows);
-                            conn.close_on_drop();
+                            if dirty_policy == DirtyConnPolicy::Discard {
+                                conn.close_on_drop();
+                            }
                             return Err(DriverError::QueryCancelled);
                         }
                         Err(error) => return Err(query_failed(error)),
@@ -357,16 +393,23 @@ impl PostgresDriver {
             }
         }
 
+        let mut conn_dirty = false;
         if truncated && !policy.server_capped {
             drop(rows);
             self.cancel_backend(backend_pid).await;
-            conn.close_on_drop();
+            conn_dirty = true;
+            if dirty_policy == DirtyConnPolicy::Discard {
+                conn.close_on_drop();
+            }
         }
 
-        Ok(RowSet {
-            columns,
-            rows: data,
-            truncated,
+        Ok(FetchOutcome {
+            row_set: RowSet {
+                columns,
+                rows: data,
+                truncated,
+            },
+            conn_dirty,
         })
     }
 
@@ -376,12 +419,15 @@ impl PostgresDriver {
         conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
         backend_pid: i32,
         cancel_token: CancellationToken,
+        dirty_policy: DirtyConnPolicy,
     ) -> Result<RowSet, DriverError> {
         tokio::select! {
             biased;
             _ = cancel_token.cancelled() => {
                 self.cancel_backend(backend_pid).await;
-                conn.close_on_drop();
+                if dirty_policy == DirtyConnPolicy::Discard {
+                    conn.close_on_drop();
+                }
                 Err(DriverError::QueryCancelled)
             }
             result = sqlx::query(sql).execute(&mut **conn) => {
@@ -468,8 +514,254 @@ impl Driver for PostgresDriver {
         ))
     }
 
+    fn begin_session(&self) -> DriverFuture<'_, Box<dyn DriverSession>> {
+        Box::pin(async move {
+            Ok(Box::new(PostgresSession::begin(self.clone()).await?) as Box<dyn DriverSession>)
+        })
+    }
+
     fn close(&self) -> DriverCloseFuture<'_> {
         Box::pin(PostgresDriver::close(self))
+    }
+}
+
+/// PostgreSQL 独占 session：BEGIN 后所有语句固定同一物理连接（FR-244）。
+///
+/// 与 MySQL 的差异：
+/// - 取消用 `pg_cancel_backend`；取消 / 客户端截断后连接上可能有未消费的
+///   行流残留，session 会发 `SELECT 1` 验证协议干净再继续使用，验证失败则
+///   销毁连接并返回 SessionBroken（事务由服务端兜底回滚）。
+/// - 出错（含取消）后事务进入 aborted 状态：`in_transaction` 保持 true，
+///   需要用户显式 ROLLBACK 恢复，与 PG 语义一致。
+/// - session 结束时先 `ROLLBACK`（若在事务中）再 `RESET ALL; CLOSE ALL; DISCARD TEMP`
+///   清理会话状态归还 pool（不用 DISCARD ALL：它会清空 sqlx 的 prepared statement
+///   cache，复用时报 "prepared statement does not exist"）；失败则销毁连接。
+pub struct PostgresSession {
+    driver: PostgresDriver,
+    conn: Option<sqlx::pool::PoolConnection<sqlx::Postgres>>,
+    backend_pid: i32,
+    in_transaction: bool,
+}
+
+impl PostgresSession {
+    /// 从主 pool 取一条连接并开启事务。
+    async fn begin(driver: PostgresDriver) -> Result<Self, DriverError> {
+        let mut conn = driver.pool.acquire().await.map_err(query_failed)?;
+        let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(query_failed)?;
+        conn.execute(sqlx::raw_sql("BEGIN"))
+            .await
+            .map_err(query_failed)?;
+        Ok(Self {
+            driver,
+            conn: Some(conn),
+            backend_pid,
+            in_transaction: true,
+        })
+    }
+
+    /// 归还 pool 前尽力清理会话状态；失败销毁连接（服务端兜底回滚）。
+    async fn cleanup(mut conn: sqlx::pool::PoolConnection<sqlx::Postgres>, in_transaction: bool) {
+        let steps = async {
+            if in_transaction {
+                conn.execute(sqlx::raw_sql("ROLLBACK")).await?;
+            }
+            // 清理会话状态但保留 prepared statement cache：DISCARD ALL 会 DEALLOCATE
+            // 全部预备语句，sqlx 缓存的 sqlx_s_N 复用时报 "prepared statement does not exist"
+            conn.execute(sqlx::raw_sql("RESET ALL; CLOSE ALL; DISCARD TEMP"))
+                .await
+        };
+        let done = timeout(CONTROL_QUERY_TIMEOUT * 2, steps).await;
+        if !matches!(done, Ok(Ok(_))) {
+            conn.close_on_drop();
+        }
+    }
+
+    /// 取消 / 客户端截断后验证连接协议干净；验证失败销毁连接并标记 session 失效。
+    async fn verify_conn(&mut self) -> Result<(), DriverError> {
+        let Some(conn) = self.conn.as_mut() else {
+            return Err(DriverError::SessionBroken);
+        };
+        let check = timeout(
+            CONTROL_QUERY_TIMEOUT,
+            sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&mut **conn),
+        )
+        .await;
+        if matches!(check, Ok(Ok(_))) {
+            return Ok(());
+        }
+        // 协议已脏或连接已断：事务无法挽救，销毁连接由服务端兜底回滚
+        self.in_transaction = false;
+        if let Some(mut conn) = self.conn.take() {
+            conn.close_on_drop();
+        }
+        Err(DriverError::SessionBroken)
+    }
+
+    /// commit / rollback 的公共路径；失败时销毁连接，杜绝事务状态中间态。
+    async fn finish_tx(&mut self, stmt: &'static str) -> Result<(), DriverError> {
+        if !self.in_transaction {
+            return Err(DriverError::SessionNotInTransaction);
+        }
+        let Some(conn) = self.conn.as_mut() else {
+            return Err(DriverError::SessionBroken);
+        };
+        match conn.execute(sqlx::raw_sql(stmt)).await {
+            Ok(_) => {
+                self.in_transaction = false;
+                Ok(())
+            }
+            Err(error) => {
+                self.in_transaction = false;
+                if let Some(mut conn) = self.conn.take() {
+                    conn.close_on_drop();
+                }
+                Err(query_failed(error))
+            }
+        }
+    }
+}
+
+impl DriverSession for PostgresSession {
+    fn query<'a>(
+        &'a mut self,
+        sql: &'a str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, RowSet> {
+        Box::pin(async move {
+            if cancel_token.is_cancelled() {
+                return Err(DriverError::QueryCancelled);
+            }
+            let prepared = prepare_query_sql_for_dialect(sql, options, SqlDialect::PostgreSql)?;
+            let Some(conn) = self.conn.as_mut() else {
+                return Err(DriverError::SessionBroken);
+            };
+            let result = match prepared.kind {
+                PreparedSqlKind::Read {
+                    limit,
+                    server_capped,
+                } => {
+                    let columns = describe_columns(conn, &prepared.sql).await?;
+                    self.driver
+                        .fetch_rows(
+                            &prepared.sql,
+                            columns,
+                            FetchPolicy {
+                                limit,
+                                server_capped,
+                            },
+                            conn,
+                            self.backend_pid,
+                            cancel_token,
+                            DirtyConnPolicy::Keep,
+                        )
+                        .await
+                        .map(|outcome| (outcome.row_set, outcome.conn_dirty))
+                }
+                PreparedSqlKind::Write => {
+                    let columns = describe_columns(conn, &prepared.sql).await?;
+                    if columns.is_empty() {
+                        self.driver
+                            .execute_write(
+                                &prepared.sql,
+                                conn,
+                                self.backend_pid,
+                                cancel_token,
+                                DirtyConnPolicy::Keep,
+                            )
+                            .await
+                            .map(|row_set| (row_set, false))
+                    } else {
+                        // DML ... RETURNING：返回结果行
+                        self.driver
+                            .fetch_rows(
+                                &prepared.sql,
+                                columns,
+                                FetchPolicy {
+                                    limit: options.effective_limit(),
+                                    server_capped: false,
+                                },
+                                conn,
+                                self.backend_pid,
+                                cancel_token,
+                                DirtyConnPolicy::Keep,
+                            )
+                            .await
+                            .map(|outcome| (outcome.row_set, outcome.conn_dirty))
+                    }
+                }
+                PreparedSqlKind::TxControl(tx) => {
+                    // 事务控制语句走 simple protocol，执行很快，取消窗口可忽略
+                    let result = conn
+                        .execute(sqlx::raw_sql(&prepared.sql))
+                        .await
+                        .map_err(query_failed)?;
+                    match tx {
+                        TxControl::Begin => self.in_transaction = true,
+                        TxControl::Commit | TxControl::Rollback => self.in_transaction = false,
+                        TxControl::Neutral => {}
+                    }
+                    Ok((
+                        RowSet {
+                            columns: vec!["affected_rows".to_string()],
+                            rows: vec![vec![Some(result.rows_affected().to_string())]],
+                            truncated: false,
+                        },
+                        false,
+                    ))
+                }
+            };
+            // 取消（Err(QueryCancelled)）或客户端截断（conn_dirty）后验证协议干净
+            let dirty = match &result {
+                Ok((_, dirty)) => *dirty,
+                Err(DriverError::QueryCancelled) => true,
+                Err(_) => false,
+            };
+            if dirty {
+                self.verify_conn().await?;
+            }
+            result.map(|(row_set, _)| row_set)
+        })
+    }
+
+    fn commit(&mut self) -> DriverFuture<'_, ()> {
+        Box::pin(self.finish_tx("COMMIT"))
+    }
+
+    fn rollback(&mut self) -> DriverFuture<'_, ()> {
+        Box::pin(self.finish_tx("ROLLBACK"))
+    }
+
+    fn close(&mut self) -> DriverCloseFuture<'_> {
+        Box::pin(async move {
+            let in_transaction = self.in_transaction;
+            self.in_transaction = false;
+            if let Some(conn) = self.conn.take() {
+                Self::cleanup(conn, in_transaction).await;
+            }
+        })
+    }
+
+    fn in_transaction(&self) -> bool {
+        self.in_transaction
+    }
+}
+
+impl Drop for PostgresSession {
+    fn drop(&mut self) {
+        let Some(conn) = self.conn.take() else {
+            return;
+        };
+        // 未经 close 的 session：后台尽力清理后归还，无 runtime 直接销毁连接
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(Self::cleanup(conn, self.in_transaction));
+        } else {
+            let mut conn = conn;
+            conn.close_on_drop();
+        }
     }
 }
 

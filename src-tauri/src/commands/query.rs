@@ -27,7 +27,7 @@ pub struct QueryCommandError {
 }
 
 impl QueryCommandError {
-    fn from_key(key: impl Into<String>) -> Self {
+    pub(crate) fn from_key(key: impl Into<String>) -> Self {
         Self {
             key: key.into(),
             line: None,
@@ -45,7 +45,7 @@ impl From<DriverError> for QueryCommandError {
 }
 
 /// 从注册表取出指定连接的 driver 句柄（克隆，brief lock）。
-async fn driver_of(state: &State<'_, AppState>, id: &str) -> Result<ActiveDriver, String> {
+pub(crate) async fn driver_of(state: &State<'_, AppState>, id: &str) -> Result<ActiveDriver, String> {
     let conns = state.connections.lock().await;
     conns
         .get(id)
@@ -201,7 +201,7 @@ pub async fn db_query(
 }
 
 /// 把一次执行写入 SQL 历史（FR-106）。历史落盘失败不影响查询结果本身。
-fn record_history(
+pub(crate) fn record_history(
     state: &State<'_, AppState>,
     connection_id: &str,
     driver: &ActiveDriver,
