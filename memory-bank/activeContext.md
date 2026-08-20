@@ -2,11 +2,13 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-19
+**最后更新**：2026-08-20
 
 ## 当前状态
 
-**里程碑：v0.2 真实环境验收全部通过（2026-08-19）**——用户实测通过 PLAN.md「真实环境验收」全部四项：T3.4（PostgreSQL 直连、双 driver 切换/取消不串线、各自 1 跳 SSH）、T4.3（真实 TLS MySQL 四种模式正反例 + 双向证书）、T7.1/T7.2 真实链路（RTT/超时不阻塞主链路、断中间跳 lost → 重连闭环）、T8.1（双 driver × 直连/1 跳/3 跳 dogfooding）。V2-CP2/CP3/CP4 关闭，PLAN.md 仅余发布事项；CHANGELOG / ARCHITECTURE / REQUIREMENTS 的验收口径已同步。
+**里程碑：v0.2.0-rc1 已发布（2026-08-20）**——用户选择按计划走 RC 路径（不跳过 T8.2 试用期）。发布前 `just check` 全绿；`just release v0.2.0-rc1` 完成版本号更新（package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock → `0.2.0-rc1`，预发布不切 CHANGELOG）、发布提交 `64787d8`、main 与 tag 推送（本次 SSH push 未被代理阻断）。Release workflow run `32322049995` 构建中；RC 预期产物为全平台安装包 + updater `.sig`，**不生成 `latest.json`**，Release 标记 prerelease 且不设 latest，notes 取 CHANGELOG `[Unreleased]` 段。
+
+**前一状态：v0.2 真实环境验收全部通过（2026-08-19）**——用户实测通过 PLAN.md「真实环境验收」全部四项：T3.4（PostgreSQL 直连、双 driver 切换/取消不串线、各自 1 跳 SSH）、T4.3（真实 TLS MySQL 四种模式正反例 + 双向证书）、T7.1/T7.2 真实链路（RTT/超时不阻塞主链路、断中间跳 lost → 重连闭环）、T8.1（双 driver × 直连/1 跳/3 跳 dogfooding）。V2-CP2/CP3/CP4 关闭，PLAN.md 仅余发布事项；CHANGELOG / ARCHITECTURE / REQUIREMENTS 的验收口径已同步。
 
 **上一轮修复：点击表重复开 tab（2026-08-19）**——schema 树表名单击触发 `selectTable`，原实现每次无条件 `createTab`，双击一次会开出两个同名预览 tab。修复为去重复用：已存在 `selectedTable === table && initialSql === 生成的预览 SQL` 的 tab 时只激活不新建（initialSql 含命名空间引号，可区分不同 db/schema 同名表）。新增 session-store 去重测试，前端 vitest 36/36 与 tsc 全绿，CHANGELOG `[Unreleased]` 已补录。
 
@@ -18,8 +20,8 @@
 
 ### 本轮核对后的事实基线
 
-- Git：`v0.1.0` tag 指向发布提交 `624b108`；发布后的文档对齐提交将继续落在 `main`，不移动 tag。
-- 版本：`package.json`、`Cargo.lock`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 一致为 `0.1.0`。
+- Git：`v0.2.0-rc1` tag 与 main 均指向发布提交 `64787d8`；上一正式版 `v0.1.0` tag 仍指向 `624b108`。
+- 版本：`package.json`、`Cargo.lock`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 一致为 `0.2.0-rc1`（预发布版本号写入配置文件；正式版发布时 `just release v0.2.0` 会改为 `0.2.0` 并切出 CHANGELOG）。
 - 本地门禁：`just check`、5 个真实 MySQL integration test 与本机 Tauri 生产构建均通过。
 - Release：workflow run `32110227419` 的 macOS arm64/x64、Windows x64、Linux x64 与发布 job 全部成功；GitHub Release 为非草稿、非预发布且是 latest。
 - 产物：四个平台安装包、updater artifact / `.sig` 与 `latest.json` 均已验证；manifest 的四个平台 URL 均指向 `v0.1.0` 资产。
@@ -107,18 +109,16 @@
 
 ## 下一步（按优先级）
 
-1. RC 前完成 PostgreSQL 15.latest / 18.latest 双端点 integration 回归（版本基线见 techContext.md）。
-2. V2-T8.2：作者和至少 2 位试用者使用 v0.2 RC ≥ 1 周（至少 1 人以 PostgreSQL 为主），要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
-3. V2-T8.4：`just release v0.2.0-rc1` 触发全平台构建并下载验收；P0/P1 清零后发布 v0.2.0（V2-CP5）。
+1. RC 云端构建验收：Release run `32322049995` 全平台成功后下载 RC 包实测启动（macOS 右键打开 / `xattr -cr`、Windows / Linux 到主界面）。
+2. PostgreSQL 15.latest / 18.latest 双端点 integration 回归（版本基线见 techContext.md）。
+3. V2-T8.2：作者和至少 2 位试用者使用 v0.2 RC ≥ 1 周（至少 1 人以 PostgreSQL 为主），要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
+4. P0/P1 清零后 `just release v0.2.0` 发正式版（V2-CP5），CHANGELOG 切出 `0.2.0` 段并生成 `latest.json`。
 
 ## 阻塞 / 风险
 
-- **MySQL TLS 真实验收仍缺环境**：错误分类 key 与证书选择 UX 已就绪，正反例需真实 TLS MySQL（V2-T8.1）。
+- **RC 云端构建未验收**：run `32322049995` 构建中，全平台产物与 RC 安装实测未完成。
+- **PostgreSQL 版本矩阵未完成**：真实本地实例已通过后端契约，但 PostgreSQL 15.latest / 18.latest 双端点仍需分别回归。
 - **高级设置仅部分生效**：连接超时与 SSH keepalive 已接线；读取/写入超时、压缩、自动连接仍只持久化，不能描述成已生效。
-- **v0.2 范围约 98h**：必须执行 Week 6 降级规则，禁止为了完整 P2 挤压 driver、凭据和 TLS 安全门槛。
-- **PostgreSQL 版本矩阵未完成**：当前真实本地实例已通过后端契约，但 PostgreSQL 15.latest / 18.latest 双端点仍需在 RC 前分别回归。
-- **PostgreSQL 应用验收未完成**：自动门禁已覆盖 driver、AppState、commands 与前端状态，但真实 Tauri 直连/1 跳 SSH、切换和取消仍需人工验证。
-- **重连真实链路未验收**：自动门禁已覆盖资源清理边界、旧查询结果与旧 SSH 事件隔离；仍需真实中间跳断链后确认 lost → 重连 → connected 且无旧 task/event 泄漏。
-- **SSH RTT 真实链路未验收**：代码、事件/UI 回归与全量门禁已完成，但当前环境没有可控的真实多跳端点；累计 RTT 数值、2 秒超时和 direct-tcpip 并发仍需 RC 人工验收。
+- **T8.2 RC 试用未开始**：需 ≥2 位试用者使用 RC ≥ 1 周且 0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，未完成前不发正式版。
 
 相关：[[progress]] · [[systemPatterns]]
