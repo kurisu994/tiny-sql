@@ -8,7 +8,7 @@
 
 **v0.3 开发计划已立项（2026-08-20）**——用户决定在 v0.2 RC 试用期并行启动 v0.3 规划（用户口径“v3.0”按 ROADMAP 版本线确认为 v0.3）。`docs/PLAN.md` 新增「v0.3 开发计划」章节：7 周约 84h，范围为 ROADMAP v0.3 五项 FR——FR-242 服务端筛选排序分页（P0）、FR-244 独占 session 可靠事务（P0，v0.4 前置）、FR-240 SQL 文件与最近文件（P1）、FR-241 index/constraint 树与对象搜索（P1）、FR-243 多结果与 SQL 格式化（P1）；排期 Week 1-2 事务后端+UI、Week 3 筛选分页、Week 4 元数据树/搜索、Week 5 多结果/格式化、Week 6 SQL 文件、Week 7 dogfooding 发布；含 V3-CP0~CP5 检查点、降级链（格式化→最近文件→对象搜索→多结果；P0 不降级）与 V3-R01~R06 风险表。功能代码待 v0.2.0 正式版发布后开工（V3-CP0 准入）。
 
-**里程碑：v0.2.0-rc1 已发布（2026-08-20）**——用户选择按计划走 RC 路径（不跳过 T8.2 试用期）。发布前 `just check` 全绿；`just release v0.2.0-rc1` 完成版本号更新（package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock → `0.2.0-rc1`，预发布不切 CHANGELOG）、发布提交 `64787d8`、main 与 tag 推送（本次 SSH push 未被代理阻断）。Release workflow run `32322049995` 构建中；RC 预期产物为全平台安装包 + updater `.sig`，**不生成 `latest.json`**，Release 标记 prerelease 且不设 latest，notes 取 CHANGELOG `[Unreleased]` 段。
+**里程碑：v0.2.0-rc1 已发布（2026-08-20）**——用户选择按计划走 RC 路径（不跳过 T8.2 试用期）。发布前 `just check` 全绿；`just release v0.2.0-rc1` 完成版本号更新（package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock → `0.2.0-rc1`，预发布不切 CHANGELOG）、发布提交 `64787d8`、main 与 tag 推送（本次 SSH push 未被代理阻断）。Release workflow run `32322049995` 四平台 bundle + Publish 全部成功；GitHub Release `v0.2.0-rc1` 为 prerelease、非草稿，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows `.exe(.sig)`、Linux `.AppImage(.sig)`，**未生成 `latest.json`**（不会成为更新源）。RC 预期产物为全平台安装包 + updater `.sig`，notes 取 CHANGELOG `[Unreleased]` 段；剩下载安装实测。
 
 **前一状态：v0.2 真实环境验收全部通过（2026-08-19）**——用户实测通过 PLAN.md「真实环境验收」全部四项：T3.4（PostgreSQL 直连、双 driver 切换/取消不串线、各自 1 跳 SSH）、T4.3（真实 TLS MySQL 四种模式正反例 + 双向证书）、T7.1/T7.2 真实链路（RTT/超时不阻塞主链路、断中间跳 lost → 重连闭环）、T8.1（双 driver × 直连/1 跳/3 跳 dogfooding）。V2-CP2/CP3/CP4 关闭，PLAN.md 仅余发布事项；CHANGELOG / ARCHITECTURE / REQUIREMENTS 的验收口径已同步。
 
@@ -115,7 +115,7 @@
 
 ## 下一步（按优先级）
 
-1. RC 云端构建验收：Release run `32322049995` 全平台成功后下载 RC 包实测启动（macOS 右键打开 / `xattr -cr`、Windows / Linux 到主界面）。
+1. RC 安装验收：下载 `v0.2.0-rc1` 各平台包实测启动（macOS 右键打开 / `xattr -cr`、Windows / Linux 到主界面）。
 2. PostgreSQL 15.latest / 18.latest 双端点 integration 回归（版本基线见 techContext.md）。
 3. V2-T8.2：作者和至少 2 位试用者使用 v0.2 RC ≥ 1 周（至少 1 人以 PostgreSQL 为主），要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
 4. P0/P1 清零后 `just release v0.2.0` 发正式版（V2-CP5），CHANGELOG 切出 `0.2.0` 段并生成 `latest.json`。
@@ -123,7 +123,7 @@
 
 ## 阻塞 / 风险
 
-- **RC 云端构建未验收**：run `32322049995` 构建中，全平台产物与 RC 安装实测未完成。
+- **RC 安装实测未完成**：run `32322049995` 已全绿、Release 资产齐全；各平台下载启动验收未做。
 - **PostgreSQL 版本矩阵未完成**：真实本地实例已通过后端契约，但 PostgreSQL 15.latest / 18.latest 双端点仍需分别回归。
 - **高级设置仅部分生效**：连接超时与 SSH keepalive 已接线；读取/写入超时、压缩、自动连接仍只持久化，不能描述成已生效。
 - **T8.2 RC 试用未开始**：需 ≥2 位试用者使用 RC ≥ 1 周且 0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，未完成前不发正式版。
