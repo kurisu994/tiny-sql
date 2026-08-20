@@ -5167,7 +5167,7 @@ dependencies = [
 
 [[package]]
 name = "tiny-sql"
-version = "0.2.0-rc1"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "argon2",
