@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use db_driver::{
     ColumnMeta, DatabaseMeta, Driver, DriverCloseFuture, DriverFuture, DriverKind, DriverSession,
-    MetadataScope, MySqlDriver, PostgresDriver, QueryOptions, RowSet, SchemaMeta, TableMeta,
+    MetadataScope, MySqlDriver, PostgresDriver, QueryOptions, RowSet, SchemaMeta, TableBrowseQuery,
+    TableBrowseResult, TableMeta,
 };
 use ssh_multihop::SshTunnel;
 use tokio::sync::Mutex as AsyncMutex;
@@ -101,6 +102,23 @@ impl Driver for ActiveDriver {
         match self {
             Self::MySql(driver) => Driver::begin_session(driver),
             Self::PostgreSql(driver) => Driver::begin_session(driver),
+        }
+    }
+
+    fn browse_table<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        query: &'a TableBrowseQuery,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, TableBrowseResult> {
+        match self {
+            Self::MySql(driver) => {
+                Driver::browse_table(driver, scope, table, query, cancel_token)
+            }
+            Self::PostgreSql(driver) => {
+                Driver::browse_table(driver, scope, table, query, cancel_token)
+            }
         }
     }
 

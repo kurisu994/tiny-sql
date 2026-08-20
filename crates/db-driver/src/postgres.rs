@@ -343,6 +343,154 @@ impl PostgresDriver {
         }
     }
 
+    /// 浏览表数据（FR-242）：服务端筛选 / 排序 / 分页，COUNT 超时降级 None。
+    /// PostgreSQL 只能浏览当前 database，scope 校验沿用 metadata 语义。
+    pub async fn browse_table(
+        &self,
+        scope: &MetadataScope,
+        table: &str,
+        query: &TableBrowseQuery,
+        cancel_token: CancellationToken,
+    ) -> Result<TableBrowseResult, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        self.ensure_current_database(&scope.database).await?;
+        let schema = scope
+            .schema
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(DriverError::SchemaRequired)?;
+        let from = format!("{}.{}", quote_pg_ident(schema), quote_pg_ident(table));
+        let (where_sql, binds) = build_filter_clause(&query.filters, quote_pg_ident, |n| {
+            format!("${n}")
+        });
+        let order_sql = query.order.as_ref().map_or(String::new(), |order| {
+            format!(
+                " ORDER BY {} {}",
+                quote_pg_ident(&order.column),
+                if order.descending { "DESC" } else { "ASC" }
+            )
+        });
+        let limit = query.effective_limit();
+        // 多取一行探测「是否有下一页」（COUNT 失败降级时仍保证分页行为正确）
+        let data_sql = format!(
+            "SELECT * FROM {from}{where_sql}{order_sql}\nLIMIT {} OFFSET {}",
+            limit + 1,
+            query.offset
+        );
+        let count_sql = format!("SELECT COUNT(*) FROM {from}{where_sql}");
+
+        let mut conn = self.pool.acquire().await.map_err(query_failed)?;
+        let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(query_failed)?;
+
+        let data_future = async {
+            let mut q = sqlx::query(&data_sql);
+            for value in &binds {
+                q = match value {
+                    FilterValue::Int(v) => q.bind(*v),
+                    FilterValue::Float(v) => q.bind(*v),
+                    FilterValue::Text(v) => q.bind(v.clone()),
+                };
+            }
+            let mut rows = q.fetch(&mut *conn);
+            let mut columns: Vec<String> = Vec::new();
+            let mut data: Vec<Vec<Option<String>>> = Vec::new();
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel_token.cancelled() => {
+                        drop(rows);
+                        self.cancel_backend(backend_pid).await;
+                        conn.close_on_drop();
+                        return Err(DriverError::QueryCancelled);
+                    }
+                    row = rows.try_next() => {
+                        let row = match row {
+                            Ok(row) => row,
+                            Err(_) if cancel_token.is_cancelled() => {
+                                drop(rows);
+                                conn.close_on_drop();
+                                return Err(DriverError::QueryCancelled);
+                            }
+                            Err(error) => return Err(query_failed(error)),
+                        };
+                        let Some(row) = row else { break; };
+                        if columns.is_empty() {
+                            columns = row.columns().iter().map(|column| column.name().to_string()).collect();
+                        }
+                        data.push((0..row.columns().len()).map(|index| postgres_cell_to_string(&row, index)).collect());
+                    }
+                }
+            }
+            Ok((columns, data))
+        };
+        let count_future = self.count_rows(&count_sql, &binds, &cancel_token);
+        let (data_result, total) = tokio::join!(data_future, count_future);
+        let (columns, mut data) = data_result?;
+
+        // 列头补空：0 行结果集也展示表头。从 metadata 取（PG describe 带 $N 参数
+        // 的语句可能推断不出参数类型；list_columns 顺序与 SELECT * 一致）
+        let columns = if columns.is_empty() {
+            self.list_columns(scope, table)
+                .await?
+                .into_iter()
+                .map(|column| column.name)
+                .collect()
+        } else {
+            columns
+        };
+
+        let has_next_page = match total {
+            Some(total) => query.offset + limit < total as usize,
+            None => data.len() > limit,
+        };
+        data.truncate(limit);
+        Ok(TableBrowseResult {
+            row_set: RowSet {
+                columns,
+                rows: data,
+                truncated: false,
+            },
+            total,
+            has_next_page,
+        })
+    }
+
+    /// COUNT 查询：独立连接 + 5s 超时 + 可取消；超时/失败降级 None，不影响浏览主链路。
+    async fn count_rows(
+        &self,
+        sql: &str,
+        binds: &[FilterValue],
+        cancel_token: &CancellationToken,
+    ) -> Option<u64> {
+        let work = async {
+            let mut conn = self.pool.acquire().await.ok()?;
+            let mut q = sqlx::query_scalar::<_, i64>(sql);
+            for value in binds {
+                q = match value {
+                    FilterValue::Int(v) => q.bind(*v),
+                    FilterValue::Float(v) => q.bind(*v),
+                    FilterValue::Text(v) => q.bind(v.clone()),
+                };
+            }
+            q.fetch_one(&mut *conn).await.ok()
+        };
+        let cancellable = async {
+            tokio::select! {
+                result = work => result,
+                _ = cancel_token.cancelled() => None,
+            }
+        };
+        match timeout(Duration::from_secs(5), cancellable).await {
+            Ok(value) => value.map(|count| count.max(0) as u64),
+            Err(_) => None,
+        }
+    }
+
     async fn fetch_rows(
         &self,
         sql: &str,
@@ -518,6 +666,22 @@ impl Driver for PostgresDriver {
         Box::pin(async move {
             Ok(Box::new(PostgresSession::begin(self.clone()).await?) as Box<dyn DriverSession>)
         })
+    }
+
+    fn browse_table<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        query: &'a TableBrowseQuery,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, TableBrowseResult> {
+        Box::pin(PostgresDriver::browse_table(
+            self,
+            scope,
+            table,
+            query,
+            cancel_token,
+        ))
     }
 
     fn close(&self) -> DriverCloseFuture<'_> {

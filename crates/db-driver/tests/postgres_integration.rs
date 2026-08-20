@@ -331,3 +331,131 @@ async fn postgres_session_pins_connection_and_handles_aborted() {
         .expect("清理失败");
     driver.close().await;
 }
+
+// === FR-242 表数据服务端筛选 / 排序 / 分页 ===
+
+/// 浏览查询：筛选、排序、分页与总行数（PG 方言：$N 占位符、双引号引用、严格类型绑定）。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_browse_table_filters_sorts_and_paginates() {
+    use db_driver::{FilterOp, TableBrowseQuery, TableFilter, TableOrder};
+    let driver = connect().await;
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_browse_probe",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理旧表失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_browse_probe (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建表失败");
+    let mut values = Vec::new();
+    for i in 1..=15 {
+        let note = if i % 5 == 0 { "NULL".to_string() } else { format!("'n{i}'") };
+        values.push(format!("({i}, 'name{i}', {note})"));
+    }
+    driver
+        .query_with_options(
+            &format!("INSERT INTO tx_browse_probe VALUES {}", values.join(",")),
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("写入测试数据失败");
+
+    // 当前 database / public schema
+    let current_db = driver
+        .query("SELECT current_database()")
+        .await
+        .expect("查询当前库失败");
+    let db_name = current_db.rows[0][0].clone().expect("库名不为空");
+    let scope = MetadataScope::postgresql(db_name, "public");
+
+    // 筛选 id > 10（数值绑定）+ 降序：5 行
+    let filtered = driver
+        .browse_table(
+            &scope,
+            "tx_browse_probe",
+            &TableBrowseQuery {
+                filters: vec![TableFilter {
+                    column: "id".to_string(),
+                    op: FilterOp::Gt,
+                    value: "10".to_string(),
+                }],
+                order: Some(TableOrder { column: "id".to_string(), descending: true }),
+                limit: 10,
+                offset: 0,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("浏览失败");
+    assert_eq!(filtered.total, Some(5));
+    assert!(!filtered.has_next_page);
+    assert_eq!(filtered.row_set.rows.len(), 5);
+    assert_eq!(filtered.row_set.rows[0][0].as_deref(), Some("15"));
+
+    // 文本筛选（LIKE）+ 分页
+    let page = driver
+        .browse_table(
+            &scope,
+            "tx_browse_probe",
+            &TableBrowseQuery {
+                filters: vec![TableFilter {
+                    column: "name".to_string(),
+                    op: FilterOp::Like,
+                    value: "name1%".to_string(),
+                }],
+                order: Some(TableOrder { column: "id".to_string(), descending: false }),
+                limit: 5,
+                offset: 0,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("浏览失败");
+    // name1, name10..name15 共 7 行
+    assert_eq!(page.total, Some(7));
+    assert!(page.has_next_page);
+    assert_eq!(page.row_set.rows.len(), 5);
+
+    // 空结果集仍返回列头（list_columns 兜底）
+    let empty = driver
+        .browse_table(
+            &scope,
+            "tx_browse_probe",
+            &TableBrowseQuery {
+                filters: vec![TableFilter {
+                    column: "id".to_string(),
+                    op: FilterOp::Gt,
+                    value: "99999".to_string(),
+                }],
+                order: None,
+                limit: 10,
+                offset: 0,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("浏览失败");
+    assert_eq!(empty.total, Some(0));
+    assert_eq!(empty.row_set.columns, vec!["id", "name", "note"]);
+    assert!(empty.row_set.rows.is_empty());
+
+    driver
+        .query_with_options(
+            "DROP TABLE tx_browse_probe",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver.close().await;
+}

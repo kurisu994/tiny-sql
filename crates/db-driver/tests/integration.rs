@@ -348,3 +348,167 @@ async fn session_drop_rolls_back_uncommitted() {
         .expect("清理失败");
     driver.close().await;
 }
+
+// === FR-242 表数据服务端筛选 / 排序 / 分页 ===
+
+/// 浏览查询：筛选、排序、分页、总行数、空结果列头与取消。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn browse_table_filters_sorts_and_paginates() {
+    use db_driver::{FilterOp, TableBrowseQuery, TableFilter, TableOrder};
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_browse_probe",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理旧表失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_browse_probe (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建表失败");
+    let mut values = Vec::new();
+    for i in 1..=25 {
+        let note = if i % 5 == 0 { "NULL" } else { &format!("'n{i}'") };
+        values.push(format!("({i}, 'name{i}', {note})"));
+    }
+    driver
+        .query_with_options(
+            &format!("INSERT INTO tx_browse_probe VALUES {}", values.join(",")),
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("写入测试数据失败");
+
+    let scope = MetadataScope::mysql(
+        test_url()
+            .rsplit('/')
+            .next()
+            .expect("URL 应含 database")
+            .split('?')
+            .next()
+            .expect("database 名"),
+    );
+
+    // 第一页 10 行：total=25、has_next、按 id 升序
+    let page1 = driver
+        .browse_table(
+            &scope,
+            "tx_browse_probe",
+            &TableBrowseQuery {
+                filters: vec![],
+                order: Some(TableOrder { column: "id".to_string(), descending: false }),
+                limit: 10,
+                offset: 0,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("浏览失败");
+    assert_eq!(page1.total, Some(25));
+    assert!(page1.has_next_page);
+    assert_eq!(page1.row_set.rows.len(), 10);
+    assert_eq!(page1.row_set.rows[0][0].as_deref(), Some("1"));
+    assert_eq!(page1.row_set.columns, vec!["id", "name", "note"]);
+
+    // 第二页：offset 生效
+    let page2 = driver
+        .browse_table(
+            &scope,
+            "tx_browse_probe",
+            &TableBrowseQuery {
+                filters: vec![],
+                order: Some(TableOrder { column: "id".to_string(), descending: false }),
+                limit: 10,
+                offset: 10,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("浏览失败");
+    assert_eq!(page2.row_set.rows[0][0].as_deref(), Some("11"));
+
+    // 筛选 id > 20：5 行无下一页；降序首行最大
+    let filtered = driver
+        .browse_table(
+            &scope,
+            "tx_browse_probe",
+            &TableBrowseQuery {
+                filters: vec![TableFilter {
+                    column: "id".to_string(),
+                    op: FilterOp::Gt,
+                    value: "20".to_string(),
+                }],
+                order: Some(TableOrder { column: "id".to_string(), descending: true }),
+                limit: 10,
+                offset: 0,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("浏览失败");
+    assert_eq!(filtered.total, Some(5));
+    assert!(!filtered.has_next_page);
+    assert_eq!(filtered.row_set.rows[0][0].as_deref(), Some("25"));
+
+    // IsNull 筛选（5 的倍数共 5 行）+ LIKE
+    let nulls = driver
+        .browse_table(
+            &scope,
+            "tx_browse_probe",
+            &TableBrowseQuery {
+                filters: vec![
+                    TableFilter { column: "note".to_string(), op: FilterOp::IsNull, value: String::new() },
+                    TableFilter { column: "name".to_string(), op: FilterOp::Like, value: "name%".to_string() },
+                ],
+                order: None,
+                limit: 10,
+                offset: 0,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("浏览失败");
+    assert_eq!(nulls.total, Some(5));
+
+    // 空结果集仍返回列头
+    let empty = driver
+        .browse_table(
+            &scope,
+            "tx_browse_probe",
+            &TableBrowseQuery {
+                filters: vec![TableFilter {
+                    column: "id".to_string(),
+                    op: FilterOp::Gt,
+                    value: "99999".to_string(),
+                }],
+                order: None,
+                limit: 10,
+                offset: 0,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("浏览失败");
+    assert_eq!(empty.total, Some(0));
+    assert_eq!(empty.row_set.columns, vec!["id", "name", "note"]);
+    assert!(empty.row_set.rows.is_empty());
+
+    driver
+        .query_with_options(
+            "DROP TABLE tx_browse_probe",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver.close().await;
+}

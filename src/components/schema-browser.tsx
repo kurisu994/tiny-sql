@@ -5,6 +5,7 @@ import { Virtuoso } from "react-virtuoso";
 import { PlusIcon, XIcon } from "lucide-react";
 
 import { HistoryPanel } from "@/components/history-panel";
+import { BrowseView } from "@/components/browse-view";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
 import { TopologyGraph } from "@/components/topology-graph";
 import { useColumnWidths } from "@/hooks/use-column-widths";
@@ -405,8 +406,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
             </div>
           </div>
 
-          <div className="border-b border-neutral-200 p-3 dark:border-neutral-800">
-            {activeTab && (
+          {!activeTab?.browse && (
+            <div className="border-b border-neutral-200 p-3 dark:border-neutral-800">
+              {activeTab && (
               <SqlCodeEditor
                 value={activeTab.sqlText}
                 onChange={setSqlText}
@@ -519,23 +521,36 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 {activeTab.queryErrorMsg}
               </p>
             )}
-          </div>
+            </div>
+          )}
 
           <div className="min-h-0 flex-1 overflow-hidden">
-            {!activeTab?.rowSet && !activeTab?.loadingData && (
-              <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-                {activeTab?.selectedTable ? "暂无结果" : "选择左侧表，或直接执行 SQL。"}
-              </div>
-            )}
-            {activeTab?.loadingData && (
-              <p className="p-4 text-sm text-neutral-500">加载中…</p>
-            )}
-            {!activeTab?.loadingData && activeTab?.rowSet && (
-              <ResultTable
-                rowSet={activeTab.rowSet}
+            {activeTab?.browse ? (
+              <BrowseView
+                key={activeTab.id}
+                tab={activeTab}
                 connectionId={connection.id}
-                truncated={activeTab.rowSet.truncated}
               />
+            ) : (
+              <>
+                {!activeTab?.rowSet && !activeTab?.loadingData && (
+                  <div className="flex h-full items-center justify-center text-sm text-neutral-400">
+                    {activeTab?.selectedTable
+                      ? "暂无结果"
+                      : "选择左侧表，或直接执行 SQL。"}
+                  </div>
+                )}
+                {activeTab?.loadingData && (
+                  <p className="p-4 text-sm text-neutral-500">加载中…</p>
+                )}
+                {!activeTab?.loadingData && activeTab?.rowSet && (
+                  <ResultTable
+                    rowSet={activeTab.rowSet}
+                    connectionId={connection.id}
+                    truncated={activeTab.rowSet.truncated}
+                  />
+                )}
+              </>
             )}
           </div>
           {activeTab?.selectedTable && (
@@ -767,10 +782,15 @@ export function ResultTable({
   rowSet,
   connectionId,
   truncated,
+  sort,
+  onSort,
 }: {
   rowSet: RowSet;
   connectionId: string;
   truncated?: boolean;
+  /** 当前排序（FR-242）；与 onSort 同时提供时列头可点击切换 */
+  sort?: { column: string; descending: boolean } | null;
+  onSort?: (column: string) => void;
 }) {
   const { widthOf, customized, startResize, reset } = useColumnWidths(
     connectionId,
@@ -820,15 +840,26 @@ export function ResultTable({
             {rowSet.columns.map((c, ci) => (
               <div
                 key={`${ci}-${c}`}
-                className="relative truncate border-b border-neutral-200 px-2 py-1 text-left font-medium dark:border-neutral-700"
+                className={cn(
+                  "relative truncate border-b border-neutral-200 px-2 py-1 text-left font-medium dark:border-neutral-700",
+                  onSort &&
+                    "cursor-pointer select-none hover:bg-neutral-200/70 dark:hover:bg-neutral-700/60",
+                )}
                 title={c}
+                onClick={onSort ? () => onSort(c) : undefined}
               >
                 {c}
+                {sort?.column === c && (
+                  <span className="ml-0.5 text-blue-500">
+                    {sort.descending ? "↓" : "↑"}
+                  </span>
+                )}
                 <span
                   role="separator"
                   aria-orientation="vertical"
                   aria-label={`拖拽调整 ${c} 列宽`}
                   onMouseDown={(e) => startResize(ci, e)}
+                  onClick={(e) => e.stopPropagation()}
                   className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize hover:bg-blue-400/60"
                 />
               </div>

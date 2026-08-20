@@ -25,7 +25,9 @@ import {
   type RowSet,
   type SchemaMeta,
   type StoredConnection,
+  type TableFilter,
   type TableMeta,
+  type TableOrder,
 } from "@/lib/tauri-api";
 
 /** 按 driver 方言引用标识符。 */
@@ -62,6 +64,8 @@ export interface QueryTab {
   selectedTable: string | null;
   /** 事务 session（FR-244）：存在时本 tab 所有语句走绑定同一物理连接的独占 session */
   transaction: TabTransaction | null;
+  /** 表数据浏览（FR-242）：非空时本 tab 为浏览模式（无 SQL 编辑器，工具栏 + 分页） */
+  browse: BrowseState | null;
 }
 
 /** tab 绑定的事务 session 状态（FR-244）。 */
@@ -71,8 +75,22 @@ export interface TabTransaction {
   inTransaction: boolean;
 }
 
-/** tab 是否有未执行的修改（关闭前需要确认）。 */
+/** 表数据浏览状态（FR-242）：服务端筛选 / 排序 / 分页。 */
+export interface BrowseState {
+  table: string;
+  filters: TableFilter[];
+  order: TableOrder | null;
+  /** 0 起页码 */
+  page: number;
+  pageSize: number;
+  /** 满足筛选的总行数；COUNT 超时/失败为 null（降级未知总数分页） */
+  total: number | null;
+  hasNextPage: boolean;
+}
+
+/** tab 是否有未执行的修改（关闭前需要确认）。浏览 tab 无 SQL 编辑，恒不 dirty。 */
 export function isTabDirty(tab: QueryTab): boolean {
+  if (tab.browse) return false;
   return tab.sqlText !== tab.initialSql;
 }
 
@@ -97,6 +115,7 @@ function createTab(title?: string, sql = "SELECT 1"): QueryTab {
     queryErrorMsg: null,
     selectedTable: null,
     transaction: null,
+    browse: null,
   };
 }
 
@@ -191,6 +210,88 @@ async function safeCloseSession(
     await transactionApi.close(openId, sessionId);
   } catch {
     // session 可能已随连接消亡，忽略
+  }
+}
+
+/** 更新浏览 tab 状态并重新查询（FR-242）。 */
+async function browsePatchAndRefresh(
+  get: Get,
+  set: Set,
+  tabId: string,
+  patch: Partial<BrowseState>,
+): Promise<void> {
+  const tab = get().tabs.find((t) => t.id === tabId);
+  if (!tab?.browse) return;
+  set((s) => ({
+    tabs: patchTab(s.tabs, tabId, {
+      browse: { ...tab.browse!, ...patch },
+    }),
+  }));
+  await browseTabData(get, set, tabId);
+}
+
+/**
+ * 浏览 tab 数据查询（FR-242）：服务端筛选 / 排序 / 分页。
+ * 与 runTabQuery 相同的迟到守卫：只有 tab 当前 query_id 仍匹配时才写回。
+ */
+async function browseTabData(get: Get, set: Set, tabId: string): Promise<void> {
+  const openId = get().openId;
+  const tab = get().tabs.find((t) => t.id === tabId);
+  const browse = tab?.browse;
+  const database = get().selectedDb;
+  if (!openId || !tab || !browse || !database) return;
+  const schema =
+    get().activeConnection?.driver === "postgresql"
+      ? get().selectedSchema
+      : null;
+  const queryId = createQueryId();
+  set((s) => ({
+    tabs: patchTab(s.tabs, tabId, {
+      loadingData: true,
+      queryRunning: true,
+      currentQueryId: queryId,
+      queryErrorMsg: null,
+    }),
+  }));
+  try {
+    const result = await dbApi.browseTable({
+      id: openId,
+      database,
+      schema,
+      table: browse.table,
+      filters: browse.filters,
+      order: browse.order,
+      limit: browse.pageSize,
+      offset: browse.page * browse.pageSize,
+    });
+    const current = get().tabs.find((t) => t.id === tabId);
+    if (!current || current.currentQueryId !== queryId) return;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        rowSet: result.rowSet,
+        loadingData: false,
+        queryRunning: false,
+        currentQueryId: null,
+        browse: current.browse
+          ? {
+              ...current.browse,
+              total: result.total,
+              hasNextPage: result.hasNextPage,
+            }
+          : null,
+      }),
+    }));
+  } catch (e) {
+    const current = get().tabs.find((t) => t.id === tabId);
+    if (!current || current.currentQueryId !== queryId) return;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        queryErrorMsg: translateError(e),
+        loadingData: false,
+        queryRunning: false,
+        currentQueryId: null,
+      }),
+    }));
   }
 }
 
@@ -307,6 +408,16 @@ interface SessionState {
   rollbackTransaction: () => Promise<void>;
   /** 结束当前 tab 事务 session（未提交自动回滚），回到普通查询模式 */
   endTransaction: () => Promise<void>;
+  /** 浏览 tab：更新筛选并回到第一页（FR-242） */
+  browseSetFilters: (tabId: string, filters: TableFilter[]) => Promise<void>;
+  /** 浏览 tab：切换列排序 */
+  browseSetOrder: (tabId: string, order: TableOrder | null) => Promise<void>;
+  /** 浏览 tab：翻到指定页（0 起） */
+  browseSetPage: (tabId: string, page: number) => Promise<void>;
+  /** 浏览 tab：调整每页行数并回到第一页 */
+  browseSetPageSize: (tabId: string, pageSize: number) => Promise<void>;
+  /** 浏览 tab：按当前状态重新查询 */
+  browseRefresh: (tabId: string) => Promise<void>;
   markHopStatus: (payload: HopStatusPayload) => void;
   markHopRtt: (payload: HopRttPayload) => void;
   markHopLost: (hopIndex: number) => void;
@@ -970,22 +1081,29 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const driver = activeConnection?.driver ?? "mysql";
     const namespace = driver === "postgresql" ? selectedSchema : selectedDb;
     if (!namespace) return;
-    const sql = `SELECT * FROM ${quoteIdent(namespace, driver)}.${quoteIdent(table, driver)}`;
-    // 已存在同一张表的预览 tab（initialSql 与预览 SQL 一致）时直接激活，
-    // 避免双击/反复点击同一表产生重复 tab；不覆盖用户在其他 tab 的 SQL
-    const existing = get().tabs.find(
-      (t) => t.selectedTable === table && t.initialSql === sql,
-    );
+    // 已存在同一张表的浏览 tab 时直接激活，避免双击/反复点击产生重复 tab
+    const existing = get().tabs.find((t) => t.browse?.table === table);
     if (existing) {
       set({ activeTabId: existing.id });
       return;
     }
-    const tab = createTab(table, sql);
+    // 表预览是浏览模式 tab（FR-242）：服务端筛选 / 排序 / 分页，无 SQL 编辑器
+    const tab = createTab(table, "");
+    tab.selectedTable = table;
+    tab.browse = {
+      table,
+      filters: [],
+      order: null,
+      page: 0,
+      pageSize: 1000,
+      total: null,
+      hasNextPage: false,
+    };
     set((s) => ({
       tabs: [...s.tabs, tab],
       activeTabId: tab.id,
     }));
-    await runTabQuery(get, set, tab.id, sql, { rowLimit: 1000 }, table);
+    await browseTabData(get, set, tab.id);
   },
 
   newTab: (sql) => {
@@ -1155,6 +1273,26 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((s) => ({
       tabs: patchTab(s.tabs, tab.id, { transaction: null }),
     }));
+  },
+
+  browseSetFilters: async (tabId, filters) => {
+    await browsePatchAndRefresh(get, set, tabId, { filters, page: 0 });
+  },
+
+  browseSetOrder: async (tabId, order) => {
+    await browsePatchAndRefresh(get, set, tabId, { order, page: 0 });
+  },
+
+  browseSetPage: async (tabId, page) => {
+    await browsePatchAndRefresh(get, set, tabId, { page });
+  },
+
+  browseSetPageSize: async (tabId, pageSize) => {
+    await browsePatchAndRefresh(get, set, tabId, { pageSize, page: 0 });
+  },
+
+  browseRefresh: async (tabId) => {
+    await browseTabData(get, set, tabId);
   },
 
   markHopStatus: (payload) =>

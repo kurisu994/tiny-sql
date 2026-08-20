@@ -369,7 +369,61 @@ export const dbApi = {
     }),
   cancelQuery: (queryId: string) =>
     invoke<void>("db_query_cancel", { queryId }),
+  browseTable: (input: BrowseTableInput) =>
+    invoke<TableBrowseResult>("db_browse_table", {
+      id: input.id,
+      database: input.database,
+      schema: input.schema ?? null,
+      table: input.table,
+      filters: input.filters,
+      order: input.order ?? null,
+      limit: input.limit ?? null,
+      offset: input.offset ?? null,
+    }),
 };
+
+/** 浏览表数据的筛选操作符（FR-242；与后端 FilterOp 一致） */
+export type FilterOp =
+  | "eq"
+  | "notEq"
+  | "gt"
+  | "gtEq"
+  | "lt"
+  | "ltEq"
+  | "like"
+  | "notLike"
+  | "isNull"
+  | "isNotNull";
+
+export interface TableFilter {
+  column: string;
+  op: FilterOp;
+  value: string;
+}
+
+export interface TableOrder {
+  column: string;
+  descending: boolean;
+}
+
+export interface BrowseTableInput {
+  id: string;
+  database: string;
+  schema?: string | null;
+  table: string;
+  filters: TableFilter[];
+  order?: TableOrder | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
+/** 浏览查询结果（FR-242） */
+export interface TableBrowseResult {
+  rowSet: RowSet;
+  /** 满足筛选的总行数；COUNT 超时/失败为 null（降级未知总数分页） */
+  total: number | null;
+  hasNextPage: boolean;
+}
 
 /** 事务内查询的返回：结果集 + 最新事务状态（FR-244） */
 export interface TxQueryResult {

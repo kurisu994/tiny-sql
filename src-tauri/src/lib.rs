@@ -98,6 +98,7 @@ pub fn run() {
             commands::query::db_list_columns,
             commands::query::db_query,
             commands::query::db_query_cancel,
+            commands::query::db_browse_table,
             commands::ssh_tofu::ssh_tofu_decision,
             commands::security::security_status,
             commands::security::security_setup,

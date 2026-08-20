@@ -4,8 +4,9 @@
 //! 不长持注册表锁），再调 db-driver。连接未打开返回 `error.connection.not_open`。
 
 use db_driver::{
-    ColumnMeta, DatabaseMeta, Driver, DriverError, DriverKind, MetadataScope, QueryOptions, RowSet,
-    SchemaMeta, TableMeta, QUERY_RESULT_LIMIT,
+    ColumnMeta, DatabaseMeta, Driver, DriverError, DriverKind, MetadataScope, QueryOptions,
+    RowSet, SchemaMeta, TableBrowseQuery, TableBrowseResult, TableFilter, TableMeta, TableOrder,
+    QUERY_RESULT_LIMIT, TABLE_PREVIEW_LIMIT,
 };
 use serde::Serialize;
 use tauri::State;
@@ -243,6 +244,79 @@ pub(crate) fn record_history(
     };
     // 锁定等状态下记录失败仅忽略，不向前端报错
     let _ = state.history.record(entry);
+}
+
+/// 浏览表数据：服务端筛选 / 排序 / 分页（FR-242）。
+///
+/// 列名白名单在这里强制：filter/order 的列必须属于该表已加载列，杜绝任意标识符
+/// 进入查询（driver 侧另有标识符引用转义与值参数化双保险）。
+#[tauri::command]
+pub async fn db_browse_table(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    schema: Option<String>,
+    table: String,
+    filters: Vec<TableFilter>,
+    order: Option<TableOrder>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<TableBrowseResult, QueryCommandError> {
+    let query_id = Uuid::new_v4().to_string();
+    // 与 close/reconnect 串行化「取 driver + 注册 token」（同 db_query）
+    let (driver, token) = {
+        let lifecycle = state.connection_lifecycle(&id);
+        let _lifecycle = lifecycle.lock().await;
+        let driver = driver_of(&state, &id)
+            .await
+            .map_err(QueryCommandError::from_key)?;
+        let token = CancellationToken::new();
+        state.queries.lock().await.insert(
+            query_id.clone(),
+            ActiveQuery {
+                connection_id: id.clone(),
+                cancel_token: token.clone(),
+            },
+        );
+        (driver, token)
+    };
+    let scope = metadata_scope(Driver::kind(&driver), database, schema)
+        .map_err(QueryCommandError::from_key)?;
+    let result = async {
+        let columns = Driver::list_columns(&driver, &scope, &table)
+            .await
+            .map_err(QueryCommandError::from)?;
+        let known: std::collections::HashSet<&str> =
+            columns.iter().map(|c| c.name.as_str()).collect();
+        let invalid = filters
+            .iter()
+            .any(|filter| !known.contains(filter.column.as_str()))
+            || order
+                .as_ref()
+                .is_some_and(|order| !known.contains(order.column.as_str()));
+        if invalid {
+            return Err(QueryCommandError::from_key(
+                "error.driver.invalid_identifier",
+            ));
+        }
+        Driver::browse_table(
+            &driver,
+            &scope,
+            &table,
+            &TableBrowseQuery {
+                filters,
+                order,
+                limit: limit.map(|value| value as usize).unwrap_or(TABLE_PREVIEW_LIMIT),
+                offset: offset.map(|value| value as usize).unwrap_or(0),
+            },
+            token,
+        )
+        .await
+        .map_err(QueryCommandError::from)
+    }
+    .await;
+    state.queries.lock().await.remove(&query_id);
+    result
 }
 
 /// 取消正在执行的 SQL。若 query 已完成，幂等成功。

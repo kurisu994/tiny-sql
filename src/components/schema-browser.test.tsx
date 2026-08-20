@@ -103,6 +103,7 @@ beforeEach(() => {
         queryErrorMsg: null,
         selectedTable: null,
         transaction: null,
+        browse: null,
       },
     ],
     activeTabId: "tab-1",

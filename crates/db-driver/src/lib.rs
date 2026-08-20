@@ -294,6 +294,143 @@ pub type DriverFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, DriverError
 /// Driver 关闭操作返回值。关闭是幂等清理，不向 UI 暴露二次错误。
 pub type DriverCloseFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
+/// 浏览查询每页行数上限（FR-242）：超出 clamp，防超大页拖垮隧道。
+pub const TABLE_BROWSE_MAX_LIMIT: usize = 10_000;
+
+/// 筛选操作符（FR-242）。枚举值即 SQL 语义，不允许拼接受用户文本。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FilterOp {
+    Eq,
+    NotEq,
+    Gt,
+    GtEq,
+    Lt,
+    LtEq,
+    Like,
+    NotLike,
+    IsNull,
+    IsNotNull,
+}
+
+/// 单条筛选条件：列名由应用层按已加载 metadata 白名单校验后传入（driver 只做
+/// 标识符引用转义），值全部参数化绑定，绝不拼接进 SQL 文本。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableFilter {
+    pub column: String,
+    pub op: FilterOp,
+    /// 统一按文本传输；IsNull / IsNotNull 时忽略。
+    pub value: String,
+}
+
+/// 单列排序（FR-242）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableOrder {
+    pub column: String,
+    pub descending: bool,
+}
+
+/// 表数据浏览查询（FR-242）：服务端 WHERE / ORDER BY / LIMIT / OFFSET。
+#[derive(Debug, Clone)]
+pub struct TableBrowseQuery {
+    pub filters: Vec<TableFilter>,
+    pub order: Option<TableOrder>,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+impl TableBrowseQuery {
+    fn effective_limit(&self) -> usize {
+        self.limit.clamp(1, TABLE_BROWSE_MAX_LIMIT)
+    }
+}
+
+/// 浏览查询结果（FR-242）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableBrowseResult {
+    pub row_set: RowSet,
+    /// 满足筛选条件的总行数；COUNT 超时或失败时为 None（前端降级为未知总数分页）。
+    pub total: Option<u64>,
+    /// 是否还有下一页（有 total 时精确计算，否则用 LIMIT+1 探测）。
+    pub has_next_page: bool,
+}
+
+/// 筛选值绑定（FR-242）：能解析为整数/浮点的按数值绑定（PostgreSQL 严格类型比较
+/// 需要），其余按文本（MySQL 隐式转换、PG 日期/布尔文本均可比较）。
+#[derive(Debug, Clone, PartialEq)]
+enum FilterValue {
+    Int(i64),
+    Float(f64),
+    Text(String),
+}
+
+fn parse_filter_value(raw: &str) -> FilterValue {
+    let trimmed = raw.trim();
+    if !trimmed.is_empty() {
+        if let Ok(value) = trimmed.parse::<i64>() {
+            return FilterValue::Int(value);
+        }
+        if let Ok(value) = trimmed.parse::<f64>() {
+            if value.is_finite() {
+                return FilterValue::Float(value);
+            }
+        }
+    }
+    FilterValue::Text(raw.to_string())
+}
+
+/// 由筛选条件生成 WHERE 子句与绑定值。`placeholder` 按方言生成（MySQL `?` / PG `$N`）。
+fn build_filter_clause(
+    filters: &[TableFilter],
+    quote: impl Fn(&str) -> String,
+    placeholder: impl Fn(usize) -> String,
+) -> (String, Vec<FilterValue>) {
+    let mut clauses: Vec<String> = Vec::new();
+    let mut binds: Vec<FilterValue> = Vec::new();
+    for filter in filters {
+        let column = quote(&filter.column);
+        let clause = match filter.op {
+            FilterOp::Eq | FilterOp::NotEq | FilterOp::Gt | FilterOp::GtEq | FilterOp::Lt
+            | FilterOp::LtEq | FilterOp::Like | FilterOp::NotLike => {
+                let op = match filter.op {
+                    FilterOp::Eq => "=",
+                    FilterOp::NotEq => "<>",
+                    FilterOp::Gt => ">",
+                    FilterOp::GtEq => ">=",
+                    FilterOp::Lt => "<",
+                    FilterOp::LtEq => "<=",
+                    FilterOp::Like => "LIKE",
+                    FilterOp::NotLike => "NOT LIKE",
+                    _ => unreachable!(),
+                };
+                binds.push(parse_filter_value(&filter.value));
+                format!("{column} {op} {}", placeholder(binds.len()))
+            }
+            FilterOp::IsNull => format!("{column} IS NULL"),
+            FilterOp::IsNotNull => format!("{column} IS NOT NULL"),
+        };
+        clauses.push(clause);
+    }
+    if clauses.is_empty() {
+        (String::new(), binds)
+    } else {
+        (format!(" WHERE {}", clauses.join(" AND ")), binds)
+    }
+}
+
+/// MySQL 反引号标识符引用（内部反引号双写转义）。
+fn quote_mysql_ident(name: &str) -> String {
+    format!("`{}`", name.replace('`', "``"))
+}
+
+/// PostgreSQL 双引号标识符引用（内部双引号双写转义）。
+fn quote_pg_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
 /// MySQL / PostgreSQL 共用的最小数据库 Driver 契约。
 ///
 /// 仅覆盖 v0.2 多 driver 主链路需要的 ping、metadata、query、cancel 与 close。
@@ -336,6 +473,18 @@ pub trait Driver: Send + Sync {
     /// session 建立时已执行 BEGIN；`close` / `Drop` 时未提交事务自动回滚。
     /// 普通查询继续走 `query` 的 pool 路径，两者互不影响。
     fn begin_session(&self) -> DriverFuture<'_, Box<dyn DriverSession>>;
+
+    /// 浏览表数据：服务端筛选 / 排序 / 分页 + 总行数（FR-242）。
+    ///
+    /// `query.filters` 的列名必须先经应用层白名单校验；driver 负责标识符引用
+    /// 转义与值参数化。取消语义与 `query` 相同；COUNT 超时降级为 `total = None`。
+    fn browse_table<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        query: &'a TableBrowseQuery,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, TableBrowseResult>;
 
     /// 幂等关闭 driver 持有的连接资源。
     fn close(&self) -> DriverCloseFuture<'_>;
@@ -660,6 +809,141 @@ impl MySqlDriver {
         }
     }
 
+    /// 浏览表数据（FR-242）：服务端筛选 / 排序 / 分页，COUNT 超时降级 None。
+    pub async fn browse_table(
+        &self,
+        scope: &MetadataScope,
+        table: &str,
+        query: &TableBrowseQuery,
+        cancel_token: CancellationToken,
+    ) -> Result<TableBrowseResult, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        let from = format!(
+            "{}.{}",
+            quote_mysql_ident(&scope.database),
+            quote_mysql_ident(table)
+        );
+        let (where_sql, binds) =
+            build_filter_clause(&query.filters, quote_mysql_ident, |_| "?".to_string());
+        let order_sql = query.order.as_ref().map_or(String::new(), |order| {
+            format!(
+                " ORDER BY {} {}",
+                quote_mysql_ident(&order.column),
+                if order.descending { "DESC" } else { "ASC" }
+            )
+        });
+        let limit = query.effective_limit();
+        // 多取一行探测「是否有下一页」（COUNT 失败降级时仍保证分页行为正确）
+        let data_sql = format!(
+            "SELECT * FROM {from}{where_sql}{order_sql}\nLIMIT {} OFFSET {}",
+            limit + 1,
+            query.offset
+        );
+        let count_sql = format!("SELECT COUNT(*) FROM {from}{where_sql}");
+
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        let mysql_thread_id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+
+        let data_future = async {
+            // describe 拿列头（0 行结果集也需要表头；prepare 阶段不需要绑定值）
+            let mut columns: Vec<String> = (&mut *conn)
+                .describe(&data_sql)
+                .await
+                .map_err(|e| DriverError::QueryFailed(e.to_string()))?
+                .columns()
+                .iter()
+                .map(|c| c.name().to_string())
+                .collect();
+            let mut q = sqlx::query(&data_sql);
+            for value in &binds {
+                q = match value {
+                    FilterValue::Int(v) => q.bind(*v),
+                    FilterValue::Float(v) => q.bind(*v),
+                    FilterValue::Text(v) => q.bind(v.clone()),
+                };
+            }
+            let mut rows = q.fetch(&mut *conn);
+            let mut data: Vec<Vec<Option<String>>> = Vec::new();
+            loop {
+                tokio::select! {
+                    row = rows.try_next() => {
+                        let Some(row) = row.map_err(|e| DriverError::QueryFailed(e.to_string()))? else {
+                            break;
+                        };
+                        if columns.is_empty() {
+                            columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+                        }
+                        data.push((0..row.columns().len()).map(|i| cell_to_string(&row, i)).collect());
+                    }
+                    _ = cancel_token.cancelled() => {
+                        drop(rows);
+                        self.kill_query(mysql_thread_id).await;
+                        return Err(DriverError::QueryCancelled);
+                    }
+                }
+            }
+            Ok((columns, data))
+        };
+        let count_future = self.count_rows(&count_sql, &binds, &cancel_token);
+        let (data_result, total) = tokio::join!(data_future, count_future);
+        let (columns, mut data) = data_result?;
+
+        let has_next_page = match total {
+            Some(total) => query.offset + limit < total as usize,
+            None => data.len() > limit,
+        };
+        data.truncate(limit);
+        Ok(TableBrowseResult {
+            row_set: RowSet {
+                columns,
+                rows: data,
+                truncated: false,
+            },
+            total,
+            has_next_page,
+        })
+    }
+
+    /// COUNT 查询：独立连接 + 5s 超时 + 可取消；超时/失败降级 None，不影响浏览主链路。
+    async fn count_rows(
+        &self,
+        sql: &str,
+        binds: &[FilterValue],
+        cancel_token: &CancellationToken,
+    ) -> Option<u64> {
+        let work = async {
+            let mut conn = self.pool.acquire().await.ok()?;
+            let mut q = sqlx::query_scalar::<_, i64>(sql);
+            for value in binds {
+                q = match value {
+                    FilterValue::Int(v) => q.bind(*v),
+                    FilterValue::Float(v) => q.bind(*v),
+                    FilterValue::Text(v) => q.bind(v.clone()),
+                };
+            }
+            q.fetch_one(&mut *conn).await.ok()
+        };
+        let cancellable = async {
+            tokio::select! {
+                result = work => result,
+                _ = cancel_token.cancelled() => None,
+            }
+        };
+        match timeout(Duration::from_secs(5), cancellable).await {
+            Ok(value) => value.map(|count| count.max(0) as u64),
+            Err(_) => None,
+        }
+    }
+
     async fn fetch_read_rows(
         &self,
         sql: &str,
@@ -813,6 +1097,22 @@ impl Driver for MySqlDriver {
         Box::pin(async move {
             Ok(Box::new(MySqlSession::begin(self.clone()).await?) as Box<dyn DriverSession>)
         })
+    }
+
+    fn browse_table<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        query: &'a TableBrowseQuery,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, TableBrowseResult> {
+        Box::pin(MySqlDriver::browse_table(
+            self,
+            scope,
+            table,
+            query,
+            cancel_token,
+        ))
     }
 
     fn close(&self) -> DriverCloseFuture<'_> {
@@ -1615,6 +1915,91 @@ mod tests {
     fn session_trait_is_object_safe() {
         fn accept_session_object(_session: &dyn DriverSession) {}
         let _object_safe_check: fn(&dyn DriverSession) = accept_session_object;
+    }
+
+    #[test]
+    fn filter_clause_escapes_identifiers_and_parameterizes_values() {
+        let (sql, binds) = build_filter_clause(
+            &[
+                TableFilter {
+                    column: "user`name".to_string(),
+                    op: FilterOp::Eq,
+                    value: "42".to_string(),
+                },
+                TableFilter {
+                    column: "note".to_string(),
+                    op: FilterOp::Like,
+                    value: "%a%".to_string(),
+                },
+                TableFilter {
+                    column: "deleted".to_string(),
+                    op: FilterOp::IsNull,
+                    value: String::new(),
+                },
+            ],
+            quote_mysql_ident,
+            |_| "?".to_string(),
+        );
+        assert_eq!(
+            sql,
+            " WHERE `user``name` = ? AND `note` LIKE ? AND `deleted` IS NULL"
+        );
+        assert_eq!(
+            binds,
+            vec![FilterValue::Int(42), FilterValue::Text("%a%".to_string())]
+        );
+
+        // 注入尝试：值绝不进入 SQL 文本
+        let (sql, binds) = build_filter_clause(
+            &[TableFilter {
+                column: "id".to_string(),
+                op: FilterOp::Eq,
+                value: "1 OR 1=1; DROP TABLE users".to_string(),
+            }],
+            quote_mysql_ident,
+            |_| "?".to_string(),
+        );
+        assert!(!sql.contains("DROP"), "注入文本不得进入 SQL: {sql}");
+        assert_eq!(binds.len(), 1);
+    }
+
+    #[test]
+    fn pg_filter_clause_uses_numbered_placeholders() {
+        let (sql, binds) = build_filter_clause(
+            &[
+                TableFilter {
+                    column: "a".to_string(),
+                    op: FilterOp::Eq,
+                    value: "1".to_string(),
+                },
+                TableFilter {
+                    column: "b".to_string(),
+                    op: FilterOp::NotEq,
+                    value: "x".to_string(),
+                },
+            ],
+            quote_pg_ident,
+            |n| format!("${n}"),
+        );
+        assert_eq!(sql, " WHERE \"a\" = $1 AND \"b\" <> $2");
+        assert_eq!(binds.len(), 2);
+    }
+
+    #[test]
+    fn filter_value_prefers_numeric_binding() {
+        assert_eq!(parse_filter_value("42"), FilterValue::Int(42));
+        assert_eq!(parse_filter_value(" 42 "), FilterValue::Int(42));
+        assert_eq!(parse_filter_value("4.5"), FilterValue::Float(4.5));
+        assert_eq!(parse_filter_value("1e5"), FilterValue::Float(100000.0));
+        assert_eq!(
+            parse_filter_value("NaN"),
+            FilterValue::Text("NaN".to_string())
+        );
+        assert_eq!(
+            parse_filter_value("042x"),
+            FilterValue::Text("042x".to_string())
+        );
+        assert_eq!(parse_filter_value(""), FilterValue::Text(String::new()));
     }
 
     #[test]

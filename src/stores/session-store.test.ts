@@ -29,6 +29,7 @@ function makeTab(overrides: Partial<QueryTab> = {}): QueryTab {
     queryErrorMsg: null,
     selectedTable: null,
     transaction: null,
+    browse: null,
     ...overrides,
   };
 }
@@ -231,6 +232,66 @@ describe("session-store", () => {
     });
   });
 
+  it("浏览 tab 筛选 / 排序 / 翻页都重置页码并重新查询（FR-242）", async () => {
+    useSessionStore.setState({ openId: "c1", selectedDb: "app" });
+    routeInvoke({
+      db_browse_table: {
+        rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+        total: 100,
+        hasNextPage: true,
+      },
+    });
+    await useSessionStore.getState().selectTable("users");
+    const tabId = activeTab().id;
+
+    // 应用筛选：page 归 0、参数透传
+    await useSessionStore
+      .getState()
+      .browseSetFilters(tabId, [{ column: "id", op: "gt", value: "10" }]);
+    expect(mockInvoke).toHaveBeenLastCalledWith("db_browse_table", {
+      id: "c1",
+      database: "app",
+      schema: null,
+      table: "users",
+      filters: [{ column: "id", op: "gt", value: "10" }],
+      order: null,
+      limit: 1000,
+      offset: 0,
+    });
+    expect(activeTab().browse?.filters).toHaveLength(1);
+
+    // 排序：保持筛选、page 归 0
+    await useSessionStore
+      .getState()
+      .browseSetOrder(tabId, { column: "id", descending: true });
+    expect(mockInvoke).toHaveBeenLastCalledWith(
+      "db_browse_table",
+      expect.objectContaining({
+        filters: [{ column: "id", op: "gt", value: "10" }],
+        order: { column: "id", descending: true },
+        offset: 0,
+      }),
+    );
+
+    // 翻页：offset = page × pageSize
+    await useSessionStore.getState().browseSetPage(tabId, 2);
+    expect(mockInvoke).toHaveBeenLastCalledWith(
+      "db_browse_table",
+      expect.objectContaining({ offset: 2000, limit: 1000 }),
+    );
+    expect(activeTab().browse?.page).toBe(2);
+
+    // 每页行数：page 归 0
+    await useSessionStore.getState().browseSetPageSize(tabId, 100);
+    expect(mockInvoke).toHaveBeenLastCalledWith(
+      "db_browse_table",
+      expect.objectContaining({ limit: 100, offset: 0 }),
+    );
+    expect(activeTab().browse?.page).toBe(0);
+    expect(activeTab().browse?.total).toBe(100);
+    expect(activeTab().browse?.hasNextPage).toBe(true);
+  });
+
   it("私钥 passphrase 错误时触发弹窗而非报错", async () => {
     mockInvoke.mockRejectedValueOnce("error.ssh.invalid_passphrase");
     await useSessionStore.getState().open("c1");
@@ -250,31 +311,43 @@ describe("session-store", () => {
     });
   });
 
-  it("selectTable 新开 tab 用反引号包裹并交给后端 rowLimit=1000", async () => {
+  it("selectTable 新开浏览 tab 并走服务端浏览查询（FR-242）", async () => {
     useSessionStore.setState({ openId: "c1", selectedDb: "app" });
     routeInvoke({
-      db_query: { columns: ["id"], rows: [["1"]], truncated: false },
+      db_browse_table: {
+        rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+        total: 1,
+        hasNextPage: false,
+      },
     });
     await useSessionStore.getState().selectTable("user`s");
-    expect(mockInvoke).toHaveBeenCalledWith("db_query", {
+    expect(mockInvoke).toHaveBeenCalledWith("db_browse_table", {
       id: "c1",
-      sql: "SELECT * FROM `app`.`user``s`",
-      queryId: expect.any(String),
-      rowLimit: 1000,
-      allowWrite: false,
+      database: "app",
       schema: null,
+      table: "user`s",
+      filters: [],
+      order: null,
+      limit: 1000,
+      offset: 0,
     });
     // 表预览在新 tab 中进行，不影响原 tab
     const tab = activeTab();
     expect(tab.title).toBe("user`s");
+    expect(tab.browse?.table).toBe("user`s");
+    expect(tab.browse?.total).toBe(1);
     expect(tab.rowSet?.rows).toHaveLength(1);
     expect(useSessionStore.getState().tabs).toHaveLength(2);
   });
 
-  it("selectTable 重复点击同一表复用已有预览 tab，不产生重复 tab", async () => {
+  it("selectTable 重复点击同一表复用已有浏览 tab，不产生重复 tab", async () => {
     useSessionStore.setState({ openId: "c1", selectedDb: "app" });
     routeInvoke({
-      db_query: { columns: ["id"], rows: [["1"]], truncated: false },
+      db_browse_table: {
+        rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+        total: 1,
+        hasNextPage: false,
+      },
     });
     // 模拟双击 / 反复点击同一张表
     await useSessionStore.getState().selectTable("users");
@@ -282,12 +355,12 @@ describe("session-store", () => {
     await useSessionStore.getState().selectTable("users");
 
     const s = useSessionStore.getState();
-    expect(s.tabs.filter((t) => t.selectedTable === "users")).toHaveLength(1);
-    expect(s.tabs).toHaveLength(2); // 初始 tab + 一个预览 tab
+    expect(s.tabs.filter((t) => t.browse?.table === "users")).toHaveLength(1);
+    expect(s.tabs).toHaveLength(2); // 初始 tab + 一个浏览 tab
     expect(activeTab().selectedTable).toBe("users");
     // 只查询过一次
     expect(
-      mockInvoke.mock.calls.filter(([cmd]) => cmd === "db_query"),
+      mockInvoke.mock.calls.filter(([cmd]) => cmd === "db_browse_table"),
     ).toHaveLength(1);
   });
 
@@ -607,7 +680,11 @@ describe("session-store", () => {
       db_list_tables: [
         { name: "order\"items", tableType: "BASE TABLE", rows: null, comment: null },
       ],
-      db_query: { columns: ["id"], rows: [["1"]], truncated: false },
+      db_browse_table: {
+        rowSet: { columns: ["id"], rows: [["1"]], truncated: false },
+        total: 1,
+        hasNextPage: false,
+      },
     });
 
     await useSessionStore.getState().selectDb("app");
@@ -625,13 +702,15 @@ describe("session-store", () => {
     });
 
     await useSessionStore.getState().selectTable('order"items');
-    expect(mockInvoke).toHaveBeenCalledWith("db_query", {
+    expect(mockInvoke).toHaveBeenCalledWith("db_browse_table", {
       id: "c1",
-      sql: 'SELECT * FROM "audit"."order""items"',
-      queryId: expect.any(String),
-      rowLimit: 1000,
-      allowWrite: false,
+      database: "app",
       schema: "audit",
+      table: 'order"items',
+      filters: [],
+      order: null,
+      limit: 1000,
+      offset: 0,
     });
   });
 
