@@ -4,6 +4,8 @@
 
 ## v0.2 发布检查清单
 
+> **v0.2.0 发布结果（2026-08-20）**：Release workflow [run 32325101849](https://github.com/kurisu994/tiny-sql/actions/runs/32325101849) 全部成功；[GitHub Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.2.0) 为非草稿、非预发布且是 latest，已包含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 和正式版 `latest.json`。`latest.json` 的四个平台 URL 均已核对指向 `v0.2.0` 资产，Release notes 与 CHANGELOG `0.2.0` 段一致。RC（`v0.2.0-rc1`）下载安装验收、PostgreSQL 15/18 双端点回归与 T8.2 关闭均已于发布前完成（见 PLAN.md 历史与 progress.md）；从 v0.1.0 应用内检查更新到 v0.2.0 的端到端实测由用户在日常使用中验证。
+
 v0.2 在 v0.1 全平台发布链路不变的前提下，新增以下验收项（对应 `docs/PLAN.md` 的 V2-CP5）：
 
 ### v0.2 RC 前本地检查

@@ -8,6 +8,8 @@
 
 **本轮优化：结果表格序号列冻结（2026-08-20）**——用户要求 `#` 序号列不随横向滚动。ResultTable 改用 Virtuoso `customScrollParent` 复用外层统一横纵滚动容器（原生 Virtuoso scroller 会截获 sticky 上下文，直接 sticky 对行无效），表头 `sticky top-0 z-20`、表头序号 `sticky left-0 z-30`、行序号 `sticky left-0 z-10` + `bg-background`（hover 用 group 同步行色）。tsc、vitest 93/93、Next build 全绿，CHANGELOG `[Unreleased]` 已补录；待用户 dev 实测后发布 v0.2.0。
 
+**里程碑：v0.2.0 正式版已发布（2026-08-20）**——用户实测序号列冻结无问题后执行 `just release v0.2.0`：版本号 → `0.2.0`（package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock）、CHANGELOG 切出 `0.2.0 — 2026-08-20` 段、发布提交 `4f6b07f`、main 与 tag 推送成功。Release workflow run `32325101849` 四平台 bundle + Publish 全部成功；GitHub Release `v0.2.0` 为非草稿、非预发布且是 latest，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows `.exe(.sig)`、Linux `.AppImage(.sig)` 与正式版 `latest.json`。`latest.json` 已核对：version `0.2.0`、notes 与 CHANGELOG `0.2.0` 段一致、四平台 URL 均指向 `v0.2.0` 资产。v0.1.0 用户将收到自动更新；应用内端到端更新实测由用户日常验证。
+
 **v0.2 发布前置全部就绪（2026-08-20）**——用户当日连续确认：PostgreSQL 15.latest/18.latest 双端点 integration 回归完成、RC 全平台下载安装验收完成、V2-T8.2 提前关闭（RC 发布当日关闭，未执行满一周试用；实质验收依据为 08-19 T8.1 dogfooding 与 08-20 RC 安装验收，后续反馈走常规 P0/P1/P2 流程）。V2-CP5 三项标准全部满足，v0.2 仅剩 `just release v0.2.0` 正式发布。
 
 **v0.3 开发计划已立项（2026-08-20）**——用户决定在 v0.2 RC 试用期并行启动 v0.3 规划（用户口径“v3.0”按 ROADMAP 版本线确认为 v0.3）。`docs/PLAN.md` 新增「v0.3 开发计划」章节：7 周约 84h，范围为 ROADMAP v0.3 五项 FR——FR-242 服务端筛选排序分页（P0）、FR-244 独占 session 可靠事务（P0，v0.4 前置）、FR-240 SQL 文件与最近文件（P1）、FR-241 index/constraint 树与对象搜索（P1）、FR-243 多结果与 SQL 格式化（P1）；排期 Week 1-2 事务后端+UI、Week 3 筛选分页、Week 4 元数据树/搜索、Week 5 多结果/格式化、Week 6 SQL 文件、Week 7 dogfooding 发布；含 V3-CP0~CP5 检查点、降级链（格式化→最近文件→对象搜索→多结果；P0 不降级）与 V3-R01~R06 风险表。功能代码待 v0.2.0 正式版发布后开工（V3-CP0 准入）。
@@ -26,8 +28,8 @@
 
 ### 本轮核对后的事实基线
 
-- Git：`v0.2.0-rc1` tag 与 main 均指向发布提交 `64787d8`；上一正式版 `v0.1.0` tag 仍指向 `624b108`。
-- 版本：`package.json`、`Cargo.lock`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 一致为 `0.2.0-rc1`（预发布版本号写入配置文件；正式版发布时 `just release v0.2.0` 会改为 `0.2.0` 并切出 CHANGELOG）。
+- Git：`v0.2.0` tag 与 main 指向发布提交 `4f6b07f`；上一 RC tag 为 `v0.2.0-rc1`（`64787d8`）。
+- 版本：`package.json`、`Cargo.lock`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 一致为 `0.2.0`。
 - 本地门禁：`just check`、5 个真实 MySQL integration test 与本机 Tauri 生产构建均通过。
 - Release：workflow run `32110227419` 的 macOS arm64/x64、Windows x64、Linux x64 与发布 job 全部成功；GitHub Release 为非草稿、非预发布且是 latest。
 - 产物：四个平台安装包、updater artifact / `.sig` 与 `latest.json` 均已验证；manifest 的四个平台 URL 均指向 `v0.1.0` 资产。
@@ -119,12 +121,11 @@
 
 ## 下一步（按优先级）
 
-1. 正式发布 v0.2.0：`just release v0.2.0`，切出 CHANGELOG `0.2.0` 段、验收四平台 `latest.json` 与应用内更新链路（V2-CP5 收尾）。
-2. V3-CP0 准入收口（v0.2.0 发布 + REQUIREMENTS.md 补 v0.3 范围）后启动 v0.3 Week 1：Driver 契约扩展独占 session（V3-T1.1）。
+1. V3-CP0 准入收口（REQUIREMENTS.md 补 v0.3 范围章节）后启动 v0.3 Week 1：Driver 契约扩展独占 session（V3-T1.1）。
 
 ## 阻塞 / 风险
 
 - **高级设置仅部分生效**：连接超时与 SSH keepalive 已接线；读取/写入超时、压缩、自动连接仍只持久化，不能描述成已生效。
-- **RC 真实用户反馈未经历完整试用周期**：T8.2 提前关闭，若正式版后出现 P0/P1 需随时准备 v0.2.1 补丁并优先于 v0.3 开发。
+- **正式版未经历完整 RC 试用周期**：T8.2 提前关闭，若 v0.2.0 后出现 P0/P1 需随时准备 v0.2.1 补丁并优先于 v0.3 开发。
 
 相关：[[progress]] · [[systemPatterns]]

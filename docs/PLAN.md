@@ -11,26 +11,9 @@ last_updated: 2026-08-19
 >
 > 本文件只保留尚未完成的工作。v0.2 各 Week 已完成任务的实现细节与检查点历史见 [progress.md](../memory-bank/progress.md)；用户可见变化见 [CHANGELOG.md](../CHANGELOG.md) 的 `[Unreleased]` 段。
 
-当前稳定版为 `v0.1.0`（2026-08-18 发布），`v0.2.0-rc1` 已于 2026-08-20 发布进入试用期。**v0.2 的全部开发任务已完成**：Driver 契约、PostgreSQL 后端与应用接线、主密码加密与 TLS 错误诊断、schema intelligence、查询工作台（历史/多 tab/导出/列宽）、SSH RTT/重连/keepalive、文档与英文 README。自动化门禁全绿：`just check`、双 driver integration 9/9、本机 Tauri 调试包构建成功。
+> 本文件只保留尚未完成的工作。已发布版本的实现细节与检查点历史见 [progress.md](../memory-bank/progress.md)；用户可见变化见 [CHANGELOG.md](../CHANGELOG.md)。
 
-**v0.2 真实环境验收已于 2026-08-19 全部通过**（T3.4 双 driver Tauri 验收、T4.3 真实 TLS、T7.1/T7.2 真实链路、T8.1 双 driver dogfooding），V2-CP2 / V2-CP3 / V2-CP4 均已关闭。**PostgreSQL 15.latest / 18.latest 双端点 integration 回归与 RC 全平台下载安装验收已于 2026-08-20 由用户完成；V2-T8.2 同日由用户确认提前关闭**（RC 发布当日关闭，未执行满一周试用等待；实质验收依据为 08-19 T8.1 双 driver dogfooding 与 08-20 RC 安装验收，后续真实用户反馈按 P0/P1/P2 常规流程处理）。v0.2 剩余事项仅为正式发布（见下节）；**v0.3 开发计划已立项（见本文「v0.3 开发计划」节），v0.2.0 正式版发布后即可开工**。
-
-## v0.2 剩余待办
-
-### 发布
-
-- [ ] **正式发布 v0.2.0**：`just release v0.2.0`，切出 CHANGELOG `0.2.0` 段并验收四平台 `latest.json`，通过 **V2-CP5**。所有前置（双 driver dogfooding、PG 15/18 双端点回归、RC 安装验收、T8.2 关闭）均已完成。
-
-### 发布检查点
-
-| 检查点 | 通过标准 | 不通过的应对 |
-|---|---|---|
-| **V2-CP2** 双 driver 闭环 | ✅ 已通过（2026-08-19 T3.4 真实验收） | — |
-| **V2-CP3** 安全与 TLS | ✅ 已通过（2026-08-19 T4.3 真实 TLS 正反例） | — |
-| **V2-CP4** 查询工作台 | ✅ 已通过（2026-08-19 T8.1 dogfooding） | — |
-| **V2-CP5** 发布 | 双 driver dogfooding（✅ 2026-08-19）+ RC 安装通过（✅ 2026-08-20）+ P0/P1 清零（✅ 2026-08-20 用户关闭 T8.2） | 延后正式版，不降低凭据与数据安全标准 |
-
-明确不进入 v0.2：安全表格编辑、对象设计、CSV 导入、SQL dump、备份同步、用户权限和 ER/BI/AI；这些分别留在 v0.3-v0.5+（见 [ROADMAP](./ROADMAP.md)）。
+当前稳定版为 `v0.2.0`（2026-08-20 发布）：多 driver 架构 + PostgreSQL、主密码加密与 TLS 诊断、schema intelligence、查询工作台（历史/多 tab/导出/列宽/冻结序号列）、SSH RTT/重连/keepalive。V2 全部检查点已关闭，详见 [progress.md](../memory-bank/progress.md)。以下为 v0.3 开发计划，V3-CP0 启动准入收口后即可开工。
 
 ---
 
@@ -50,7 +33,7 @@ last_updated: 2026-08-19
 
 ## V3.1 Phase 0：启动准入（不计入 7 周预算）
 
-- [ ] v0.2.0 正式版已发布：T8.2 双 driver RC 试用完成、P0/P1 清零、CHANGELOG 切出 `0.2.0` 段、全平台 `latest.json` 验收通过。
+- [x] v0.2.0 正式版已发布（2026-08-20）：V2 全检查点关闭、CHANGELOG 切出 `0.2.0` 段；全平台 `latest.json` 验收在发布工单收尾记录。
 - [ ] RC 反馈产生的 v0.2.1 补丁（如有）已发布并稳定；剩余 P2 明确移入 v0.2.x 或 v0.4，不混入 v0.3 承诺。
 - [ ] `REQUIREMENTS.md` 已补 v0.3 范围章节（Week 1 前收口，作为 V3-CP0 的一部分）。
 
