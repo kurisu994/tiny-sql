@@ -2,6 +2,31 @@
 
 > 本文件用于各版本 dogfooding、RC 和正式发布。不要在这里记录真实 host、用户名、库名、表名、IP 或公司环境细节；真实记录写到被忽略的 `docs/dogfooding-log.md`。
 
+## v0.3 发布检查清单
+
+### v0.3 RC 前本地检查
+
+- `just check` 全绿（Rust fmt/clippy/workspace 测试、Vitest、Next build）。
+- `just test-integration` 双 driver 全绿（含 v0.3 新增：事务 session 同连接证明与回滚、浏览筛选分页、index/constraint metadata、多语句拆分执行）。
+- `just build` 产出本机安装包与 updater artifact / `.sig`。
+- `CHANGELOG.md` 的 `[Unreleased]` 段覆盖 v0.3 全部用户可见变更。
+
+### v0.3 功能验收（对应 PLAN.md V3-CP1~CP4）
+
+- 事务（FR-244）：MySQL/PostgreSQL 各自开始事务 → 多条 SQL → 提交生效 / 回滚消失；事务中取消查询、关闭 tab、断开重连连接，未提交事务均回滚且 UI 状态正确清理；两个事务 tab 并行互不串连接。
+- 浏览（FR-242）：百万行级表筛选 / 排序 / 翻页不整拉全表；PG 数值列筛选正常；COUNT 超时降级为未知总数分页仍可翻页。
+- 元数据树与搜索（FR-241）：双方言索引 / 约束展示正确；对象搜索定位展开；DDL 后 cache 失效。
+- 多语句（FR-243）：含字符串 / 注释 / dollar-quoted body 的脚本拆分正确；写语句确认流程；首错中止；dollar-quoted 函数体（PG）不破坏格式化。
+- SQL 文件（FR-240）：打开 / 保存 / 另存为 / 最近文件全链路；外部修改覆盖确认；⌘O / ⌘S 快捷键。
+- 双 driver × 直连 / 1 跳 / 3 跳回归上述全部功能。
+
+### v0.3 正式发布追加条件
+
+- RC 试用 ≥ 1 周（沿用 V2-T8.2 标准）且 P0/P1 清零；未完成 P1 降级项明确移入 v0.3.1 或 v0.4，不在 Release notes 承诺。
+- `ARCHITECTURE.md` 已含 session/事务、多语句拆分与浏览查询章节；`REQUIREMENTS.md` §3.3 已收口。
+
+---
+
 ## v0.2 发布检查清单
 
 > **v0.2.0 发布结果（2026-08-20）**：Release workflow [run 32325101849](https://github.com/kurisu994/tiny-sql/actions/runs/32325101849) 全部成功；[GitHub Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.2.0) 为非草稿、非预发布且是 latest，已包含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 和正式版 `latest.json`。`latest.json` 的四个平台 URL 均已核对指向 `v0.2.0` 资产，Release notes 与 CHANGELOG `0.2.0` 段一致。RC（`v0.2.0-rc1`）下载安装验收、PostgreSQL 15/18 双端点回归与 T8.2 关闭均已于发布前完成（见 PLAN.md 历史与 progress.md）；从 v0.1.0 应用内检查更新到 v0.2.0 的端到端实测由用户在日常使用中验证。

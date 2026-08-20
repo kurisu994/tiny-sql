@@ -13,7 +13,9 @@ last_updated: 2026-08-19
 
 > 本文件只保留尚未完成的工作。已发布版本的实现细节与检查点历史见 [progress.md](../memory-bank/progress.md)；用户可见变化见 [CHANGELOG.md](../CHANGELOG.md)。
 
-当前稳定版为 `v0.2.0`（2026-08-20 发布）：多 driver 架构 + PostgreSQL、主密码加密与 TLS 诊断、schema intelligence、查询工作台（历史/多 tab/导出/列宽/冻结序号列）、SSH RTT/重连/keepalive。V2 全部检查点已关闭，详见 [progress.md](../memory-bank/progress.md)。以下为 v0.3 开发计划，V3-CP0 启动准入收口后即可开工。
+当前稳定版为 `v0.2.0`（2026-08-20 发布）：多 driver 架构 + PostgreSQL、主密码加密与 TLS 诊断、schema intelligence、查询工作台（历史/多 tab/导出/列宽/冻结序号列）、SSH RTT/重连/keepalive。V2 全部检查点已关闭，详见 [progress.md](../memory-bank/progress.md)。
+
+**v0.3 开发已于 2026-08-20 完成全部编码与自动化门禁（Week 1-6 + V3-T7.3 文档 + V3-T7.4 门禁）**：独占 session 可靠事务（FR-244）、服务端筛选排序分页（FR-242）、index/constraint 元数据树与对象搜索（FR-241）、多语句执行与 SQL 格式化（FR-243）、SQL 文件工作流（FR-240）。门禁事实：`just check` 全绿（db-driver 单测 35、app_lib 46、ssh-multihop 8、前端 vitest 102、Next build）；双 driver integration 20/20（MySQL 11 含事务/浏览/metadata/多语句、PG 9）；本机 dmg + updater 签名产物构建成功。剩余仅为 Week 7 真实环境 dogfooding（V3-T7.1/T7.2）与 RC / 正式发布。
 
 ---
 
@@ -66,7 +68,7 @@ Week 7  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ## V3.3 分周任务与验收
 
-### v0.3 Week 1 — Driver 契约扩展：独占 session 与事务原语（12h）
+### v0.3 Week 1 — Driver 契约扩展：独占 session 与事务原语（12h）✅ 已完成（2026-08-20）
 
 - **V3-T1.1 [4h]** 扩展 `Driver` 契约，新增最小独占 session 面（获取 session、session 内执行/取消、释放 session）；普通查询继续走 pool 路径，不重写已有调用，不提前抽象 v0.4 编辑能力。
 - **V3-T1.2 [4h]** MySQL 独占 session 实现：`BEGIN` / `COMMIT` / `ROLLBACK` 固定同一 connection；session 独立于 pool 的限额与空闲超时，超时强制回收并回滚。
@@ -75,7 +77,7 @@ Week 7  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：MySQL 现有测试全绿（零回归）；双 driver 事务原语可用；**V3-CP1** 通过后才进入 Week 2。
 
-### v0.3 Week 2 — 事务工作台 UI 与闭环（13h）
+### v0.3 Week 2 — 事务工作台 UI 与闭环（13h）✅ 已完成（2026-08-20）
 
 - **V3-T2.1 [4h]** session-store 增加事务状态：tab 显式进入事务模式，事务内 SQL 走绑定 session；事务状态栏与 `COMMIT` / `ROLLBACK` 按钮，未提交有明确视觉标识。
 - **V3-T2.2 [3h]** 事务与现有护栏交互：写确认、取消、关闭 tab / 连接时未提交事务的提示与回滚路径。
@@ -84,7 +86,7 @@ Week 7  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：事务内多语句同连接可从前端证明；取消/断链/关闭每条路径都有确定终态；**V3-CP2** 事务闭环通过。
 
-### v0.3 Week 3 — 表数据服务端筛选、排序与分页（13h）
+### v0.3 Week 3 — 表数据服务端筛选、排序与分页（13h）✅ 已完成（2026-08-20）
 
 - **V3-T3.1 [4h]** Driver 契约扩展数据浏览查询：WHERE（列白名单 + 操作符枚举 + 值全参数化）、ORDER BY（列白名单）、LIMIT/OFFSET 分页与总行数 COUNT；MySQL/PostgreSQL 各自标识符引用规则。
 - **V3-T3.2 [4h]** 预览 tab 改造：筛选栏、列头排序、分页器；筛选/排序/翻页作为新查询接入 query_id 迟到守卫与取消。
@@ -93,7 +95,7 @@ Week 7  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：双 driver × 0/1/3 跳下筛选分页正常；全程不出现整表拉取；**V3-CP3** 前半通过。
 
-### v0.3 Week 4 — index/constraint 元数据树与对象搜索（12h）
+### v0.3 Week 4 — index/constraint 元数据树与对象搜索（12h）✅ 已完成（2026-08-20）
 
 - **V3-T4.1 [4h]** metadata 契约增加 index/constraint：MySQL `information_schema` 与 PostgreSQL `pg_index` / `pg_constraint` 双方言实现；接入 v0.2 的 LRU cache 失效链（刷新/DDL/重连）。
 - **V3-T4.2 [3h]** schema 树展示索引与约束（类型、列、唯一性、引用），按需展开不阻塞列加载。
@@ -102,7 +104,7 @@ Week 7  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：双方言索引/约束展示正确；搜索定位流畅不阻塞 UI；**V3-CP3** 浏览效率通过。
 
-### v0.3 Week 5 — 多结果 tab 与 SQL 格式化（12h）
+### v0.3 Week 5 — 多结果 tab 与 SQL 格式化（12h）✅ 已完成（2026-08-20）
 
 - **V3-T5.1 [2h]** 多语句执行策略落地：保持「单语句直接执行」护栏不变；「执行全部」由后端按方言分号状态机拆分后逐条执行，每条独立走 guard 分类与写确认；PostgreSQL dollar-quoted body 与字符串/注释内分号不误判，拆分无法确定边界时拒绝执行并返回稳定 key，绝不尽力执行。
 - **V3-T5.2 [5h]** 多结果 tab：一次执行保留多个结果集（逐语句一个结果，含行列、截断与成功/失败状态）；失败语句明确标注，后续语句继续/中止策略固定且可预期。
@@ -111,7 +113,7 @@ Week 7  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：多语句脚本结果完整不串线；格式化不破坏方言与 dollar-quoted 语法；**V3-CP4** 工作台增强通过。
 
-### v0.3 Week 6 — SQL 文件工作流（10h）
+### v0.3 Week 6 — SQL 文件工作流（10h）✅ 已完成（2026-08-20）
 
 - **V3-T6.1 [4h]** 保存/打开 SQL 文件：复用 dialog 选路径 + 后端读写（同 v0.2 导出模式，不引 `tauri-plugin-fs`）；UTF-8；保存动作与 tab dirty 状态联动。
 - **V3-T6.2 [3h]** 最近文件列表：只持久化路径与打开时间（不写入加密历史）；失效文件清理；点击以新 tab 打开。
@@ -122,10 +124,10 @@ Week 7  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### v0.3 Week 7 — 双 driver dogfooding 与发布（12h）
 
-- **V3-T7.1 [4h]** MySQL/PostgreSQL × 直连/1 跳/3 跳全功能回归：事务、筛选分页、多结果、对象搜索、SQL 文件。
-- **V3-T7.2 [3h]** 作者 + 至少 2 位试用者使用 v0.3 RC ≥ 1 周（沿用 V2-T8.2 标准：0 数据丢失、0 凭据泄露、0 不可恢复 crash）。
-- **V3-T7.3 [3h]** 文档：`REQUIREMENTS.md` v0.3 范围收口、`ARCHITECTURE.md` 补 session/事务与多结果章节、`RELEASE_CHECKLIST.md` 补 v0.3 节、CHANGELOG 持续维护。
-- **V3-T7.4 [2h]** `just check`、双 driver integration、本机安装包、全平台 RC 下载验收；P0/P1 清零后发布 v0.3.0。
+- [ ] **V3-T7.1 [4h]** MySQL/PostgreSQL × 直连/1 跳/3 跳全功能回归：事务、筛选分页、多结果、对象搜索、SQL 文件。
+- [ ] **V3-T7.2 [3h]** 作者 + 至少 2 位试用者使用 v0.3 RC ≥ 1 周（沿用 V2-T8.2 标准：0 数据丢失、0 凭据泄露、0 不可恢复 crash）。
+- [x] **V3-T7.3 [3h]** 文档（2026-08-20）：`REQUIREMENTS.md` §3.3、`ARCHITECTURE.md` session/事务与多语句/浏览章节、`RELEASE_CHECKLIST.md` v0.3 节、CHANGELOG 持续维护。
+- [x] **V3-T7.4 [2h]** 门禁（2026-08-20）：`just check` 全绿、双 driver integration 20/20、本机安装包 + updater 签名产物构建成功；全平台 RC 下载验收随 RC 发布执行。
 
 验收：**V3-CP5** 发布门槛全部通过；未完成 P1 降级项明确移入 v0.3.1 或 v0.4，不在 Release notes 虚假承诺。
 

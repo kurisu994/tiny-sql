@@ -8,6 +8,8 @@
 
 **本轮优化：结果表格序号列冻结（2026-08-20）**——用户要求 `#` 序号列不随横向滚动。ResultTable 改用 Virtuoso `customScrollParent` 复用外层统一横纵滚动容器（原生 Virtuoso scroller 会截获 sticky 上下文，直接 sticky 对行无效），表头 `sticky top-0 z-20`、表头序号 `sticky left-0 z-30`、行序号 `sticky left-0 z-10` + `bg-background`（hover 用 group 同步行色）。tsc、vitest 93/93、Next build 全绿，CHANGELOG `[Unreleased]` 已补录；待用户 dev 实测后发布 v0.2.0。
 
+**里程碑：v0.3 全部编码与自动化门禁完成（2026-08-20）**——按 PLAN.md v0.3 开发计划完成 Week 1-6 全部五项 FR（提交 `5ad5ce2` 事务 / `7acc006` 浏览分页 / `8794ff8` 元数据树与搜索 / `5007cf6` 多语句与格式化 / `8477545` SQL 文件）+ V3-T7.3 文档 + V3-T7.4 门禁。门禁事实：`just check` 全绿（db-driver 单测 35、app_lib 46、ssh-multihop 8、前端 vitest 102、Next build）；双 driver integration 20/20（MySQL 11、PG 9，含事务同连接证明/回滚、浏览筛选分页、index/constraint metadata、多语句拆分执行）；本机 dmg + updater 签名产物构建成功。剩余仅为 V3-T7.1/T7.2 真实 dogfooding 与 RC/正式发布。
+
 **V3-CP0 启动准入已关闭（2026-08-20）**——`REQUIREMENTS.md` 补 §3.3 v0.3 范围章节（FR-240~FR-244 五项锚点，含边界与固化的设计决策），文件头快照同步到 v0.2.0 已发布；Phase 0 三项全部勾选（v0.2.0 已发布、无 RC 反馈补丁需求、需求收口）。**v0.3 Week 1（V3-T1.1 Driver 契约扩展独占 session）可以开工**。
 
 **里程碑：v0.2.0 正式版已发布（2026-08-20）**——用户实测序号列冻结无问题后执行 `just release v0.2.0`：版本号 → `0.2.0`（package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock）、CHANGELOG 切出 `0.2.0 — 2026-08-20` 段、发布提交 `4f6b07f`、main 与 tag 推送成功。Release workflow run `32325101849` 四平台 bundle + Publish 全部成功；GitHub Release `v0.2.0` 为非草稿、非预发布且是 latest，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows `.exe(.sig)`、Linux `.AppImage(.sig)` 与正式版 `latest.json`。`latest.json` 已核对：version `0.2.0`、notes 与 CHANGELOG `0.2.0` 段一致、四平台 URL 均指向 `v0.2.0` 资产。v0.1.0 用户将收到自动更新；应用内端到端更新实测由用户日常验证。
@@ -83,8 +85,10 @@
 
 ## 近期决策
 
+- v0.3 工程落地教训：MySQL 事务/会话管理语句（START TRANSACTION/RESET CONNECTION）不支持 prepared 协议（1295），必须 `sqlx::raw_sql` + `Executor::execute` 规避装箱 Future HRTB 推导限制；PG 清理会话不能用 DISCARD ALL（会清掉 sqlx prepared statement cache），改用 ROLLBACK + `RESET ALL; CLOSE ALL; DISCARD TEMP`；PG 列级 NOT NULL 在 pg_constraint 里是 CHECK 类型，断言/展示需预期多条 CHECK。
+- v0.3 前端确认复用模式：store 记录 `lastErrorKey`，UI 层按 key 补弹确认重试（多语句写确认回填）；browse/transaction 等 command 参数超 7 个时打包 input 结构体（clippy too_many_arguments）。
 - V2-T8.2 于 RC 发布当日由用户确认提前关闭，未执行满一周试用；文档如实记录关闭依据，不写成“试用满一周通过”。
-- v0.3 多语句执行保持「单语句直接执行」护栏：「执行全部」由后端按方言分号状态机拆分逐条执行，每条独立 guard 分类与写确认；边界不确定即拒绝执行，绝不尽力执行。
+- v0.3 多语句执行保持「单语句直接执行」护栏：「执行全部」由后端按方言分号状态机拆分逐条执行，每条独立 guard 分类与写确认；边界不确定即拒绝执行，绝不尽力执行。首错/取消中止，后续标记 skipped；脚本含事务语句整体拒绝（tx_requires_session 引导去事务 tab）。
 - v0.3 事务采用独占 session（独立于 pool，限额 + 空闲超时强制回收）；断链即事务消亡，禁止「重连续事务」隐式承诺；pool 与 session 路径并存，不重写 v0.2 已稳定 query 路径。
 - v0.3 SQL 文件读写复用「dialog 选路径 + 后端读写」模式，不引入 `tauri-plugin-fs`；最近文件只持久化路径与时间，不进加密历史。
 - 代码是事实源：把 SSL/TLS 描述为“已接线、默认禁用、真实环境未验收”，不再写成完全未实现，也不宣称生产验证完成。
@@ -123,11 +127,14 @@
 
 ## 下一步（按优先级）
 
-1. v0.3 Week 1 开工：V3-T1.1 Driver 契约扩展独占 session（4h）→ V3-T1.2 MySQL 实现（4h）→ V3-T1.3 PostgreSQL 实现（2h）→ V3-T1.4 同连接证明单测（2h）；V3-CP1 门槛为 MySQL 零回归 + 双 driver 事务原语可用。
+1. V3-T7.1：MySQL/PostgreSQL × 直连/1 跳/3 跳全功能真实回归（事务、筛选分页、多结果、对象搜索、SQL 文件）。
+2. V3-T7.2：作者 + 至少 2 位试用者使用 v0.3 RC ≥ 1 周（沿用 V2-T8.2 标准）。
+3. P0/P1 清零后 `just release v0.3.0-rc1` → RC 验收 → `just release v0.3.0`（V3-CP5）。
 
 ## 阻塞 / 风险
 
 - **高级设置仅部分生效**：连接超时与 SSH keepalive 已接线；读取/写入超时、压缩、自动连接仍只持久化，不能描述成已生效。
 - **正式版未经历完整 RC 试用周期**：T8.2 提前关闭，若 v0.2.0 后出现 P0/P1 需随时准备 v0.2.1 补丁并优先于 v0.3 开发。
+- **PG session 客户端截断/取消后事务大概率保不住**：协议残留低频路径，session 验证失败即 session_broken，前端引导重建；已如实写入 ARCHITECTURE 与 PLAN 风险。
 
 相关：[[progress]] · [[systemPatterns]]

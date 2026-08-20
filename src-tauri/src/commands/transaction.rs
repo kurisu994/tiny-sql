@@ -69,18 +69,33 @@ pub async fn transaction_begin(
     Ok(session_id)
 }
 
+/// 事务内查询输入（打包结构以满足 command 参数约束）。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TxQueryInput {
+    pub session_id: String,
+    pub sql: String,
+    pub query_id: Option<String>,
+    pub row_limit: Option<u32>,
+    pub allow_write: Option<bool>,
+    pub schema: Option<String>,
+}
+
 /// 在事务 session 内执行 SQL；取消语义与 `db_query` 相同（复用 query_id + cancel token）。
 #[tauri::command]
 pub async fn transaction_query(
     state: State<'_, AppState>,
     id: String,
-    session_id: String,
-    sql: String,
-    query_id: Option<String>,
-    row_limit: Option<u32>,
-    allow_write: Option<bool>,
-    schema: Option<String>,
+    input: TxQueryInput,
 ) -> Result<TxQueryResult, QueryCommandError> {
+    let TxQueryInput {
+        session_id,
+        sql,
+        query_id,
+        row_limit,
+        allow_write,
+        schema,
+    } = input;
     let session = session_of(&state, &id, &session_id).await?;
     let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let token = CancellationToken::new();
@@ -107,10 +122,20 @@ pub async fn transaction_query(
     state.queries.lock().await.remove(&query_id);
     // 连接已断开时 driver_of 失败：历史跳过，不影响错误返回
     if let Ok(driver) = driver_of(&state, &id).await {
-        record_history(&state, &id, &driver, &sql, schema.as_deref(), result.is_ok());
+        record_history(
+            &state,
+            &id,
+            &driver,
+            &sql,
+            schema.as_deref(),
+            result.is_ok(),
+        );
     }
     let row_set = result.map_err(QueryCommandError::from)?;
-    Ok(TxQueryResult { row_set, in_transaction })
+    Ok(TxQueryResult {
+        row_set,
+        in_transaction,
+    })
 }
 
 /// 提交当前事务。

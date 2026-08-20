@@ -36,7 +36,9 @@ pub async fn sql_file_write(path: String, content: String) -> Result<(), String>
 
 /// 读取最近文件列表（最新在前）。
 #[tauri::command]
-pub async fn sql_file_recent_list(state: State<'_, AppState>) -> Result<Vec<RecentFileEntry>, String> {
+pub async fn sql_file_recent_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<RecentFileEntry>, String> {
     Ok(state.recent_files.load())
 }
 
@@ -48,6 +50,9 @@ pub async fn sql_file_recent_touch(state: State<'_, AppState>, path: String) -> 
 
 /// 从最近文件移除（打开失败确认失效后调用）。
 #[tauri::command]
-pub async fn sql_file_recent_remove(state: State<'_, AppState>, path: String) -> Result<(), String> {
+pub async fn sql_file_recent_remove(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
     state.recent_files.remove(&path)
 }

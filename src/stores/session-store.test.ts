@@ -169,7 +169,10 @@ describe("session-store", () => {
     await useSessionStore.getState().executeSql("SELECT 1");
     expect(mockInvoke).toHaveBeenCalledWith(
       "transaction_query",
-      expect.objectContaining({ id: "c1", sessionId: "tx-1" }),
+      expect.objectContaining({
+        id: "c1",
+        input: expect.objectContaining({ sessionId: "tx-1" }),
+      }),
     );
     expect(activeTab().rowSet?.rows).toEqual([["1"]]);
 
@@ -380,13 +383,15 @@ describe("session-store", () => {
       .browseSetFilters(tabId, [{ column: "id", op: "gt", value: "10" }]);
     expect(mockInvoke).toHaveBeenLastCalledWith("db_browse_table", {
       id: "c1",
-      database: "app",
-      schema: null,
-      table: "users",
-      filters: [{ column: "id", op: "gt", value: "10" }],
-      order: null,
-      limit: 1000,
-      offset: 0,
+      input: {
+        database: "app",
+        schema: null,
+        table: "users",
+        filters: [{ column: "id", op: "gt", value: "10" }],
+        order: null,
+        limit: 1000,
+        offset: 0,
+      },
     });
     expect(activeTab().browse?.filters).toHaveLength(1);
 
@@ -397,9 +402,11 @@ describe("session-store", () => {
     expect(mockInvoke).toHaveBeenLastCalledWith(
       "db_browse_table",
       expect.objectContaining({
-        filters: [{ column: "id", op: "gt", value: "10" }],
-        order: { column: "id", descending: true },
-        offset: 0,
+        input: expect.objectContaining({
+          filters: [{ column: "id", op: "gt", value: "10" }],
+          order: { column: "id", descending: true },
+          offset: 0,
+        }),
       }),
     );
 
@@ -407,7 +414,9 @@ describe("session-store", () => {
     await useSessionStore.getState().browseSetPage(tabId, 2);
     expect(mockInvoke).toHaveBeenLastCalledWith(
       "db_browse_table",
-      expect.objectContaining({ offset: 2000, limit: 1000 }),
+      expect.objectContaining({
+        input: expect.objectContaining({ offset: 2000, limit: 1000 }),
+      }),
     );
     expect(activeTab().browse?.page).toBe(2);
 
@@ -415,7 +424,9 @@ describe("session-store", () => {
     await useSessionStore.getState().browseSetPageSize(tabId, 100);
     expect(mockInvoke).toHaveBeenLastCalledWith(
       "db_browse_table",
-      expect.objectContaining({ limit: 100, offset: 0 }),
+      expect.objectContaining({
+        input: expect.objectContaining({ limit: 100, offset: 0 }),
+      }),
     );
     expect(activeTab().browse?.page).toBe(0);
     expect(activeTab().browse?.total).toBe(100);
@@ -453,13 +464,15 @@ describe("session-store", () => {
     await useSessionStore.getState().selectTable("user`s");
     expect(mockInvoke).toHaveBeenCalledWith("db_browse_table", {
       id: "c1",
-      database: "app",
-      schema: null,
-      table: "user`s",
-      filters: [],
-      order: null,
-      limit: 1000,
-      offset: 0,
+      input: {
+        database: "app",
+        schema: null,
+        table: "user`s",
+        filters: [],
+        order: null,
+        limit: 1000,
+        offset: 0,
+      },
     });
     // 表预览在新 tab 中进行，不影响原 tab
     const tab = activeTab();
@@ -834,13 +847,15 @@ describe("session-store", () => {
     await useSessionStore.getState().selectTable('order"items');
     expect(mockInvoke).toHaveBeenCalledWith("db_browse_table", {
       id: "c1",
-      database: "app",
-      schema: "audit",
-      table: 'order"items',
-      filters: [],
-      order: null,
-      limit: 1000,
-      offset: 0,
+      input: {
+        database: "app",
+        schema: "audit",
+        table: 'order"items',
+        filters: [],
+        order: null,
+        limit: 1000,
+        offset: 0,
+      },
     });
   });
 

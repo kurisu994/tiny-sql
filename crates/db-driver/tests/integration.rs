@@ -230,11 +230,19 @@ async fn session_pins_connection_and_commits_or_rolls_back() {
     let mut session = driver.begin_session().await.expect("begin_session 失败");
     assert!(session.in_transaction());
     let first = session
-        .query("SELECT CONNECTION_ID()", read_opts(), CancellationToken::new())
+        .query(
+            "SELECT CONNECTION_ID()",
+            read_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect("session 查询失败");
     let second = session
-        .query("SELECT CONNECTION_ID()", read_opts(), CancellationToken::new())
+        .query(
+            "SELECT CONNECTION_ID()",
+            read_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect("session 查询失败");
     assert_eq!(
@@ -286,7 +294,10 @@ async fn session_pins_connection_and_commits_or_rolls_back() {
     // 无事务时 commit / rollback 返回稳定错误
     let missing = session.commit().await.expect_err("无事务 commit 必须报错");
     assert!(matches!(missing, DriverError::SessionNotInTransaction));
-    let missing = session.rollback().await.expect_err("无事务 rollback 必须报错");
+    let missing = session
+        .rollback()
+        .await
+        .expect_err("无事务 rollback 必须报错");
     assert!(matches!(missing, DriverError::SessionNotInTransaction));
     session.close().await;
 
@@ -376,7 +387,11 @@ async fn browse_table_filters_sorts_and_paginates() {
         .expect("建表失败");
     let mut values = Vec::new();
     for i in 1..=25 {
-        let note = if i % 5 == 0 { "NULL" } else { &format!("'n{i}'") };
+        let note = if i % 5 == 0 {
+            "NULL"
+        } else {
+            &format!("'n{i}'")
+        };
         values.push(format!("({i}, 'name{i}', {note})"));
     }
     driver
@@ -405,7 +420,10 @@ async fn browse_table_filters_sorts_and_paginates() {
             "tx_browse_probe",
             &TableBrowseQuery {
                 filters: vec![],
-                order: Some(TableOrder { column: "id".to_string(), descending: false }),
+                order: Some(TableOrder {
+                    column: "id".to_string(),
+                    descending: false,
+                }),
                 limit: 10,
                 offset: 0,
             },
@@ -426,7 +444,10 @@ async fn browse_table_filters_sorts_and_paginates() {
             "tx_browse_probe",
             &TableBrowseQuery {
                 filters: vec![],
-                order: Some(TableOrder { column: "id".to_string(), descending: false }),
+                order: Some(TableOrder {
+                    column: "id".to_string(),
+                    descending: false,
+                }),
                 limit: 10,
                 offset: 10,
             },
@@ -447,7 +468,10 @@ async fn browse_table_filters_sorts_and_paginates() {
                     op: FilterOp::Gt,
                     value: "20".to_string(),
                 }],
-                order: Some(TableOrder { column: "id".to_string(), descending: true }),
+                order: Some(TableOrder {
+                    column: "id".to_string(),
+                    descending: true,
+                }),
                 limit: 10,
                 offset: 0,
             },
@@ -466,8 +490,16 @@ async fn browse_table_filters_sorts_and_paginates() {
             "tx_browse_probe",
             &TableBrowseQuery {
                 filters: vec![
-                    TableFilter { column: "note".to_string(), op: FilterOp::IsNull, value: String::new() },
-                    TableFilter { column: "name".to_string(), op: FilterOp::Like, value: "name%".to_string() },
+                    TableFilter {
+                        column: "note".to_string(),
+                        op: FilterOp::IsNull,
+                        value: String::new(),
+                    },
+                    TableFilter {
+                        column: "name".to_string(),
+                        op: FilterOp::Like,
+                        value: "name%".to_string(),
+                    },
                 ],
                 order: None,
                 limit: 10,
@@ -572,10 +604,16 @@ async fn list_indexes_and_constraints() {
         .list_indexes(db, "tx_meta_child")
         .await
         .expect("list_indexes 失败");
-    let primary = indexes.iter().find(|i| i.index_type == "PRIMARY").expect("应有主键索引");
+    let primary = indexes
+        .iter()
+        .find(|i| i.index_type == "PRIMARY")
+        .expect("应有主键索引");
     assert_eq!(primary.columns, vec!["id"]);
     assert!(primary.unique);
-    let idx_name = indexes.iter().find(|i| i.name == "idx_name").expect("应有 idx_name");
+    let idx_name = indexes
+        .iter()
+        .find(|i| i.name == "idx_name")
+        .expect("应有 idx_name");
     assert_eq!(idx_name.index_type, "INDEX");
     assert!(!idx_name.unique);
     let composite = indexes
@@ -613,11 +651,19 @@ async fn list_indexes_and_constraints() {
     assert_eq!(uq.columns, vec!["code"]);
 
     driver
-        .query_with_options("DROP TABLE tx_meta_child", write_opts(), CancellationToken::new())
+        .query_with_options(
+            "DROP TABLE tx_meta_child",
+            write_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect("清理失败");
     driver
-        .query_with_options("DROP TABLE tx_meta_parent", write_opts(), CancellationToken::new())
+        .query_with_options(
+            "DROP TABLE tx_meta_parent",
+            write_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect("清理失败");
     driver.close().await;
@@ -660,7 +706,10 @@ async fn query_many_executes_statements_and_stops_on_error() {
         )
         .await
         .expect("多语句应返回部分结果而非整体失败");
-    assert!(matches!(result.statements[0].outcome, db_driver::StatementOutcome::Ok { .. }));
+    assert!(matches!(
+        result.statements[0].outcome,
+        db_driver::StatementOutcome::Ok { .. }
+    ));
     assert!(matches!(
         &result.statements[1].outcome,
         db_driver::StatementOutcome::Error { key, .. } if key == "error.driver.query_failed"
@@ -683,11 +732,7 @@ async fn query_many_executes_statements_and_stops_on_error() {
 
     // 含事务语句 → 整体拒绝
     let error = driver
-        .query_many(
-            "SELECT 1; COMMIT",
-            write_opts(),
-            CancellationToken::new(),
-        )
+        .query_many("SELECT 1; COMMIT", write_opts(), CancellationToken::new())
         .await
         .expect_err("事务语句必须拒绝");
     assert!(matches!(error, DriverError::TxRequiresSession));

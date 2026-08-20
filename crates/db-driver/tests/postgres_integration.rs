@@ -7,7 +7,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use bigdecimal::BigDecimal;
-use db_driver::{Driver, DriverError, MetadataScope, PostgresDriver, QueryOptions, QUERY_RESULT_LIMIT};
+use db_driver::{
+    Driver, DriverError, MetadataScope, PostgresDriver, QueryOptions, QUERY_RESULT_LIMIT,
+};
 use tokio_util::sync::CancellationToken;
 
 fn postgres_url() -> String {
@@ -242,11 +244,19 @@ async fn postgres_session_pins_connection_and_handles_aborted() {
     let mut session = driver.begin_session().await.expect("begin_session 失败");
     assert!(session.in_transaction());
     let first = session
-        .query("SELECT pg_backend_pid()", read_opts(), CancellationToken::new())
+        .query(
+            "SELECT pg_backend_pid()",
+            read_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect("session 查询失败");
     let second = session
-        .query("SELECT pg_backend_pid()", read_opts(), CancellationToken::new())
+        .query(
+            "SELECT pg_backend_pid()",
+            read_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect("session 查询失败");
     assert_eq!(
@@ -274,7 +284,11 @@ async fn postgres_session_pins_connection_and_handles_aborted() {
         .expect("手写 BEGIN 应允许且免写确认");
     assert!(session.in_transaction());
     let aborted = session
-        .query("SELECT * FROM table_not_exists_12345", read_opts(), CancellationToken::new())
+        .query(
+            "SELECT * FROM table_not_exists_12345",
+            read_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect_err("不存在的表必须报错");
     assert!(matches!(aborted, DriverError::QueryFailed(_)));
@@ -358,7 +372,11 @@ async fn postgres_browse_table_filters_sorts_and_paginates() {
         .expect("建表失败");
     let mut values = Vec::new();
     for i in 1..=15 {
-        let note = if i % 5 == 0 { "NULL".to_string() } else { format!("'n{i}'") };
+        let note = if i % 5 == 0 {
+            "NULL".to_string()
+        } else {
+            format!("'n{i}'")
+        };
         values.push(format!("({i}, 'name{i}', {note})"));
     }
     driver
@@ -389,7 +407,10 @@ async fn postgres_browse_table_filters_sorts_and_paginates() {
                     op: FilterOp::Gt,
                     value: "10".to_string(),
                 }],
-                order: Some(TableOrder { column: "id".to_string(), descending: true }),
+                order: Some(TableOrder {
+                    column: "id".to_string(),
+                    descending: true,
+                }),
                 limit: 10,
                 offset: 0,
             },
@@ -413,7 +434,10 @@ async fn postgres_browse_table_filters_sorts_and_paginates() {
                     op: FilterOp::Like,
                     value: "name1%".to_string(),
                 }],
-                order: Some(TableOrder { column: "id".to_string(), descending: false }),
+                order: Some(TableOrder {
+                    column: "id".to_string(),
+                    descending: false,
+                }),
                 limit: 5,
                 offset: 0,
             },
@@ -524,7 +548,10 @@ async fn postgres_list_indexes_and_constraints() {
         .list_indexes(&scope, "tx_meta_child")
         .await
         .expect("list_indexes 失败");
-    let primary = indexes.iter().find(|i| i.index_type == "PRIMARY").expect("应有主键索引");
+    let primary = indexes
+        .iter()
+        .find(|i| i.index_type == "PRIMARY")
+        .expect("应有主键索引");
     assert_eq!(primary.columns, vec!["id"]);
     let idx_name = indexes
         .iter()
@@ -556,8 +583,7 @@ async fn postgres_list_indexes_and_constraints() {
         fk.reference
     );
     let has_name_check = constraints.iter().any(|c| {
-        c.constraint_type == "CHECK"
-            && c.reference.as_deref().is_some_and(|r| r.contains("name"))
+        c.constraint_type == "CHECK" && c.reference.as_deref().is_some_and(|r| r.contains("name"))
     });
     assert!(
         has_name_check,
@@ -565,11 +591,19 @@ async fn postgres_list_indexes_and_constraints() {
     );
 
     driver
-        .query_with_options("DROP TABLE tx_meta_child", write_opts(), CancellationToken::new())
+        .query_with_options(
+            "DROP TABLE tx_meta_child",
+            write_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect("清理失败");
     driver
-        .query_with_options("DROP TABLE tx_meta_parent", write_opts(), CancellationToken::new())
+        .query_with_options(
+            "DROP TABLE tx_meta_parent",
+            write_opts(),
+            CancellationToken::new(),
+        )
         .await
         .expect("清理失败");
     driver.close().await;
@@ -607,9 +641,18 @@ async fn postgres_query_many_handles_dollar_quotes_and_errors() {
         )
         .await
         .expect("多语句应返回部分结果");
-    assert!(matches!(result.statements[0].outcome, db_driver::StatementOutcome::Ok { .. }));
-    assert!(matches!(result.statements[1].outcome, db_driver::StatementOutcome::Error { .. }));
-    assert!(matches!(result.statements[2].outcome, db_driver::StatementOutcome::Skipped));
+    assert!(matches!(
+        result.statements[0].outcome,
+        db_driver::StatementOutcome::Ok { .. }
+    ));
+    assert!(matches!(
+        result.statements[1].outcome,
+        db_driver::StatementOutcome::Error { .. }
+    ));
+    assert!(matches!(
+        result.statements[2].outcome,
+        db_driver::StatementOutcome::Skipped
+    ));
 
     driver.close().await;
 }

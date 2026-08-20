@@ -31,6 +31,14 @@ enum DirtyConnPolicy {
     Keep,
 }
 
+/// 行流抓取策略（PG 专用）：上限、服务端封顶标记与污染连接处置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FetchPolicy {
+    limit: usize,
+    server_capped: bool,
+    dirty: DirtyConnPolicy,
+}
+
 /// PostgreSQL driver。
 ///
 /// 主连接池负责业务查询；独立 control pool 通过 `pg_cancel_backend` 取消服务端
@@ -350,12 +358,14 @@ impl PostgresDriver {
         .map_err(query_failed)?;
         Ok(rows
             .into_iter()
-            .map(|(name, constraint_type, columns, definition)| ConstraintMeta {
-                name,
-                constraint_type,
-                columns: columns.unwrap_or_default(),
-                reference: definition,
-            })
+            .map(
+                |(name, constraint_type, columns, definition)| ConstraintMeta {
+                    name,
+                    constraint_type,
+                    columns: columns.unwrap_or_default(),
+                    reference: definition,
+                },
+            )
             .collect())
     }
 
@@ -407,11 +417,11 @@ impl PostgresDriver {
                     FetchPolicy {
                         limit,
                         server_capped,
+                        dirty: DirtyConnPolicy::Discard,
                     },
                     &mut conn,
                     backend_pid,
                     cancel_token,
-                    DirtyConnPolicy::Discard,
                 )
                 .await
                 .map(|outcome| outcome.row_set)
@@ -435,11 +445,11 @@ impl PostgresDriver {
                         FetchPolicy {
                             limit: prepared.row_limit,
                             server_capped: false,
+                            dirty: DirtyConnPolicy::Discard,
                         },
                         &mut conn,
                         backend_pid,
                         cancel_token,
-                        DirtyConnPolicy::Discard,
                     )
                     .await
                     .map(|outcome| outcome.row_set)
@@ -459,8 +469,7 @@ impl PostgresDriver {
         if cancel_token.is_cancelled() {
             return Err(DriverError::QueryCancelled);
         }
-        let (statements, prepared_list) =
-            prepare_statements(sql, options, SqlDialect::PostgreSql)?;
+        let (statements, prepared_list) = prepare_statements(sql, options, SqlDialect::PostgreSql)?;
         let driver = self.clone();
         query_many_with(
             statements,
@@ -493,9 +502,8 @@ impl PostgresDriver {
             .filter(|value| !value.trim().is_empty())
             .ok_or(DriverError::SchemaRequired)?;
         let from = format!("{}.{}", quote_pg_ident(schema), quote_pg_ident(table));
-        let (where_sql, binds) = build_filter_clause(&query.filters, quote_pg_ident, |n| {
-            format!("${n}")
-        });
+        let (where_sql, binds) =
+            build_filter_clause(&query.filters, quote_pg_ident, |n| format!("${n}"));
         let order_sql = query.order.as_ref().map_or(String::new(), |order| {
             format!(
                 " ORDER BY {} {}",
@@ -630,7 +638,6 @@ impl PostgresDriver {
         conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
         backend_pid: i32,
         cancel_token: CancellationToken,
-        dirty_policy: DirtyConnPolicy,
     ) -> Result<FetchOutcome, DriverError> {
         let mut rows = sqlx::query(sql).fetch(&mut **conn);
         let mut data: Vec<Vec<Option<String>>> = Vec::new();
@@ -642,7 +649,7 @@ impl PostgresDriver {
                 _ = cancel_token.cancelled() => {
                     drop(rows);
                     self.cancel_backend(backend_pid).await;
-                    if dirty_policy == DirtyConnPolicy::Discard {
+                    if policy.dirty == DirtyConnPolicy::Discard {
                         conn.close_on_drop();
                     }
                     return Err(DriverError::QueryCancelled);
@@ -652,7 +659,7 @@ impl PostgresDriver {
                         Ok(row) => row,
                         Err(_) if cancel_token.is_cancelled() => {
                             drop(rows);
-                            if dirty_policy == DirtyConnPolicy::Discard {
+                            if policy.dirty == DirtyConnPolicy::Discard {
                                 conn.close_on_drop();
                             }
                             return Err(DriverError::QueryCancelled);
@@ -677,7 +684,7 @@ impl PostgresDriver {
             drop(rows);
             self.cancel_backend(backend_pid).await;
             conn_dirty = true;
-            if dirty_policy == DirtyConnPolicy::Discard {
+            if policy.dirty == DirtyConnPolicy::Discard {
                 conn.close_on_drop();
             }
         }
@@ -972,11 +979,11 @@ impl DriverSession for PostgresSession {
                             FetchPolicy {
                                 limit,
                                 server_capped,
+                                dirty: DirtyConnPolicy::Keep,
                             },
                             conn,
                             self.backend_pid,
                             cancel_token,
-                            DirtyConnPolicy::Keep,
                         )
                         .await
                         .map(|outcome| (outcome.row_set, outcome.conn_dirty))
@@ -1003,11 +1010,11 @@ impl DriverSession for PostgresSession {
                                 FetchPolicy {
                                     limit: options.effective_limit(),
                                     server_capped: false,
+                                    dirty: DirtyConnPolicy::Keep,
                                 },
                                 conn,
                                 self.backend_pid,
                                 cancel_token,
-                                DirtyConnPolicy::Keep,
                             )
                             .await
                             .map(|outcome| (outcome.row_set, outcome.conn_dirty))

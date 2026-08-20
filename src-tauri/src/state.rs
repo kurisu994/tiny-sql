@@ -136,9 +136,7 @@ impl Driver for ActiveDriver {
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, TableBrowseResult> {
         match self {
-            Self::MySql(driver) => {
-                Driver::browse_table(driver, scope, table, query, cancel_token)
-            }
+            Self::MySql(driver) => Driver::browse_table(driver, scope, table, query, cancel_token),
             Self::PostgreSql(driver) => {
                 Driver::browse_table(driver, scope, table, query, cancel_token)
             }
@@ -153,9 +151,7 @@ impl Driver for ActiveDriver {
     ) -> DriverFuture<'a, db_driver::MultiQueryResult> {
         match self {
             Self::MySql(driver) => Driver::query_many(driver, sql, options, cancel_token),
-            Self::PostgreSql(driver) => {
-                Driver::query_many(driver, sql, options, cancel_token)
-            }
+            Self::PostgreSql(driver) => Driver::query_many(driver, sql, options, cancel_token),
         }
     }
 

@@ -4,8 +4,8 @@
 //! 不长持注册表锁），再调 db-driver。连接未打开返回 `error.connection.not_open`。
 
 use db_driver::{
-    ColumnMeta, DatabaseMeta, Driver, DriverError, DriverKind, MetadataScope, QueryOptions,
-    RowSet, SchemaMeta, TableBrowseQuery, TableBrowseResult, TableFilter, TableMeta, TableOrder,
+    ColumnMeta, DatabaseMeta, Driver, DriverError, DriverKind, MetadataScope, QueryOptions, RowSet,
+    SchemaMeta, TableBrowseQuery, TableBrowseResult, TableFilter, TableMeta, TableOrder,
     QUERY_RESULT_LIMIT, TABLE_PREVIEW_LIMIT,
 };
 use serde::Serialize;
@@ -46,7 +46,10 @@ impl From<DriverError> for QueryCommandError {
 }
 
 /// 从注册表取出指定连接的 driver 句柄（克隆，brief lock）。
-pub(crate) async fn driver_of(state: &State<'_, AppState>, id: &str) -> Result<ActiveDriver, String> {
+pub(crate) async fn driver_of(
+    state: &State<'_, AppState>,
+    id: &str,
+) -> Result<ActiveDriver, String> {
     let conns = state.connections.lock().await;
     conns
         .get(id)
@@ -278,6 +281,19 @@ pub(crate) fn record_history(
     let _ = state.history.record(entry);
 }
 
+/// 浏览查询输入（FR-242）：列筛选 / 排序 / 分页。打包结构以满足 command 参数约束。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseTableInput {
+    pub database: String,
+    pub schema: Option<String>,
+    pub table: String,
+    pub filters: Vec<TableFilter>,
+    pub order: Option<TableOrder>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
 /// 浏览表数据：服务端筛选 / 排序 / 分页（FR-242）。
 ///
 /// 列名白名单在这里强制：filter/order 的列必须属于该表已加载列，杜绝任意标识符
@@ -286,15 +302,18 @@ pub(crate) fn record_history(
 pub async fn db_browse_table(
     state: State<'_, AppState>,
     id: String,
-    database: String,
-    schema: Option<String>,
-    table: String,
-    filters: Vec<TableFilter>,
-    order: Option<TableOrder>,
-    limit: Option<u32>,
-    offset: Option<u32>,
+    input: BrowseTableInput,
 ) -> Result<TableBrowseResult, QueryCommandError> {
     let query_id = Uuid::new_v4().to_string();
+    let BrowseTableInput {
+        database,
+        schema,
+        table,
+        filters,
+        order,
+        limit,
+        offset,
+    } = input;
     // 与 close/reconnect 串行化「取 driver + 注册 token」（同 db_query）
     let (driver, token) = {
         let lifecycle = state.connection_lifecycle(&id);
@@ -338,7 +357,9 @@ pub async fn db_browse_table(
             &TableBrowseQuery {
                 filters,
                 order,
-                limit: limit.map(|value| value as usize).unwrap_or(TABLE_PREVIEW_LIMIT),
+                limit: limit
+                    .map(|value| value as usize)
+                    .unwrap_or(TABLE_PREVIEW_LIMIT),
                 offset: offset.map(|value| value as usize).unwrap_or(0),
             },
             token,
@@ -401,14 +422,7 @@ pub async fn db_query_many(
                 .all(|stmt| !matches!(stmt.outcome, db_driver::StatementOutcome::Error { .. }))
         })
         .unwrap_or(false);
-    record_history(
-        &state,
-        &id,
-        &driver,
-        &sql,
-        schema.as_deref(),
-        success,
-    );
+    record_history(&state, &id, &driver, &sql, schema.as_deref(), success);
     result.map_err(QueryCommandError::from)
 }
 

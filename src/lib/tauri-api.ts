@@ -412,13 +412,15 @@ export const dbApi = {
   browseTable: (input: BrowseTableInput) =>
     invoke<TableBrowseResult>("db_browse_table", {
       id: input.id,
-      database: input.database,
-      schema: input.schema ?? null,
-      table: input.table,
-      filters: input.filters,
-      order: input.order ?? null,
-      limit: input.limit ?? null,
-      offset: input.offset ?? null,
+      input: {
+        database: input.database,
+        schema: input.schema ?? null,
+        table: input.table,
+        filters: input.filters,
+        order: input.order ?? null,
+        limit: input.limit ?? null,
+        offset: input.offset ?? null,
+      },
     }),
   queryMany: (id: string, sql: string, options: QueryOptions = {}) =>
     invoke<MultiQueryResult>("db_query_many", {
@@ -525,12 +527,14 @@ export const transactionApi = {
   ) =>
     invoke<TxQueryResult>("transaction_query", {
       id,
-      sessionId,
-      sql,
-      queryId: options.queryId ?? null,
-      rowLimit: options.rowLimit ?? null,
-      allowWrite: options.allowWrite ?? false,
-      schema: options.schema ?? null,
+      input: {
+        sessionId,
+        sql,
+        queryId: options.queryId ?? null,
+        rowLimit: options.rowLimit ?? null,
+        allowWrite: options.allowWrite ?? false,
+        schema: options.schema ?? null,
+      },
     }),
   commit: (id: string, sessionId: string) =>
     invoke<void>("transaction_commit", { id, sessionId }),

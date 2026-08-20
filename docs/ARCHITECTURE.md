@@ -35,8 +35,9 @@ tiny-sql/
 │   │   └── src/lib.rs
 │   └── db-driver/                 # 数据库 driver 抽象 crate
 │       ├── Cargo.toml
-│       ├── src/lib.rs             # 公共契约 + MySqlDriver + SQL guard
-│       ├── src/postgres.rs        # PostgresDriver metadata/query/cancel
+│       ├── src/lib.rs             # 公共契约 + MySqlDriver + SQL guard + 多语句拆分器
+│       ├── src/postgres.rs        # PostgresDriver metadata/query/cancel/browse/session
+│       ├── src/session.rs         # DriverSession 独占 session 契约（FR-244）
 │       └── tests/                 # MySQL/PostgreSQL 本地 integration（#[ignore]）
 ├── src-tauri/                     # Tauri 壳（Cargo.toml 是 workspace 成员）
 │   ├── Cargo.toml                 # 依赖 ssh-multihop + db-driver
@@ -48,7 +49,9 @@ tiny-sql/
 │       ├── lib.rs                # Tauri 入口 + 全部 #[tauri::command] 注册
 │       ├── commands/             # tauri command 层
 │       │   ├── connection.rs     # connection_create / list / update / delete / test / open / reconnect / close
-│       │   ├── query.rs          # db_list_* / db_query / db_query_cancel + SQL 历史记录
+│       │   ├── query.rs          # db_list_* / db_query / db_query_many / db_browse_table / db_query_cancel + SQL 历史记录
+│       │   ├── transaction.rs    # transaction_begin / query / commit / rollback / close（FR-244）
+│       │   ├── sql_file.rs       # sql_file_read / write / recent_*（FR-240）
 │       │   ├── security.rs       # security_status / setup / unlock / lock / disable / reset（FR-102）
 │       │   ├── history.rs        # history_list / history_clear（FR-106）
 │       │   ├── export.rs         # db_export_query（CSV / Excel 流式导出，FR-107）
@@ -57,6 +60,7 @@ tiny-sql/
 │       │   ├── encryption.rs     # AES-GCM 加密 + master key / Argon2id 主密码 KDF
 │       │   ├── store.rs          # 连接配置序列化（扁平 Vec<StoredConnection>，v1/v2 envelope 嗅探）
 │       │   ├── history.rs        # SQL 历史加密落盘（history.enc，100 条上限）
+│       │   ├── recent_files.rs   # 最近 SQL 文件列表（recent_files.json 明文，FR-240）
 │       │   └── ssh_known_hosts.rs # 自有 known_hosts.json
 │       ├── security.rs           # SecurityManager（主密码状态机 / 迁移回滚 / secrets map）
 │       ├── tofu.rs               # SshTofuManager（TOFU 决策通道）
@@ -439,8 +443,39 @@ pub trait Driver: Send + Sync {
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> DriverFuture<'a, RowSet>;
 
+    /// v0.3（FR-241）：列出表的索引与约束
+    fn list_indexes<'a>(&'a self, scope: &'a MetadataScope, table: &'a str)
+        -> DriverFuture<'a, Vec<IndexMeta>>;
+    fn list_constraints<'a>(&'a self, scope: &'a MetadataScope, table: &'a str)
+        -> DriverFuture<'a, Vec<ConstraintMeta>>;
+
+    /// v0.3（FR-242）：服务端筛选 / 排序 / 分页浏览表数据；
+    /// 列白名单在 command 层强制，driver 负责标识符转义 + 值参数化
+    fn browse_table<'a>(&'a self, scope: &'a MetadataScope, table: &'a str,
+        query: &'a TableBrowseQuery, cancel_token: CancellationToken)
+        -> DriverFuture<'a, TableBrowseResult>;
+
+    /// v0.3（FR-244）：建立独占 session（已 BEGIN），事务内语句固定同一物理连接
+    fn begin_session(&self) -> DriverFuture<'_, Box<dyn DriverSession>>;
+
+    /// v0.3（FR-243）：多语句脚本拆分逐条执行，首错/取消中止；事务语句整体拒绝
+    fn query_many<'a>(&'a self, sql: &'a str, options: QueryOptions,
+        cancel_token: CancellationToken) -> DriverFuture<'a, MultiQueryResult>;
+
     /// 关闭主 pool 和 control pool
     fn close(&self) -> DriverCloseFuture<'_>;
+}
+
+/// v0.3（FR-244）：绑定单条物理连接的独占 session
+pub trait DriverSession: Send {
+    fn query<'a>(&'a mut self, sql: &'a str, options: QueryOptions,
+        cancel_token: CancellationToken) -> DriverFuture<'a, RowSet>;
+    fn commit(&mut self) -> DriverFuture<'_, ()>;
+    fn rollback(&mut self) -> DriverFuture<'_, ()>;
+    /// 结束 session：未提交事务先回滚再归还/销毁连接；幂等
+    fn close(&mut self) -> DriverCloseFuture<'_>;
+    /// 含 PostgreSQL aborted 状态（需 ROLLBACK 恢复）
+    fn in_transaction(&self) -> bool;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -463,7 +498,37 @@ pub enum DriverError {
     DatabaseSwitchRequired,
     #[error("error.driver.schema_required")]
     SchemaRequired,
+    // v0.3：事务控制语句必须走独占 session
+    #[error("error.driver.tx_requires_session")]
+    TxRequiresSession,
+    #[error("error.driver.session_not_in_transaction")]
+    SessionNotInTransaction,
+    #[error("error.driver.session_broken")]
+    SessionBroken,
 }
+
+**v0.3 扩展点说明**：
+
+- **独占 session 事务模型（FR-244）**：`begin_session` 从主 pool 取一条连接并立即
+  BEGIN；session 内语句通过 `&mut self` 编译期互斥串行。MySQL 结束用
+  `RESET CONNECTION`（5.7.3+）一次性清理会话状态归还 pool；PostgreSQL 用
+  `ROLLBACK` + `RESET ALL; CLOSE ALL; DISCARD TEMP`（刻意避开 `DISCARD ALL`，
+  它会清空 sqlx 的 prepared statement cache）。清理失败统一 `close_on_drop`
+  销毁连接，由服务端在连接关闭时兜底回滚。事务控制语句（BEGIN/COMMIT/ROLLBACK/
+  SAVEPOINT）在 guard 单独分类：pool 路径拒绝（`tx_requires_session`），session
+  路径免写确认并跟踪 `in_transaction`（含 `COMMIT AND CHAIN` 与
+  `ROLLBACK TO SAVEPOINT` 边界）。事务/会话管理语句必须走 text/simple protocol
+  （MySQL prepared 协议报 1295），实现用 `sqlx::raw_sql` + `Executor::execute`
+  规避装箱 Future 的 HRTB 推导限制。PG session 取消/客户端截断后先发 `SELECT 1`
+  验证协议干净再继续，验证失败销毁连接报 `session_broken`。
+- **多语句脚本（FR-243）**：`split_statements` 是方言状态机拆分器——字符串、
+  标识符引号、行/块注释与 dollar-quoted body 内的分号不切；未闭合即 `InvalidSql`
+  拒绝。`query_many` 先逐条过 guard 预检（任一失败/写未确认/含事务语句整体拒绝，
+  不执行任何语句），再顺序执行，首错或取消中止、后续语句标记 `skipped`。
+- **服务端浏览（FR-242）**：`browse_table` 生成 WHERE（列引用转义 + 值参数化，
+  数值智能绑定适配 PG 严格类型）/ ORDER BY（列白名单）/ LIMIT+1 / OFFSET；
+  COUNT 走独立连接并行查询，5s 超时降级 `total = None`。
+
 ```
 
 `DatabaseMeta.is_current` 与 `SchemaMeta.is_default` 是不同语义；`MetadataScope` 不把 MySQL 的 database/schema 同义关系强加给 PostgreSQL。MySQL scope 只携带 database，PostgreSQL scope 必须同时携带当前 database 与 schema。PostgreSQL 无法在一条连接上切换 database，请求非当前 database 时返回 `error.driver.database_switch_required`，由应用层重建目标连接。
@@ -531,6 +596,16 @@ impl OpenConnection {
 | `db_list_columns` | `(id, database, schema?, table)` | `Vec<ColumnMeta>` | 列出 column |
 | `db_query` | `(id, sql, query_id?, row_limit?, allow_write?, schema?)` | `RowSet` | 执行 SQL，结束时自动写入 SQL 历史（FR-106） |
 | `db_query_cancel` | `query_id` | `()` | 取消正在跑的 query |
+| `db_query_many` | `(id, sql, query_id?, allow_write?, schema?)` | `MultiQueryResult` | 多语句脚本逐条执行（FR-243）；首错/取消中止，后续 skipped |
+| `db_browse_table` | `(id, database, schema?, table, filters, order?, limit?, offset?)` | `TableBrowseResult` | 服务端筛选/排序/分页浏览表数据（FR-242）；列名白名单强制校验 |
+| `db_list_indexes` | `(id, database, schema?, table)` | `Vec<IndexMeta>` | 列出表的索引（FR-241） |
+| `db_list_constraints` | `(id, database, schema?, table)` | `Vec<ConstraintMeta>` | 列出表的约束（FR-241） |
+| `transaction_begin` | `(id)` | `session_id` | 建立独占 session 并 BEGIN（FR-244） |
+| `transaction_query` | `(id, session_id, sql, query_id?, row_limit?, allow_write?, schema?)` | `TxQueryResult` | 事务 session 内执行 SQL，返回最新事务状态 |
+| `transaction_commit` / `transaction_rollback` | `(id, session_id)` | `()` | 提交 / 回滚事务 |
+| `transaction_close` | `(id, session_id)` | `()` | 结束 session（未提交自动回滚）；连接关闭/重连时后端统一清理 |
+| `sql_file_read` / `sql_file_write` | `(path, content?)` | `String` / `()` | SQL 文件 UTF-8 读写（8MB 上限、原子替换，FR-240） |
+| `sql_file_recent_list` / `sql_file_recent_touch` / `sql_file_recent_remove` | `(path?)` | `Vec<RecentFileEntry>` / `()` | 最近文件列表（明文 recent_files.json，仅路径+时间） |
 | `db_export_query` | `(id, sql, format, path)` | `ExportResult` | 重新执行只读 SQL 并流式写文件（CSV/XLSX，FR-107） |
 | `security_status` | - | `SecurityStatusPayload` | 查询主密码状态（disabled/locked/unlocked）与是否可持久化 passphrase |
 | `security_setup` | `password` | `()` | 设置主密码并把现有配置迁移到 v2 envelope（FR-102） |
@@ -846,6 +921,10 @@ ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握�
 ### 5.3 SQL 历史加密（FR-106）
 
 `db_query` 结束后（成功 / 失败都记）由后端写入 `history.enc`：扁平 `Vec<HistoryEntry>` 整体加密，最多保留最近 100 条，单条 SQL 文本截断到 4000 字符。加密器与连接配置同一套（v1 本地 key / v2 派生 key），Locked 状态不可读写。前端只读列表与显式清空；历史不进入日志，导出功能不读取历史。
+
+### 5.4 最近 SQL 文件列表（FR-240）
+
+`recent_files.json` 明文存储（最多 20 条，置顶去重，原子写入）：只记录用户显式打开 / 保存的文件路径与时间戳。路径不属于敏感信息（与编辑器最近文件惯例一致）；SQL 内容永不随列表落盘。打开失败（文件已删除 / 无权限）时前端调 `sql_file_recent_remove` 清理失效项。
 
 ---
 

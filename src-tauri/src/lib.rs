@@ -78,8 +78,7 @@ pub fn run() {
                 .map_err(std::io::Error::other)?;
             let history =
                 config::history::HistoryStore::new(app_data_dir.clone(), security.clone());
-            let recent_files =
-                config::recent_files::RecentFilesStore::new(app_data_dir.clone());
+            let recent_files = config::recent_files::RecentFilesStore::new(app_data_dir.clone());
             let known_hosts = config::ssh_known_hosts::SshKnownHostsStore::new(app_data_dir);
             app.manage(state::AppState::new(
                 store,

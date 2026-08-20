@@ -419,8 +419,14 @@ fn build_filter_clause(
     for filter in filters {
         let column = quote(&filter.column);
         let clause = match filter.op {
-            FilterOp::Eq | FilterOp::NotEq | FilterOp::Gt | FilterOp::GtEq | FilterOp::Lt
-            | FilterOp::LtEq | FilterOp::Like | FilterOp::NotLike => {
+            FilterOp::Eq
+            | FilterOp::NotEq
+            | FilterOp::Gt
+            | FilterOp::GtEq
+            | FilterOp::Lt
+            | FilterOp::LtEq
+            | FilterOp::Like
+            | FilterOp::NotLike => {
                 let op = match filter.op {
                     FilterOp::Eq => "=",
                     FilterOp::NotEq => "<>",
@@ -912,9 +918,7 @@ impl MySqlDriver {
             if let Some(column) = column {
                 acc.columns.push(column);
             }
-            if let (Some(schema), Some(table), Some(column)) =
-                (ref_schema, ref_table, ref_column)
-            {
+            if let (Some(schema), Some(table), Some(column)) = (ref_schema, ref_table, ref_column) {
                 acc.ref_schema = Some(schema);
                 acc.ref_table = Some(table);
                 acc.ref_columns.push(column);
@@ -927,10 +931,9 @@ impl MySqlDriver {
                 constraint_type: acc.constraint_type,
                 columns: acc.columns,
                 reference: match (acc.ref_schema, acc.ref_table) {
-                    (Some(schema), Some(table)) if !acc.ref_columns.is_empty() => Some(format!(
-                        "{schema}.{table}({})",
-                        acc.ref_columns.join(", ")
-                    )),
+                    (Some(schema), Some(table)) if !acc.ref_columns.is_empty() => {
+                        Some(format!("{schema}.{table}({})", acc.ref_columns.join(", ")))
+                    }
                     _ => None,
                 },
             })
@@ -1657,8 +1660,8 @@ fn classify_tx_control(tokens: &[String]) -> Option<TxControl> {
         "START" if second == Some("TRANSACTION") => Some(TxControl::Begin),
         "COMMIT" | "ROLLBACK" => {
             // AND CHAIN：提交/回滚后立即开启新事务，净效果仍在事务中
-            let and_chain = second == Some("AND")
-                && tokens.get(2).map(String::as_str) == Some("CHAIN");
+            let and_chain =
+                second == Some("AND") && tokens.get(2).map(String::as_str) == Some("CHAIN");
             if and_chain {
                 return Some(TxControl::Begin);
             }
@@ -1680,12 +1683,6 @@ struct PreparedSql {
     kind: PreparedSqlKind,
     /// 客户端行数上限（Write + RETURNING 场景使用）
     row_limit: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FetchPolicy {
-    limit: usize,
-    server_capped: bool,
 }
 
 /// 多语句脚本的单条执行结果（FR-243）。
@@ -1906,7 +1903,9 @@ where
             });
         }
     }
-    Ok(MultiQueryResult { statements: results })
+    Ok(MultiQueryResult {
+        statements: results,
+    })
 }
 
 /// 多语句预检：拆分 + 逐条 guard 分类；事务控制语句整体拒绝（FR-243）。
@@ -2368,7 +2367,8 @@ mod tests {
             ("RELEASE SAVEPOINT sp1", TxControl::Neutral),
         ];
         for (sql, expected) in cases {
-            let prepared = prepare_query_sql(sql, options).unwrap_or_else(|e| panic!("{sql} 应通过 guard: {e:?}"));
+            let prepared = prepare_query_sql(sql, options)
+                .unwrap_or_else(|e| panic!("{sql} 应通过 guard: {e:?}"));
             assert!(
                 matches!(prepared.kind, PreparedSqlKind::TxControl(tx) if tx == *expected),
                 "{sql} 应识别为 TxControl::{expected:?}"
@@ -2512,7 +2512,12 @@ mod tests {
         assert_eq!(parts[1], "SELECT 1");
         // $$ 空 tag
         assert_eq!(
-            split_statements("DO $$ BEGIN RAISE NOTICE 'a;b'; END $$; SELECT 2", SqlDialect::PostgreSql).unwrap().len(),
+            split_statements(
+                "DO $$ BEGIN RAISE NOTICE 'a;b'; END $$; SELECT 2",
+                SqlDialect::PostgreSql
+            )
+            .unwrap()
+            .len(),
             2
         );
         // 未闭合 → 拒绝
@@ -2523,7 +2528,9 @@ mod tests {
         assert!(split_statements(" ; ; ", SqlDialect::MySql).is_err());
         // PG 的 $1 占位符样式不误判为 dollar-quote
         assert_eq!(
-            split_statements("SELECT $1::int; SELECT 2", SqlDialect::PostgreSql).unwrap().len(),
+            split_statements("SELECT $1::int; SELECT 2", SqlDialect::PostgreSql)
+                .unwrap()
+                .len(),
             2
         );
     }
