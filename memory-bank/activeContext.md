@@ -8,6 +8,8 @@
 
 **本轮优化：结果表格序号列冻结（2026-08-20）**——用户要求 `#` 序号列不随横向滚动。ResultTable 改用 Virtuoso `customScrollParent` 复用外层统一横纵滚动容器（原生 Virtuoso scroller 会截获 sticky 上下文，直接 sticky 对行无效），表头 `sticky top-0 z-20`、表头序号 `sticky left-0 z-30`、行序号 `sticky left-0 z-10` + `bg-background`（hover 用 group 同步行色）。tsc、vitest 93/93、Next build 全绿，CHANGELOG `[Unreleased]` 已补录；待用户 dev 实测后发布 v0.2.0。
 
+**V3-CP0 启动准入已关闭（2026-08-20）**——`REQUIREMENTS.md` 补 §3.3 v0.3 范围章节（FR-240~FR-244 五项锚点，含边界与固化的设计决策），文件头快照同步到 v0.2.0 已发布；Phase 0 三项全部勾选（v0.2.0 已发布、无 RC 反馈补丁需求、需求收口）。**v0.3 Week 1（V3-T1.1 Driver 契约扩展独占 session）可以开工**。
+
 **里程碑：v0.2.0 正式版已发布（2026-08-20）**——用户实测序号列冻结无问题后执行 `just release v0.2.0`：版本号 → `0.2.0`（package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock）、CHANGELOG 切出 `0.2.0 — 2026-08-20` 段、发布提交 `4f6b07f`、main 与 tag 推送成功。Release workflow run `32325101849` 四平台 bundle + Publish 全部成功；GitHub Release `v0.2.0` 为非草稿、非预发布且是 latest，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows `.exe(.sig)`、Linux `.AppImage(.sig)` 与正式版 `latest.json`。`latest.json` 已核对：version `0.2.0`、notes 与 CHANGELOG `0.2.0` 段一致、四平台 URL 均指向 `v0.2.0` 资产。v0.1.0 用户将收到自动更新；应用内端到端更新实测由用户日常验证。
 
 **v0.2 发布前置全部就绪（2026-08-20）**——用户当日连续确认：PostgreSQL 15.latest/18.latest 双端点 integration 回归完成、RC 全平台下载安装验收完成、V2-T8.2 提前关闭（RC 发布当日关闭，未执行满一周试用；实质验收依据为 08-19 T8.1 dogfooding 与 08-20 RC 安装验收，后续反馈走常规 P0/P1/P2 流程）。V2-CP5 三项标准全部满足，v0.2 仅剩 `just release v0.2.0` 正式发布。
@@ -121,7 +123,7 @@
 
 ## 下一步（按优先级）
 
-1. V3-CP0 准入收口（REQUIREMENTS.md 补 v0.3 范围章节）后启动 v0.3 Week 1：Driver 契约扩展独占 session（V3-T1.1）。
+1. v0.3 Week 1 开工：V3-T1.1 Driver 契约扩展独占 session（4h）→ V3-T1.2 MySQL 实现（4h）→ V3-T1.3 PostgreSQL 实现（2h）→ V3-T1.4 同连接证明单测（2h）；V3-CP1 门槛为 MySQL 零回归 + 双 driver 事务原语可用。
 
 ## 阻塞 / 风险
 
