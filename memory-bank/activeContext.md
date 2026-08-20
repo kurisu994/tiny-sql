@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+**v0.3 开发计划已立项（2026-08-20）**——用户决定在 v0.2 RC 试用期并行启动 v0.3 规划（用户口径“v3.0”按 ROADMAP 版本线确认为 v0.3）。`docs/PLAN.md` 新增「v0.3 开发计划」章节：7 周约 84h，范围为 ROADMAP v0.3 五项 FR——FR-242 服务端筛选排序分页（P0）、FR-244 独占 session 可靠事务（P0，v0.4 前置）、FR-240 SQL 文件与最近文件（P1）、FR-241 index/constraint 树与对象搜索（P1）、FR-243 多结果与 SQL 格式化（P1）；排期 Week 1-2 事务后端+UI、Week 3 筛选分页、Week 4 元数据树/搜索、Week 5 多结果/格式化、Week 6 SQL 文件、Week 7 dogfooding 发布；含 V3-CP0~CP5 检查点、降级链（格式化→最近文件→对象搜索→多结果；P0 不降级）与 V3-R01~R06 风险表。功能代码待 v0.2.0 正式版发布后开工（V3-CP0 准入）。
+
 **里程碑：v0.2.0-rc1 已发布（2026-08-20）**——用户选择按计划走 RC 路径（不跳过 T8.2 试用期）。发布前 `just check` 全绿；`just release v0.2.0-rc1` 完成版本号更新（package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock → `0.2.0-rc1`，预发布不切 CHANGELOG）、发布提交 `64787d8`、main 与 tag 推送（本次 SSH push 未被代理阻断）。Release workflow run `32322049995` 构建中；RC 预期产物为全平台安装包 + updater `.sig`，**不生成 `latest.json`**，Release 标记 prerelease 且不设 latest，notes 取 CHANGELOG `[Unreleased]` 段。
 
 **前一状态：v0.2 真实环境验收全部通过（2026-08-19）**——用户实测通过 PLAN.md「真实环境验收」全部四项：T3.4（PostgreSQL 直连、双 driver 切换/取消不串线、各自 1 跳 SSH）、T4.3（真实 TLS MySQL 四种模式正反例 + 双向证书）、T7.1/T7.2 真实链路（RTT/超时不阻塞主链路、断中间跳 lost → 重连闭环）、T8.1（双 driver × 直连/1 跳/3 跳 dogfooding）。V2-CP2/CP3/CP4 关闭，PLAN.md 仅余发布事项；CHANGELOG / ARCHITECTURE / REQUIREMENTS 的验收口径已同步。
@@ -73,6 +75,10 @@
 
 ## 近期决策
 
+- v0.2.0 正式版发布前不做 v0.3 功能代码；RC 反馈的 P0/P1 修复始终优先于 v0.3 任务。
+- v0.3 多语句执行保持「单语句直接执行」护栏：「执行全部」由后端按方言分号状态机拆分逐条执行，每条独立 guard 分类与写确认；边界不确定即拒绝执行，绝不尽力执行。
+- v0.3 事务采用独占 session（独立于 pool，限额 + 空闲超时强制回收）；断链即事务消亡，禁止「重连续事务」隐式承诺；pool 与 session 路径并存，不重写 v0.2 已稳定 query 路径。
+- v0.3 SQL 文件读写复用「dialog 选路径 + 后端读写」模式，不引入 `tauri-plugin-fs`；最近文件只持久化路径与时间，不进加密历史。
 - 代码是事实源：把 SSL/TLS 描述为“已接线、默认禁用、真实环境未验收”，不再写成完全未实现，也不宣称生产验证完成。
 - v0.1.0 直接按正式版发布，未额外补 RC；已知限制明确写入 CHANGELOG / Release notes，不伪装为已实现能力。
 - `just release` 的发布提交信息已改成中文动词开头；发布提交为 `624b108`，tag 不包含后续文档状态对齐。
@@ -113,6 +119,7 @@
 2. PostgreSQL 15.latest / 18.latest 双端点 integration 回归（版本基线见 techContext.md）。
 3. V2-T8.2：作者和至少 2 位试用者使用 v0.2 RC ≥ 1 周（至少 1 人以 PostgreSQL 为主），要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
 4. P0/P1 清零后 `just release v0.2.0` 发正式版（V2-CP5），CHANGELOG 切出 `0.2.0` 段并生成 `latest.json`。
+5. V3-CP0 准入收口（v0.2.0 发布 + REQUIREMENTS.md 补 v0.3 范围）后启动 v0.3 Week 1：Driver 契约扩展独占 session（V3-T1.1）。
 
 ## 阻塞 / 风险
 
