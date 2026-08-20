@@ -716,7 +716,7 @@ function TableTreeIcon({ active }: { active: boolean }) {
   );
 }
 
-/** 结果集表格（react-virtuoso 虚拟滚动，表头吸顶，列宽可拖拽并持久化 FR-111） */
+/** 结果集表格（react-virtuoso 虚拟滚动，表头吸顶，序号列冻结，列宽可拖拽并持久化 FR-111） */
 export function ResultTable({
   rowSet,
   connectionId,
@@ -730,6 +730,9 @@ export function ResultTable({
     connectionId,
     rowSet.columns,
   );
+  // 统一的横纵滚动容器：Virtuoso 通过 customScrollParent 复用它，
+  // 表头 sticky top 与序号列 sticky left 才能相对同一滚动框生效
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
   if (rowSet.columns.length === 0) {
     return <p className="p-4 text-sm text-neutral-500">（空结果集）</p>;
   }
@@ -759,13 +762,13 @@ export function ResultTable({
           )}
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-x-auto">
-        <div className="flex h-full flex-col text-xs" style={{ minWidth }}>
+      <div ref={setScrollEl} className="min-h-0 flex-1 overflow-auto">
+        <div className="flex min-h-full flex-col text-xs" style={{ minWidth }}>
           <div
-            className="grid bg-neutral-100 dark:bg-neutral-800"
+            className="sticky top-0 z-20 grid bg-neutral-100 dark:bg-neutral-800"
             style={{ gridTemplateColumns }}
           >
-            <div className="border-b border-neutral-200 px-2 py-1 text-right font-mono text-neutral-400 dark:border-neutral-700">
+            <div className="sticky left-0 z-30 border-r border-b border-neutral-200 bg-neutral-100 px-2 py-1 text-right font-mono text-neutral-400 dark:border-neutral-700 dark:bg-neutral-800">
               #
             </div>
             {rowSet.columns.map((c, ci) => (
@@ -789,14 +792,14 @@ export function ResultTable({
             <p className="p-4 text-sm text-neutral-500">（0 行）</p>
           ) : (
             <Virtuoso
-              className="min-h-0 flex-1"
+              customScrollParent={scrollEl ?? undefined}
               data={rowSet.rows}
               itemContent={(ri, row) => (
                 <div
-                  className="grid hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                  className="group grid hover:bg-neutral-50 dark:hover:bg-neutral-900"
                   style={{ gridTemplateColumns }}
                 >
-                  <div className="border-b border-neutral-100 px-2 py-1 text-right font-mono text-neutral-400 dark:border-neutral-900">
+                  <div className="sticky left-0 z-10 border-r border-b border-neutral-100 bg-background px-2 py-1 text-right font-mono text-neutral-400 group-hover:bg-neutral-50 dark:border-neutral-900 dark:group-hover:bg-neutral-900">
                     {ri + 1}
                   </div>
                   {row.map((cell, ci) => (

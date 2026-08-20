@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+**本轮优化：结果表格序号列冻结（2026-08-20）**——用户要求 `#` 序号列不随横向滚动。ResultTable 改用 Virtuoso `customScrollParent` 复用外层统一横纵滚动容器（原生 Virtuoso scroller 会截获 sticky 上下文，直接 sticky 对行无效），表头 `sticky top-0 z-20`、表头序号 `sticky left-0 z-30`、行序号 `sticky left-0 z-10` + `bg-background`（hover 用 group 同步行色）。tsc、vitest 93/93、Next build 全绿，CHANGELOG `[Unreleased]` 已补录；待用户 dev 实测后发布 v0.2.0。
+
 **v0.2 发布前置全部就绪（2026-08-20）**——用户当日连续确认：PostgreSQL 15.latest/18.latest 双端点 integration 回归完成、RC 全平台下载安装验收完成、V2-T8.2 提前关闭（RC 发布当日关闭，未执行满一周试用；实质验收依据为 08-19 T8.1 dogfooding 与 08-20 RC 安装验收，后续反馈走常规 P0/P1/P2 流程）。V2-CP5 三项标准全部满足，v0.2 仅剩 `just release v0.2.0` 正式发布。
 
 **v0.3 开发计划已立项（2026-08-20）**——用户决定在 v0.2 RC 试用期并行启动 v0.3 规划（用户口径“v3.0”按 ROADMAP 版本线确认为 v0.3）。`docs/PLAN.md` 新增「v0.3 开发计划」章节：7 周约 84h，范围为 ROADMAP v0.3 五项 FR——FR-242 服务端筛选排序分页（P0）、FR-244 独占 session 可靠事务（P0，v0.4 前置）、FR-240 SQL 文件与最近文件（P1）、FR-241 index/constraint 树与对象搜索（P1）、FR-243 多结果与 SQL 格式化（P1）；排期 Week 1-2 事务后端+UI、Week 3 筛选分页、Week 4 元数据树/搜索、Week 5 多结果/格式化、Week 6 SQL 文件、Week 7 dogfooding 发布；含 V3-CP0~CP5 检查点、降级链（格式化→最近文件→对象搜索→多结果；P0 不降级）与 V3-R01~R06 风险表。功能代码待 v0.2.0 正式版发布后开工（V3-CP0 准入）。
