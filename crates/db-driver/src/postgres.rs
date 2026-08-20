@@ -262,6 +262,103 @@ impl PostgresDriver {
             .collect())
     }
 
+    /// 列出 PostgreSQL 表的索引（FR-241）：pg_index 按索引名归组，列保持索引内顺序。
+    /// 表达式索引（indkey 含 0）只保留列成员。
+    pub async fn list_indexes(
+        &self,
+        scope: &MetadataScope,
+        table: &str,
+    ) -> Result<Vec<IndexMeta>, DriverError> {
+        self.ensure_current_database(&scope.database).await?;
+        let schema = scope
+            .schema
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(DriverError::SchemaRequired)?;
+        let rows = sqlx::query_as::<_, (String, bool, bool, Vec<String>)>(
+            "SELECT c2.relname, i.indisunique, i.indisprimary, \
+                    array_agg(a.attname ORDER BY k.n) AS columns \
+             FROM pg_index AS i \
+             JOIN pg_class AS c ON c.oid = i.indrelid \
+             JOIN pg_class AS c2 ON c2.oid = i.indexrelid \
+             JOIN pg_namespace AS n ON n.oid = c.relnamespace \
+             CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, n) \
+             JOIN pg_attribute AS a ON a.attrelid = c.oid AND a.attnum = k.attnum \
+             WHERE n.nspname = $1 AND c.relname = $2 \
+             GROUP BY c2.relname, i.indisunique, i.indisprimary \
+             ORDER BY c2.relname",
+        )
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(query_failed)?;
+        Ok(rows
+            .into_iter()
+            .map(|(name, unique, primary, columns)| IndexMeta {
+                index_type: if primary {
+                    "PRIMARY"
+                } else if unique {
+                    "UNIQUE"
+                } else {
+                    "INDEX"
+                }
+                .to_string(),
+                name,
+                columns,
+                unique,
+            })
+            .collect())
+    }
+
+    /// 列出 PostgreSQL 表的约束（FR-241）：pg_constraint 归组，
+    /// reference 为 `pg_get_constraintdef` 完整定义文本（含外键引用与 CHECK 表达式）。
+    pub async fn list_constraints(
+        &self,
+        scope: &MetadataScope,
+        table: &str,
+    ) -> Result<Vec<ConstraintMeta>, DriverError> {
+        self.ensure_current_database(&scope.database).await?;
+        let schema = scope
+            .schema
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(DriverError::SchemaRequired)?;
+        let rows = sqlx::query_as::<_, (String, String, Option<Vec<String>>, Option<String>)>(
+            "SELECT con.conname, \
+                    CASE con.contype \
+                        WHEN 'p' THEN 'PRIMARY KEY' \
+                        WHEN 'f' THEN 'FOREIGN KEY' \
+                        WHEN 'u' THEN 'UNIQUE' \
+                        ELSE 'CHECK' \
+                    END, \
+                    (SELECT array_agg(a.attname ORDER BY k.n) \
+                     FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, n) \
+                     JOIN pg_attribute AS a \
+                       ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS columns, \
+                    pg_get_constraintdef(con.oid) AS definition \
+             FROM pg_constraint AS con \
+             JOIN pg_class AS c ON c.oid = con.conrelid \
+             JOIN pg_namespace AS n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relname = $2 \
+             ORDER BY con.conname",
+        )
+        .bind(schema)
+        .bind(table)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(query_failed)?;
+        Ok(rows
+            .into_iter()
+            .map(|(name, constraint_type, columns, definition)| ConstraintMeta {
+                name,
+                constraint_type,
+                columns: columns.unwrap_or_default(),
+                reference: definition,
+            })
+            .collect())
+    }
+
     /// 执行 PostgreSQL SQL，默认使用编辑器 10 万行硬上限。
     pub async fn query(&self, sql: &str) -> Result<RowSet, DriverError> {
         self.query_with_options(sql, QueryOptions::default(), CancellationToken::new())
@@ -646,6 +743,22 @@ impl Driver for PostgresDriver {
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ColumnMeta>> {
         Box::pin(PostgresDriver::list_columns(self, scope, table))
+    }
+
+    fn list_indexes<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<IndexMeta>> {
+        Box::pin(PostgresDriver::list_indexes(self, scope, table))
+    }
+
+    fn list_constraints<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<ConstraintMeta>> {
+        Box::pin(PostgresDriver::list_constraints(self, scope, table))
     }
 
     fn query<'a>(

@@ -1,6 +1,11 @@
 import type { DriverKind } from "@/lib/tauri-api";
 
-export type MetadataResource = "schemas" | "tables" | "columns";
+export type MetadataResource =
+  | "schemas"
+  | "tables"
+  | "columns"
+  | "indexes"
+  | "constraints";
 
 /** metadata cache 的完整分区键，禁止省略 connection/driver/schema 边界。 */
 export interface MetadataCacheKey {

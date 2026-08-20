@@ -311,6 +311,25 @@ export interface ColumnMeta {
   comment: string | null;
 }
 
+/** 索引元信息（FR-241） */
+export interface IndexMeta {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  /** "PRIMARY" / "UNIQUE" / "INDEX" */
+  indexType: string;
+}
+
+/** 约束元信息（FR-241） */
+export interface ConstraintMeta {
+  name: string;
+  /** "PRIMARY KEY" / "FOREIGN KEY" / "UNIQUE" / "CHECK" */
+  constraintType: string;
+  columns: string[];
+  /** 外键引用目标（MySQL）或约束定义文本（PostgreSQL） */
+  reference: string | null;
+}
+
 /** 查询结果集（所有单元格统一为字符串，null = SQL NULL） */
 export interface RowSet {
   columns: string[];
@@ -358,6 +377,24 @@ export const dbApi = {
     schema: string | null,
     table: string,
   ) => invoke<ColumnMeta[]>("db_list_columns", { id, database, schema, table }),
+  listIndexes: (
+    id: string,
+    database: string,
+    schema: string | null,
+    table: string,
+  ) => invoke<IndexMeta[]>("db_list_indexes", { id, database, schema, table }),
+  listConstraints: (
+    id: string,
+    database: string,
+    schema: string | null,
+    table: string,
+  ) =>
+    invoke<ConstraintMeta[]>("db_list_constraints", {
+      id,
+      database,
+      schema,
+      table,
+    }),
   query: (id: string, sql: string, options: QueryOptions = {}) =>
     invoke<RowSet>("db_query", {
       id,

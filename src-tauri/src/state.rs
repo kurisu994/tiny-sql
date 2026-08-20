@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use db_driver::{
-    ColumnMeta, DatabaseMeta, Driver, DriverCloseFuture, DriverFuture, DriverKind, DriverSession,
-    MetadataScope, MySqlDriver, PostgresDriver, QueryOptions, RowSet, SchemaMeta, TableBrowseQuery,
-    TableBrowseResult, TableMeta,
+    ColumnMeta, ConstraintMeta, DatabaseMeta, Driver, DriverCloseFuture, DriverFuture, DriverKind,
+    DriverSession, IndexMeta, MetadataScope, MySqlDriver, PostgresDriver, QueryOptions, RowSet,
+    SchemaMeta, TableBrowseQuery, TableBrowseResult, TableMeta,
 };
 use ssh_multihop::SshTunnel;
 use tokio::sync::Mutex as AsyncMutex;
@@ -83,6 +83,28 @@ impl Driver for ActiveDriver {
         match self {
             Self::MySql(driver) => Driver::list_columns(driver, scope, table),
             Self::PostgreSql(driver) => Driver::list_columns(driver, scope, table),
+        }
+    }
+
+    fn list_indexes<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<IndexMeta>> {
+        match self {
+            Self::MySql(driver) => Driver::list_indexes(driver, scope, table),
+            Self::PostgreSql(driver) => Driver::list_indexes(driver, scope, table),
+        }
+    }
+
+    fn list_constraints<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<ConstraintMeta>> {
+        match self {
+            Self::MySql(driver) => Driver::list_constraints(driver, scope, table),
+            Self::PostgreSql(driver) => Driver::list_constraints(driver, scope, table),
         }
     }
 

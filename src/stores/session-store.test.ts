@@ -776,6 +776,8 @@ describe("session-store", () => {
       selectedDb: "app",
     });
     routeInvoke({
+      db_list_indexes: [],
+      db_list_constraints: [],
       db_list_columns: [
         {
           name: "id",

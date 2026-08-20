@@ -358,6 +358,32 @@ pub struct TableBrowseResult {
     pub has_next_page: bool,
 }
 
+/// 索引元信息（FR-241）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexMeta {
+    pub name: String,
+    /// 按索引内顺序的列名
+    pub columns: Vec<String>,
+    pub unique: bool,
+    /// "PRIMARY" / "UNIQUE" / "INDEX"（归一化）
+    pub index_type: String,
+}
+
+/// 约束元信息（FR-241）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConstraintMeta {
+    pub name: String,
+    /// "PRIMARY KEY" / "FOREIGN KEY" / "UNIQUE" / "CHECK"
+    pub constraint_type: String,
+    /// 约束涉及的列（CHECK 无列时为空）
+    pub columns: Vec<String>,
+    /// 外键引用目标（MySQL：`schema.table(col,…)`）或约束定义文本（PostgreSQL）；
+    /// 无引用 / 无定义时为 None。
+    pub reference: Option<String>,
+}
+
 /// 筛选值绑定（FR-242）：能解析为整数/浮点的按数值绑定（PostgreSQL 严格类型比较
 /// 需要），其余按文本（MySQL 隐式转换、PG 日期/布尔文本均可比较）。
 #[derive(Debug, Clone, PartialEq)]
@@ -459,6 +485,20 @@ pub trait Driver: Send + Sync {
         scope: &'a MetadataScope,
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ColumnMeta>>;
+
+    /// 列出指定表的索引（FR-241）。
+    fn list_indexes<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<IndexMeta>>;
+
+    /// 列出指定表的约束（FR-241）。
+    fn list_constraints<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<ConstraintMeta>>;
 
     /// 执行 SQL；取消令牌由应用层按 query_id 管理。
     fn query<'a>(
@@ -758,6 +798,133 @@ impl MySqlDriver {
     pub async fn query(&self, sql: &str) -> Result<RowSet, DriverError> {
         self.query_with_options(sql, QueryOptions::default(), CancellationToken::new())
             .await
+    }
+
+    /// 列出表的索引（FR-241）：information_schema.STATISTICS 按索引名归组，列保持索引内顺序。
+    pub async fn list_indexes(
+        &self,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<IndexMeta>, DriverError> {
+        let rows = sqlx::query_as::<_, (String, String, bool)>(
+            "SELECT index_name, column_name, non_unique \
+             FROM information_schema.statistics \
+             WHERE table_schema = ? AND table_name = ? \
+             ORDER BY index_name, seq_in_index",
+        )
+        .bind(database)
+        .bind(table)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        let mut indexes: Vec<IndexMeta> = Vec::new();
+        for (name, column, non_unique) in rows {
+            match indexes.iter_mut().find(|index| index.name == name) {
+                Some(index) => index.columns.push(column),
+                None => indexes.push(IndexMeta {
+                    index_type: if name == "PRIMARY" {
+                        "PRIMARY"
+                    } else if non_unique {
+                        "INDEX"
+                    } else {
+                        "UNIQUE"
+                    }
+                    .to_string(),
+                    name,
+                    columns: vec![column],
+                    unique: !non_unique,
+                }),
+            }
+        }
+        Ok(indexes)
+    }
+
+    /// 列出表的约束（FR-241）：TABLE_CONSTRAINTS + KEY_COLUMN_USAGE 按约束名归组，
+    /// 外键引用拼为 `schema.table(col,…)`；CHECK 无列记录时列为空。
+    pub async fn list_constraints(
+        &self,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<ConstraintMeta>, DriverError> {
+        let rows = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            "SELECT tc.constraint_name, tc.constraint_type, kcu.column_name, \
+                    kcu.referenced_table_schema, kcu.referenced_table_name, kcu.referenced_column_name \
+             FROM information_schema.table_constraints AS tc \
+             LEFT JOIN information_schema.key_column_usage AS kcu \
+               ON kcu.constraint_schema = tc.constraint_schema \
+              AND kcu.constraint_name = tc.constraint_name \
+              AND kcu.table_schema = tc.table_schema \
+              AND kcu.table_name = tc.table_name \
+             WHERE tc.table_schema = ? AND tc.table_name = ? \
+             ORDER BY tc.constraint_name, kcu.ordinal_position",
+        )
+        .bind(database)
+        .bind(table)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        struct Acc {
+            constraint_type: String,
+            columns: Vec<String>,
+            ref_schema: Option<String>,
+            ref_table: Option<String>,
+            ref_columns: Vec<String>,
+        }
+        let mut accs: Vec<(String, Acc)> = Vec::new();
+        for (name, constraint_type, column, ref_schema, ref_table, ref_column) in rows {
+            let pos = accs.iter().position(|(n, _)| *n == name);
+            let acc = match pos {
+                Some(i) => &mut accs[i].1,
+                None => {
+                    accs.push((
+                        name,
+                        Acc {
+                            constraint_type,
+                            columns: vec![],
+                            ref_schema: None,
+                            ref_table: None,
+                            ref_columns: vec![],
+                        },
+                    ));
+                    &mut accs.last_mut().expect("刚 push 必存在").1
+                }
+            };
+            if let Some(column) = column {
+                acc.columns.push(column);
+            }
+            if let (Some(schema), Some(table), Some(column)) =
+                (ref_schema, ref_table, ref_column)
+            {
+                acc.ref_schema = Some(schema);
+                acc.ref_table = Some(table);
+                acc.ref_columns.push(column);
+            }
+        }
+        Ok(accs
+            .into_iter()
+            .map(|(name, acc)| ConstraintMeta {
+                name,
+                constraint_type: acc.constraint_type,
+                columns: acc.columns,
+                reference: match (acc.ref_schema, acc.ref_table) {
+                    (Some(schema), Some(table)) if !acc.ref_columns.is_empty() => Some(format!(
+                        "{schema}.{table}({})",
+                        acc.ref_columns.join(", ")
+                    )),
+                    _ => None,
+                },
+            })
+            .collect())
     }
 
     /// 执行 SQL，支持顶层安全追加 LIMIT、10w 硬上限与 `KILL QUERY` 取消。
@@ -1077,6 +1244,22 @@ impl Driver for MySqlDriver {
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ColumnMeta>> {
         Box::pin(MySqlDriver::list_columns(self, &scope.database, table))
+    }
+
+    fn list_indexes<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<IndexMeta>> {
+        Box::pin(MySqlDriver::list_indexes(self, &scope.database, table))
+    }
+
+    fn list_constraints<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+    ) -> DriverFuture<'a, Vec<ConstraintMeta>> {
+        Box::pin(MySqlDriver::list_constraints(self, &scope.database, table))
     }
 
     fn query<'a>(

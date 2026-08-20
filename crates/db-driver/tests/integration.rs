@@ -512,3 +512,113 @@ async fn browse_table_filters_sorts_and_paginates() {
         .expect("清理失败");
     driver.close().await;
 }
+
+// === FR-241 索引与约束 metadata ===
+
+/// list_indexes / list_constraints：主键、唯一索引、普通索引、外键引用正确归组。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn list_indexes_and_constraints() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    let db = url
+        .rsplit('/')
+        .next()
+        .expect("URL 应含 database")
+        .split('?')
+        .next()
+        .expect("database 名");
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_meta_child",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_meta_parent",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_meta_parent (id INT PRIMARY KEY, code VARCHAR(20) NOT NULL, UNIQUE KEY uq_code (code))",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建父表失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_meta_child (\
+                id INT PRIMARY KEY, \
+                parent_id INT NOT NULL, \
+                name VARCHAR(50), \
+                KEY idx_name (name), \
+                KEY idx_parent_name (parent_id, name), \
+                CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES tx_meta_parent (id) \
+            )",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建子表失败");
+
+    let indexes = driver
+        .list_indexes(db, "tx_meta_child")
+        .await
+        .expect("list_indexes 失败");
+    let primary = indexes.iter().find(|i| i.index_type == "PRIMARY").expect("应有主键索引");
+    assert_eq!(primary.columns, vec!["id"]);
+    assert!(primary.unique);
+    let idx_name = indexes.iter().find(|i| i.name == "idx_name").expect("应有 idx_name");
+    assert_eq!(idx_name.index_type, "INDEX");
+    assert!(!idx_name.unique);
+    let composite = indexes
+        .iter()
+        .find(|i| i.name == "idx_parent_name")
+        .expect("应有联合索引");
+    assert_eq!(composite.columns, vec!["parent_id", "name"]);
+
+    let constraints = driver
+        .list_constraints(db, "tx_meta_child")
+        .await
+        .expect("list_constraints 失败");
+    let pk = constraints
+        .iter()
+        .find(|c| c.constraint_type == "PRIMARY KEY")
+        .expect("应有 PRIMARY KEY 约束");
+    assert_eq!(pk.columns, vec!["id"]);
+    let fk = constraints
+        .iter()
+        .find(|c| c.constraint_type == "FOREIGN KEY")
+        .expect("应有 FOREIGN KEY 约束");
+    assert_eq!(fk.columns, vec!["parent_id"]);
+    assert_eq!(
+        fk.reference.as_deref(),
+        Some(format!("{db}.tx_meta_parent(id)").as_str()),
+        "外键引用目标"
+    );
+    let uq = driver
+        .list_constraints(db, "tx_meta_parent")
+        .await
+        .expect("list_constraints 失败")
+        .into_iter()
+        .find(|c| c.constraint_type == "UNIQUE")
+        .expect("父表应有 UNIQUE 约束");
+    assert_eq!(uq.columns, vec!["code"]);
+
+    driver
+        .query_with_options("DROP TABLE tx_meta_child", write_opts(), CancellationToken::new())
+        .await
+        .expect("清理失败");
+    driver
+        .query_with_options("DROP TABLE tx_meta_parent", write_opts(), CancellationToken::new())
+        .await
+        .expect("清理失败");
+    driver.close().await;
+}

@@ -459,3 +459,118 @@ async fn postgres_browse_table_filters_sorts_and_paginates() {
         .expect("清理失败");
     driver.close().await;
 }
+
+// === FR-241 索引与约束 metadata ===
+
+/// list_indexes / list_constraints：主键、唯一索引、外键引用与 CHECK 正确归组（PG 方言）。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_list_indexes_and_constraints() {
+    let driver = connect().await;
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_meta_child",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS tx_meta_parent",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_meta_parent (id INT PRIMARY KEY, code VARCHAR(20) NOT NULL UNIQUE)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建父表失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE tx_meta_child (\
+                id INT PRIMARY KEY, \
+                parent_id INT NOT NULL REFERENCES tx_meta_parent (id), \
+                name VARCHAR(50) CHECK (name <> ''), \
+                note VARCHAR(50) \
+            )",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建子表失败");
+    driver
+        .query_with_options(
+            "CREATE INDEX idx_child_name ON tx_meta_child (name)",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建索引失败");
+
+    let current_db = driver
+        .query("SELECT current_database()")
+        .await
+        .expect("查询当前库失败");
+    let db_name = current_db.rows[0][0].clone().expect("库名不为空");
+    let scope = MetadataScope::postgresql(db_name, "public");
+
+    let indexes = driver
+        .list_indexes(&scope, "tx_meta_child")
+        .await
+        .expect("list_indexes 失败");
+    let primary = indexes.iter().find(|i| i.index_type == "PRIMARY").expect("应有主键索引");
+    assert_eq!(primary.columns, vec!["id"]);
+    let idx_name = indexes
+        .iter()
+        .find(|i| i.name == "idx_child_name")
+        .expect("应有 idx_child_name");
+    assert_eq!(idx_name.index_type, "INDEX");
+    assert!(!idx_name.unique);
+    assert_eq!(idx_name.columns, vec!["name"]);
+
+    let constraints = driver
+        .list_constraints(&scope, "tx_meta_child")
+        .await
+        .expect("list_constraints 失败");
+    let pk = constraints
+        .iter()
+        .find(|c| c.constraint_type == "PRIMARY KEY")
+        .expect("应有 PRIMARY KEY 约束");
+    assert_eq!(pk.columns, vec!["id"]);
+    let fk = constraints
+        .iter()
+        .find(|c| c.constraint_type == "FOREIGN KEY")
+        .expect("应有 FOREIGN KEY 约束");
+    assert_eq!(fk.columns, vec!["parent_id"]);
+    assert!(
+        fk.reference
+            .as_deref()
+            .is_some_and(|r| r.contains("tx_meta_parent")),
+        "外键定义应含引用目标: {:?}",
+        fk.reference
+    );
+    let has_name_check = constraints.iter().any(|c| {
+        c.constraint_type == "CHECK"
+            && c.reference.as_deref().is_some_and(|r| r.contains("name"))
+    });
+    assert!(
+        has_name_check,
+        "应存在含 name 表达式的 CHECK 约束: {constraints:?}"
+    );
+
+    driver
+        .query_with_options("DROP TABLE tx_meta_child", write_opts(), CancellationToken::new())
+        .await
+        .expect("清理失败");
+    driver
+        .query_with_options("DROP TABLE tx_meta_parent", write_opts(), CancellationToken::new())
+        .await
+        .expect("清理失败");
+    driver.close().await;
+}

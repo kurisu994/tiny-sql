@@ -14,7 +14,9 @@ import {
   exportApi,
   translateError,
   type ColumnMeta,
+  type ConstraintMeta,
   type ExportFormat,
+  type IndexMeta,
   type RowSet,
   type StoredConnection,
   type TableMeta,
@@ -47,6 +49,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     expandedTable,
     tableColumns,
     columnsByTable,
+    indexesByTable,
+    constraintsByTable,
     loadingColumns,
     refreshingMetadata,
     loadingData,
@@ -79,8 +83,117 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const confirm = useConfirmStore((s) => s.confirm);
   const activeTab = selectActiveTab({ tabs, activeTabId });
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [objectQuery, setObjectQuery] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  /** 展开目标表并清空搜索（对象搜索定位动作，FR-241） */
+  function locateTable(table: string) {
+    if (expandedTable !== table) {
+      void toggleTableColumns(table);
+    }
+    setObjectQuery("");
+  }
+
+  /** 对象搜索结果：在已加载的 database/schema/表/列/索引/约束中即时过滤（FR-241） */
+  const objectResults = useMemo(() => {
+    const query = objectQuery.trim().toLowerCase();
+    if (!query) return [];
+    type Result = {
+      key: string;
+      kind: string;
+      name: string;
+      detail?: string;
+      onPick: () => void;
+    };
+    const results: Result[] = [];
+    const includes = (value: string) => value.toLowerCase().includes(query);
+    for (const db of databases) {
+      if (includes(db.name)) {
+        results.push({
+          key: `db:${db.name}`,
+          kind: "数据库",
+          name: db.name,
+          onPick: () => {
+            void selectDb(db.name);
+            setObjectQuery("");
+          },
+        });
+      }
+    }
+    for (const schema of schemas) {
+      if (includes(schema.name)) {
+        results.push({
+          key: `schema:${schema.name}`,
+          kind: "Schema",
+          name: schema.name,
+          onPick: () => {
+            void selectSchema(schema.name);
+            setObjectQuery("");
+          },
+        });
+      }
+    }
+    for (const table of tables) {
+      if (includes(table.name)) {
+        results.push({
+          key: `table:${table.name}`,
+          kind: "表",
+          name: table.name,
+          detail: table.comment ?? undefined,
+          onPick: () => locateTable(table.name),
+        });
+      }
+    }
+    for (const [table, cols] of Object.entries(columnsByTable)) {
+      for (const col of cols) {
+        if (includes(col.name)) {
+          results.push({
+            key: `col:${table}.${col.name}`,
+            kind: "列",
+            name: col.name,
+            detail: table,
+            onPick: () => locateTable(table),
+          });
+        }
+      }
+    }
+    for (const [table, items] of Object.entries(indexesByTable)) {
+      for (const index of items) {
+        if (includes(index.name)) {
+          results.push({
+            key: `idx:${table}.${index.name}`,
+            kind: "索引",
+            name: index.name,
+            detail: table,
+            onPick: () => locateTable(table),
+          });
+        }
+      }
+    }
+    for (const [table, items] of Object.entries(constraintsByTable)) {
+      for (const constraint of items) {
+        if (includes(constraint.name)) {
+          results.push({
+            key: `con:${table}.${constraint.name}`,
+            kind: "约束",
+            name: constraint.name,
+            detail: table,
+            onPick: () => locateTable(table),
+          });
+        }
+      }
+    }
+    return results.slice(0, 50);
+  }, [
+    objectQuery,
+    databases,
+    schemas,
+    tables,
+    columnsByTable,
+    indexesByTable,
+    constraintsByTable,
+  ]);
+
   const sqlNamespaces = useMemo(
     () =>
       connection.driver === "postgresql"
@@ -242,6 +355,45 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               {refreshingMetadata ? "刷新中…" : "刷新"}
             </button>
           </div>
+          {connected && (
+            <div className="border-b border-neutral-100 px-2 py-1.5 dark:border-neutral-800">
+              <input
+                value={objectQuery}
+                onChange={(e) => setObjectQuery(e.target.value)}
+                placeholder="搜索表 / 列 / 索引 / 约束…"
+                aria-label="搜索数据库对象"
+                className="w-full rounded border border-neutral-200 bg-white px-2 py-1 text-xs outline-none placeholder:text-neutral-400 focus:border-blue-400 dark:border-neutral-700 dark:bg-neutral-900 dark:focus:border-blue-500"
+              />
+              {objectQuery.trim() && (
+                <div className="mt-1 max-h-56 overflow-y-auto rounded border border-neutral-200 bg-white dark:border-neutral-700 dark:bg-neutral-900">
+                  {objectResults.length === 0 ? (
+                    <p className="px-2 py-1.5 text-xs text-neutral-400">
+                      无匹配对象（仅搜索已加载范围）
+                    </p>
+                  ) : (
+                    objectResults.map((result) => (
+                      <button
+                        key={result.key}
+                        type="button"
+                        onClick={result.onPick}
+                        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                      >
+                        <span className="shrink-0 rounded bg-neutral-100 px-1 text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                          {result.kind}
+                        </span>
+                        <span className="min-w-0 truncate">{result.name}</span>
+                        {result.detail && (
+                          <span className="ml-auto shrink-0 truncate text-[10px] text-neutral-400">
+                            {result.detail}
+                          </span>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {!connected && (
             <p className="px-3 py-3 text-xs text-neutral-500">
               {status === "error" ? "连接失败，请检查上方断点。" : "正在建立连接…"}
@@ -272,6 +424,10 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                   loadingColumns={loadingColumns}
                   expandedTable={expandedTable}
                   columns={tableColumns}
+                  indexes={expandedTable ? (indexesByTable[expandedTable] ?? []) : []}
+                  constraints={
+                    expandedTable ? (constraintsByTable[expandedTable] ?? []) : []
+                  }
                   selectedTable={activeTab?.selectedTable ?? null}
                   onToggleColumns={toggleTableColumns}
                   onSelect={selectTable}
@@ -311,6 +467,16 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                           loadingColumns={loadingColumns}
                           expandedTable={expandedTable}
                           columns={tableColumns}
+                          indexes={
+                            expandedTable
+                              ? (indexesByTable[expandedTable] ?? [])
+                              : []
+                          }
+                          constraints={
+                            expandedTable
+                              ? (constraintsByTable[expandedTable] ?? [])
+                              : []
+                          }
                           selectedTable={activeTab?.selectedTable ?? null}
                           onToggleColumns={toggleTableColumns}
                           onSelect={selectTable}
@@ -573,6 +739,8 @@ function TableTreeList({
   loadingColumns,
   expandedTable,
   columns,
+  indexes,
+  constraints,
   selectedTable,
   onToggleColumns,
   onSelect,
@@ -584,6 +752,8 @@ function TableTreeList({
   loadingColumns: boolean;
   expandedTable: string | null;
   columns: ColumnMeta[];
+  indexes: IndexMeta[];
+  constraints: ConstraintMeta[];
   selectedTable: string | null;
   onToggleColumns: (table: string) => Promise<void>;
   onSelect: (table: string) => Promise<void>;
@@ -627,15 +797,102 @@ function TableTreeList({
             </button>
           </div>
           {expandedTable === table.name && (
-            <ColumnTreeList
-              columns={columns}
-              loading={loadingColumns}
-              paddingClass={columnPaddingClass}
-            />
+            <>
+              <ColumnTreeList
+                columns={columns}
+                loading={loadingColumns}
+                paddingClass={columnPaddingClass}
+              />
+              {!loadingColumns && (
+                <>
+                  <IndexTreeList
+                    indexes={indexes}
+                    paddingClass={columnPaddingClass}
+                  />
+                  <ConstraintTreeList
+                    constraints={constraints}
+                    paddingClass={columnPaddingClass}
+                  />
+                </>
+              )}
+            </>
           )}
         </li>
       ))}
     </ul>
+  );
+}
+
+/** 表下的索引清单（FR-241）：名称、列与唯一性。 */
+function IndexTreeList({
+  indexes,
+  paddingClass,
+}: {
+  indexes: IndexMeta[];
+  paddingClass: string;
+}) {
+  if (indexes.length === 0) return null;
+  return (
+    <div className={cn("px-3 pb-1", paddingClass)}>
+      <p className="pt-1 text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+        索引
+      </p>
+      {indexes.map((index) => (
+        <p
+          key={index.name}
+          title={`${index.indexType} (${index.columns.join(", ")})`}
+          className="truncate py-0.5 text-xs text-neutral-500 dark:text-neutral-400"
+        >
+          <span className="text-neutral-700 dark:text-neutral-300">
+            {index.name}
+          </span>{" "}
+          <span className="text-neutral-400">({index.columns.join(", ")})</span>
+          {index.unique && (
+            <span className="ml-1 rounded bg-blue-50 px-1 text-[10px] text-blue-600 dark:bg-blue-950 dark:text-blue-300">
+              {index.indexType === "PRIMARY" ? "主键" : "唯一"}
+            </span>
+          )}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** 表下的约束清单（FR-241）：类型、列与外键引用。 */
+function ConstraintTreeList({
+  constraints,
+  paddingClass,
+}: {
+  constraints: ConstraintMeta[];
+  paddingClass: string;
+}) {
+  if (constraints.length === 0) return null;
+  return (
+    <div className={cn("px-3 pb-1.5", paddingClass)}>
+      <p className="pt-1 text-[10px] font-medium uppercase tracking-wide text-neutral-400">
+        约束
+      </p>
+      {constraints.map((constraint) => (
+        <p
+          key={constraint.name}
+          title={constraint.reference ?? undefined}
+          className="truncate py-0.5 text-xs text-neutral-500 dark:text-neutral-400"
+        >
+          <span className="text-neutral-700 dark:text-neutral-300">
+            {constraint.name}
+          </span>{" "}
+          <span className="rounded bg-neutral-100 px-1 text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+            {constraint.constraintType}
+          </span>{" "}
+          <span className="text-neutral-400">
+            ({constraint.columns.join(", ")})
+          </span>
+          {constraint.constraintType === "FOREIGN KEY" && constraint.reference && (
+            <span className="text-neutral-400"> → {constraint.reference}</span>
+          )}
+        </p>
+      ))}
+    </div>
   );
 }
 

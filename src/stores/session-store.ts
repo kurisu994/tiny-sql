@@ -19,9 +19,11 @@ import {
   translateError,
   type CreateDatabaseInput,
   type ColumnMeta,
+  type ConstraintMeta,
   type DatabaseMeta,
   type HopStatusPayload,
   type HopRttPayload,
+  type IndexMeta,
   type RowSet,
   type SchemaMeta,
   type StoredConnection,
@@ -357,6 +359,10 @@ interface SessionState {
   tableColumns: ColumnMeta[];
   /** 当前 database/schema 已加载过的各表列，供 CodeMirror schema-aware 补全。 */
   columnsByTable: Record<string, ColumnMeta[]>;
+  /** 已加载的各表索引（FR-241），随表展开加载，与列共享 cache 失效链 */
+  indexesByTable: Record<string, IndexMeta[]>;
+  /** 已加载的各表约束（FR-241） */
+  constraintsByTable: Record<string, ConstraintMeta[]>;
   loadingColumns: boolean;
   refreshingMetadata: boolean;
   /** schema 树加载（selectDb/selectSchema/createDatabase）指示 */
@@ -450,7 +456,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   tables: [],
   expandedTable: null,
   tableColumns: [],
-  columnsByTable: {},
+  columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
   loadingColumns: false,
   refreshingMetadata: false,
   loadingData: false,
@@ -504,7 +510,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         tables: [],
         expandedTable: null,
         tableColumns: [],
-        columnsByTable: {},
+        columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
         loadingColumns: false,
         refreshingMetadata: false,
         loadingData: false,
@@ -554,7 +560,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       tables: [],
       expandedTable: null,
       tableColumns: [],
-      columnsByTable: {},
+      columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
       loadingColumns: false,
       refreshingMetadata: false,
       loadingData: false,
@@ -636,7 +642,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       tables: [],
       expandedTable: null,
       tableColumns: [],
-      columnsByTable: {},
+      columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
       loadingColumns: false,
       refreshingMetadata: false,
       loadingData: false,
@@ -678,7 +684,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       tables: [],
       expandedTable: null,
       tableColumns: [],
-      columnsByTable: {},
+      columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
       loadingColumns: false,
       refreshingMetadata: false,
       loadingData: true,
@@ -747,7 +753,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       tables: [],
       expandedTable: null,
       tableColumns: [],
-      columnsByTable: {},
+      columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
       loadingColumns: false,
       refreshingMetadata: false,
       loadingData: true,
@@ -841,26 +847,35 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       errorMsg: null,
     });
     try {
-      const cached = metadataCache.get<ColumnMeta[]>(key);
-      if (cached) {
+      const indexKey = metadataKey(openId, driver, selectedDb, schema, "indexes", table);
+      const constraintKey = metadataKey(openId, driver, selectedDb, schema, "constraints", table);
+      const cachedColumns = metadataCache.get<ColumnMeta[]>(key);
+      const cachedIndexes = metadataCache.get<IndexMeta[]>(indexKey);
+      const cachedConstraints = metadataCache.get<ConstraintMeta[]>(constraintKey);
+      if (cachedColumns && cachedIndexes && cachedConstraints) {
         if (
           !isCurrentMetadataRequest(requestEpoch) ||
           get().expandedTable !== table
         )
           return;
         set((state) => ({
-          tableColumns: cached,
-          columnsByTable: { ...state.columnsByTable, [table]: cached },
+          tableColumns: cachedColumns,
+          columnsByTable: { ...state.columnsByTable, [table]: cachedColumns },
+          indexesByTable: { ...state.indexesByTable, [table]: cachedIndexes },
+          constraintsByTable: {
+            ...state.constraintsByTable,
+            [table]: cachedConstraints,
+          },
           loadingColumns: false,
         }));
         return;
       }
-      const tableColumns = await dbApi.listColumns(
-        openId,
-        selectedDb,
-        schema,
-        table,
-      );
+      // 列 / 索引 / 约束并行加载（FR-241），任一失败整体报错重试
+      const [tableColumns, tableIndexes, tableConstraints] = await Promise.all([
+        dbApi.listColumns(openId, selectedDb, schema, table),
+        dbApi.listIndexes(openId, selectedDb, schema, table),
+        dbApi.listConstraints(openId, selectedDb, schema, table),
+      ]);
       const current = get();
       if (
         !isCurrentMetadataRequest(requestEpoch) ||
@@ -872,9 +887,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         return;
       }
       metadataCache.set(key, tableColumns);
+      metadataCache.set(indexKey, tableIndexes);
+      metadataCache.set(constraintKey, tableConstraints);
       set((state) => ({
         tableColumns,
         columnsByTable: { ...state.columnsByTable, [table]: tableColumns },
+        indexesByTable: { ...state.indexesByTable, [table]: tableIndexes },
+        constraintsByTable: {
+          ...state.constraintsByTable,
+          [table]: tableConstraints,
+        },
         loadingColumns: false,
       }));
     } catch (error) {
@@ -1062,7 +1084,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         tables: [],
         expandedTable: null,
         tableColumns: [],
-        columnsByTable: {},
+        columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
         loadingColumns: false,
         refreshingMetadata: false,
         loadingData: false,
@@ -1428,7 +1450,7 @@ async function runTabQuery(
       set((s) => ({
         expandedTable: null,
         tableColumns: [],
-        columnsByTable: {},
+        columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
         loadingColumns: false,
       }));
     }

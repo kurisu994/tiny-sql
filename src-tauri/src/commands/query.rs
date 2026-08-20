@@ -142,6 +142,38 @@ pub async fn db_list_columns(
         .map_err(|e| e.i18n_key().to_string())
 }
 
+/// 列出指定表的索引（FR-241）。
+#[tauri::command]
+pub async fn db_list_indexes(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    schema: Option<String>,
+    table: String,
+) -> Result<Vec<db_driver::IndexMeta>, String> {
+    let driver = driver_of(&state, &id).await?;
+    let scope = metadata_scope(Driver::kind(&driver), database, schema)?;
+    Driver::list_indexes(&driver, &scope, &table)
+        .await
+        .map_err(|e| e.i18n_key().to_string())
+}
+
+/// 列出指定表的约束（FR-241）。
+#[tauri::command]
+pub async fn db_list_constraints(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    schema: Option<String>,
+    table: String,
+) -> Result<Vec<db_driver::ConstraintMeta>, String> {
+    let driver = driver_of(&state, &id).await?;
+    let scope = metadata_scope(Driver::kind(&driver), database, schema)?;
+    Driver::list_constraints(&driver, &scope, &table)
+        .await
+        .map_err(|e| e.i18n_key().to_string())
+}
+
 /// 执行 SQL，返回结果集。
 ///
 /// `row_limit` 用于区分表浏览 1000 行与 SQL 编辑器 10w 行；后端会强制 clamp。
