@@ -13,15 +13,13 @@ last_updated: 2026-08-19
 
 当前稳定版为 `v0.1.0`（2026-08-18 发布），`v0.2.0-rc1` 已于 2026-08-20 发布进入试用期。**v0.2 的全部开发任务已完成**：Driver 契约、PostgreSQL 后端与应用接线、主密码加密与 TLS 错误诊断、schema intelligence、查询工作台（历史/多 tab/导出/列宽）、SSH RTT/重连/keepalive、文档与英文 README。自动化门禁全绿：`just check`、双 driver integration 9/9、本机 Tauri 调试包构建成功。
 
-**v0.2 真实环境验收已于 2026-08-19 全部通过**（T3.4 双 driver Tauri 验收、T4.3 真实 TLS、T7.1/T7.2 真实链路、T8.1 双 driver dogfooding），V2-CP2 / V2-CP3 / V2-CP4 均已关闭。v0.2 剩余事项仅为 RC 试用与正式发布（见下节）；**v0.3 开发计划已立项（见本文「v0.3 开发计划」节），规划期与 v0.2 RC 试用期并行，功能代码在 v0.2.0 正式版发布后开工**。
+**v0.2 真实环境验收已于 2026-08-19 全部通过**（T3.4 双 driver Tauri 验收、T4.3 真实 TLS、T7.1/T7.2 真实链路、T8.1 双 driver dogfooding），V2-CP2 / V2-CP3 / V2-CP4 均已关闭。**PostgreSQL 15.latest / 18.latest 双端点 integration 回归与 RC 全平台下载安装验收已于 2026-08-20 由用户完成；V2-T8.2 同日由用户确认提前关闭**（RC 发布当日关闭，未执行满一周试用等待；实质验收依据为 08-19 T8.1 双 driver dogfooding 与 08-20 RC 安装验收，后续真实用户反馈按 P0/P1/P2 常规流程处理）。v0.2 剩余事项仅为正式发布（见下节）；**v0.3 开发计划已立项（见本文「v0.3 开发计划」节），v0.2.0 正式版发布后即可开工**。
 
 ## v0.2 剩余待办
 
 ### 发布
 
-- [ ] **PostgreSQL 版本矩阵 [1h]** RC 前完成 15.latest / 18.latest 双端点 integration 回归（版本基线见 `memory-bank/techContext.md`）。
-- [ ] **V2-T8.2 [3h]** 作者和至少 2 位试用者使用 v0.2 RC ≥ 1 周；至少 1 人以 PostgreSQL 为主，要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
-- [ ] **V2-T8.4 [2h]** `just release v0.2.0-rc1` 触发全平台构建并下载验收；P0/P1 清零后发布 v0.2.0，通过 **V2-CP5**。
+- [ ] **正式发布 v0.2.0**：`just release v0.2.0`，切出 CHANGELOG `0.2.0` 段并验收四平台 `latest.json`，通过 **V2-CP5**。所有前置（双 driver dogfooding、PG 15/18 双端点回归、RC 安装验收、T8.2 关闭）均已完成。
 
 ### 发布检查点
 
@@ -30,7 +28,7 @@ last_updated: 2026-08-19
 | **V2-CP2** 双 driver 闭环 | ✅ 已通过（2026-08-19 T3.4 真实验收） | — |
 | **V2-CP3** 安全与 TLS | ✅ 已通过（2026-08-19 T4.3 真实 TLS 正反例） | — |
 | **V2-CP4** 查询工作台 | ✅ 已通过（2026-08-19 T8.1 dogfooding） | — |
-| **V2-CP5** 发布 | 双 driver dogfooding + P0/P1 清零 + RC 安装通过 | 延后正式版，不降低凭据与数据安全标准 |
+| **V2-CP5** 发布 | 双 driver dogfooding（✅ 2026-08-19）+ RC 安装通过（✅ 2026-08-20）+ P0/P1 清零（✅ 2026-08-20 用户关闭 T8.2） | 延后正式版，不降低凭据与数据安全标准 |
 
 明确不进入 v0.2：安全表格编辑、对象设计、CSV 导入、SQL dump、备份同步、用户权限和 ER/BI/AI；这些分别留在 v0.3-v0.5+（见 [ROADMAP](./ROADMAP.md)）。
 

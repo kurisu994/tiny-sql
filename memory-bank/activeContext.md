@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+**v0.2 发布前置全部就绪（2026-08-20）**——用户当日连续确认：PostgreSQL 15.latest/18.latest 双端点 integration 回归完成、RC 全平台下载安装验收完成、V2-T8.2 提前关闭（RC 发布当日关闭，未执行满一周试用；实质验收依据为 08-19 T8.1 dogfooding 与 08-20 RC 安装验收，后续反馈走常规 P0/P1/P2 流程）。V2-CP5 三项标准全部满足，v0.2 仅剩 `just release v0.2.0` 正式发布。
+
 **v0.3 开发计划已立项（2026-08-20）**——用户决定在 v0.2 RC 试用期并行启动 v0.3 规划（用户口径“v3.0”按 ROADMAP 版本线确认为 v0.3）。`docs/PLAN.md` 新增「v0.3 开发计划」章节：7 周约 84h，范围为 ROADMAP v0.3 五项 FR——FR-242 服务端筛选排序分页（P0）、FR-244 独占 session 可靠事务（P0，v0.4 前置）、FR-240 SQL 文件与最近文件（P1）、FR-241 index/constraint 树与对象搜索（P1）、FR-243 多结果与 SQL 格式化（P1）；排期 Week 1-2 事务后端+UI、Week 3 筛选分页、Week 4 元数据树/搜索、Week 5 多结果/格式化、Week 6 SQL 文件、Week 7 dogfooding 发布；含 V3-CP0~CP5 检查点、降级链（格式化→最近文件→对象搜索→多结果；P0 不降级）与 V3-R01~R06 风险表。功能代码待 v0.2.0 正式版发布后开工（V3-CP0 准入）。
 
 **里程碑：v0.2.0-rc1 已发布（2026-08-20）**——用户选择按计划走 RC 路径（不跳过 T8.2 试用期）。发布前 `just check` 全绿；`just release v0.2.0-rc1` 完成版本号更新（package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock → `0.2.0-rc1`，预发布不切 CHANGELOG）、发布提交 `64787d8`、main 与 tag 推送（本次 SSH push 未被代理阻断）。Release workflow run `32322049995` 四平台 bundle + Publish 全部成功；GitHub Release `v0.2.0-rc1` 为 prerelease、非草稿，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows `.exe(.sig)`、Linux `.AppImage(.sig)`，**未生成 `latest.json`**（不会成为更新源）。RC 预期产物为全平台安装包 + updater `.sig`，notes 取 CHANGELOG `[Unreleased]` 段；剩下载安装实测。
@@ -75,7 +77,7 @@
 
 ## 近期决策
 
-- v0.2.0 正式版发布前不做 v0.3 功能代码；RC 反馈的 P0/P1 修复始终优先于 v0.3 任务。
+- V2-T8.2 于 RC 发布当日由用户确认提前关闭，未执行满一周试用；文档如实记录关闭依据，不写成“试用满一周通过”。
 - v0.3 多语句执行保持「单语句直接执行」护栏：「执行全部」由后端按方言分号状态机拆分逐条执行，每条独立 guard 分类与写确认；边界不确定即拒绝执行，绝不尽力执行。
 - v0.3 事务采用独占 session（独立于 pool，限额 + 空闲超时强制回收）；断链即事务消亡，禁止「重连续事务」隐式承诺；pool 与 session 路径并存，不重写 v0.2 已稳定 query 路径。
 - v0.3 SQL 文件读写复用「dialog 选路径 + 后端读写」模式，不引入 `tauri-plugin-fs`；最近文件只持久化路径与时间，不进加密历史。
@@ -115,17 +117,12 @@
 
 ## 下一步（按优先级）
 
-1. RC 安装验收：下载 `v0.2.0-rc1` 各平台包实测启动（macOS 右键打开 / `xattr -cr`、Windows / Linux 到主界面）。
-2. PostgreSQL 15.latest / 18.latest 双端点 integration 回归（版本基线见 techContext.md）。
-3. V2-T8.2：作者和至少 2 位试用者使用 v0.2 RC ≥ 1 周（至少 1 人以 PostgreSQL 为主），要求 0 数据丢失、0 凭据泄露、0 不可恢复 crash。
-4. P0/P1 清零后 `just release v0.2.0` 发正式版（V2-CP5），CHANGELOG 切出 `0.2.0` 段并生成 `latest.json`。
-5. V3-CP0 准入收口（v0.2.0 发布 + REQUIREMENTS.md 补 v0.3 范围）后启动 v0.3 Week 1：Driver 契约扩展独占 session（V3-T1.1）。
+1. 正式发布 v0.2.0：`just release v0.2.0`，切出 CHANGELOG `0.2.0` 段、验收四平台 `latest.json` 与应用内更新链路（V2-CP5 收尾）。
+2. V3-CP0 准入收口（v0.2.0 发布 + REQUIREMENTS.md 补 v0.3 范围）后启动 v0.3 Week 1：Driver 契约扩展独占 session（V3-T1.1）。
 
 ## 阻塞 / 风险
 
-- **RC 安装实测未完成**：run `32322049995` 已全绿、Release 资产齐全；各平台下载启动验收未做。
-- **PostgreSQL 版本矩阵未完成**：真实本地实例已通过后端契约，但 PostgreSQL 15.latest / 18.latest 双端点仍需分别回归。
 - **高级设置仅部分生效**：连接超时与 SSH keepalive 已接线；读取/写入超时、压缩、自动连接仍只持久化，不能描述成已生效。
-- **T8.2 RC 试用未开始**：需 ≥2 位试用者使用 RC ≥ 1 周且 0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，未完成前不发正式版。
+- **RC 真实用户反馈未经历完整试用周期**：T8.2 提前关闭，若正式版后出现 P0/P1 需随时准备 v0.2.1 补丁并优先于 v0.3 开发。
 
 相关：[[progress]] · [[systemPatterns]]
