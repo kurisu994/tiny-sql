@@ -574,3 +574,42 @@ async fn postgres_list_indexes_and_constraints() {
         .expect("清理失败");
     driver.close().await;
 }
+
+// === FR-243 多语句执行 ===
+
+/// 多语句脚本：逐条执行、dollar-quoted 函数体不切分、首错中止（PG 方言）。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_query_many_handles_dollar_quotes_and_errors() {
+    let driver = connect().await;
+
+    // dollar-quoted body 内的分号不切
+    let result = driver
+        .query_many(
+            "SELECT $$a;b$$ AS s; SELECT 2 AS n",
+            QueryOptions::default(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("多语句执行失败");
+    assert_eq!(result.statements.len(), 2);
+    assert!(matches!(
+        &result.statements[0].outcome,
+        db_driver::StatementOutcome::Ok { row_set } if row_set.rows[0][0].as_deref() == Some("a;b")
+    ));
+
+    // 首错中止
+    let result = driver
+        .query_many(
+            "SELECT 1; SELECT * FROM table_not_exists_999; SELECT 3",
+            QueryOptions::default(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("多语句应返回部分结果");
+    assert!(matches!(result.statements[0].outcome, db_driver::StatementOutcome::Ok { .. }));
+    assert!(matches!(result.statements[1].outcome, db_driver::StatementOutcome::Error { .. }));
+    assert!(matches!(result.statements[2].outcome, db_driver::StatementOutcome::Skipped));
+
+    driver.close().await;
+}

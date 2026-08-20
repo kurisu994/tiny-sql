@@ -86,6 +86,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const [objectQuery, setObjectQuery] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [formatting, setFormatting] = useState(false);
   /** 展开目标表并清空搜索（对象搜索定位动作，FR-241） */
   function locateTable(table: string) {
     if (expandedTable !== table) {
@@ -217,6 +218,49 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       if (!allowWrite) return;
     }
     await executeSql(sql, { rowLimit: 100000, allowWrite });
+    // 多语句脚本的写确认回填：前端粗判只看首 token，漏网的写语句由后端
+    // 返回 write_requires_confirmation，这里补确认后按确认态重试（FR-243）
+    const state = useSessionStore.getState();
+    const latest = selectActiveTab({
+      tabs: state.tabs,
+      activeTabId: state.activeTabId,
+    });
+    if (
+      latest?.lastErrorKey === "error.driver.write_requires_confirmation" &&
+      !allowWrite
+    ) {
+      const ok = await confirm({
+        title: "确认写操作",
+        message:
+          "脚本中包含写操作，请确认已使用只读账号或明确知道风险。是否继续执行？",
+        confirmText: "继续执行",
+        danger: true,
+      });
+      if (ok) {
+        await executeSql(sql, { rowLimit: 100000, allowWrite: true });
+      }
+    }
+  }
+
+  /** 格式化当前 tab 的 SQL（FR-243）：按连接方言，sql-formatter 动态加载；失败保持原文 */
+  async function formatSql() {
+    if (!activeTab) return;
+    const sql = activeTab.sqlText;
+    if (!sql.trim()) return;
+    setFormatting(true);
+    try {
+      const { format } = await import("sql-formatter");
+      const formatted = format(sql, {
+        language: connection.driver === "postgresql" ? "postgresql" : "mysql",
+        tabWidth: 2,
+        keywordCase: "upper",
+      });
+      setSqlText(formatted);
+    } catch {
+      // 格式化失败（方言边界语法）保持原文，不打断用户
+    } finally {
+      setFormatting(false);
+    }
   }
 
   /** 关闭 tab：dirty、执行中或有未提交事务时先确认（FR-109 / FR-244） */
@@ -613,6 +657,21 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               {activeTab?.queryRunning && (
                 <span className="text-xs text-neutral-500">执行中…</span>
               )}
+              <button
+                type="button"
+                onClick={formatSql}
+                disabled={
+                  !connected ||
+                  !activeTab ||
+                  activeTab.queryRunning ||
+                  formatting ||
+                  activeTab.sqlText.trim().length === 0
+                }
+                title="按当前连接方言格式化 SQL"
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+              >
+                {formatting ? "格式化…" : "格式化"}
+              </button>
               {activeTab?.transaction?.inTransaction ? (
                 <div className="flex items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 dark:border-violet-900 dark:bg-violet-950/40">
                   <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
@@ -660,7 +719,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                     exporting ||
                     !activeTab ||
                     activeTab.queryRunning ||
-                    activeTab.sqlText.trim().length === 0
+                    activeTab.sqlText.trim().length === 0 ||
+                    !!activeTab.multiResults
                   }
                   className="rounded-md border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
                 >
@@ -674,7 +734,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                     exporting ||
                     !activeTab ||
                     activeTab.queryRunning ||
-                    activeTab.sqlText.trim().length === 0
+                    activeTab.sqlText.trim().length === 0 ||
+                    !!activeTab.multiResults
                   }
                   className="rounded-md border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
                 >
@@ -691,7 +752,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           )}
 
           <div className="min-h-0 flex-1 overflow-hidden">
-            {activeTab?.browse ? (
+            {activeTab?.multiResults ? (
+              <MultiResultView tab={activeTab} connectionId={connection.id} />
+            ) : activeTab?.browse ? (
               <BrowseView
                 key={activeTab.id}
                 tab={activeTab}
@@ -1031,6 +1094,81 @@ function TableTreeIcon({ active }: { active: boolean }) {
       <span className="rounded-[1px] bg-sky-200/90" />
       <span className="rounded-[1px] bg-sky-100/90" />
     </span>
+  );
+}
+
+/** 多语句脚本的执行结果视图（FR-243）：结果集切换条 + 当前结果。 */
+function MultiResultView({
+  tab,
+  connectionId,
+}: {
+  tab: QueryTab;
+  connectionId: string;
+}) {
+  const setActiveResultIndex = useSessionStore((s) => s.setActiveResultIndex);
+  const results = tab.multiResults ?? [];
+  if (results.length === 0) return null;
+  const activeIndex = Math.min(tab.activeResultIndex, results.length - 1);
+  const current = results[activeIndex];
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-neutral-200 px-2 py-1 dark:border-neutral-800">
+        {results.map((result, index) => (
+          <button
+            key={index}
+            type="button"
+            onClick={() => setActiveResultIndex(tab.id, index)}
+            className={cn(
+              "flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-xs",
+              index === activeIndex
+                ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                : "text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800",
+            )}
+          >
+            结果 {index + 1}
+            {result.outcome.status === "error" && (
+              <span className="text-red-500" aria-label="失败">
+                ✕
+              </span>
+            )}
+            {result.outcome.status === "skipped" && (
+              <span className="text-neutral-400" aria-label="已跳过">
+                ⤼
+              </span>
+            )}
+          </button>
+        ))}
+        <span className="ml-auto shrink-0 text-[10px] text-neutral-400">
+          共 {results.length} 条语句
+        </span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {current.outcome.status === "ok" ? (
+          <ResultTable
+            rowSet={current.outcome.rowSet}
+            connectionId={connectionId}
+            truncated={current.outcome.rowSet.truncated}
+          />
+        ) : current.outcome.status === "error" ? (
+          <p className="p-4 text-sm text-red-600 dark:text-red-300">
+            {translateError({
+              key: current.outcome.key,
+              line: current.outcome.line,
+            })}
+          </p>
+        ) : (
+          <p className="p-4 text-sm text-neutral-400">
+            已跳过（前序语句失败或被取消）
+          </p>
+        )}
+      </div>
+      <div
+        className="truncate border-t border-neutral-200 px-3 py-1 font-mono text-xs text-neutral-400 dark:border-neutral-800"
+        title={current.sql}
+      >
+        {current.sql}
+      </div>
+    </div>
   );
 }
 

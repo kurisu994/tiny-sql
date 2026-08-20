@@ -417,6 +417,14 @@ export const dbApi = {
       limit: input.limit ?? null,
       offset: input.offset ?? null,
     }),
+  queryMany: (id: string, sql: string, options: QueryOptions = {}) =>
+    invoke<MultiQueryResult>("db_query_many", {
+      id,
+      sql,
+      queryId: options.queryId ?? null,
+      allowWrite: options.allowWrite ?? false,
+      schema: options.schema ?? null,
+    }),
 };
 
 /** 浏览表数据的筛选操作符（FR-242；与后端 FilterOp 一致） */
@@ -460,6 +468,24 @@ export interface TableBrowseResult {
   /** 满足筛选的总行数；COUNT 超时/失败为 null（降级未知总数分页） */
   total: number | null;
   hasNextPage: boolean;
+}
+
+/** 多语句脚本的单条执行结果（FR-243） */
+export interface StatementResult {
+  /** 语句原文（超长截断，仅展示用） */
+  sql: string;
+  outcome: StatementOutcome;
+}
+
+/** 单条语句的执行结局（FR-243；与后端 serde tag 一致） */
+export type StatementOutcome =
+  | { status: "ok"; rowSet: RowSet }
+  | { status: "error"; key: string; line: number | null }
+  | { status: "skipped" };
+
+/** 多语句执行结果（FR-243） */
+export interface MultiQueryResult {
+  statements: StatementResult[];
 }
 
 /** 事务内查询的返回：结果集 + 最新事务状态（FR-244） */

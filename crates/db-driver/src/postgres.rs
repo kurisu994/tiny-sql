@@ -380,6 +380,15 @@ impl PostgresDriver {
         if matches!(prepared.kind, PreparedSqlKind::TxControl(_)) {
             return Err(DriverError::TxRequiresSession);
         }
+        self.execute_prepared(&prepared, cancel_token).await
+    }
+
+    /// 按已分类语句在 pool 新连接上执行（`query` / `query_many` 共用）。
+    async fn execute_prepared(
+        &self,
+        prepared: &PreparedSql,
+        cancel_token: CancellationToken,
+    ) -> Result<RowSet, DriverError> {
         let mut conn = self.pool.acquire().await.map_err(query_failed)?;
         let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
             .fetch_one(&mut *conn)
@@ -424,7 +433,7 @@ impl PostgresDriver {
                         &prepared.sql,
                         columns,
                         FetchPolicy {
-                            limit: options.effective_limit(),
+                            limit: prepared.row_limit,
                             server_capped: false,
                         },
                         &mut conn,
@@ -438,6 +447,31 @@ impl PostgresDriver {
             }
             PreparedSqlKind::TxControl(_) => unreachable!("TxControl 已在 prepare 后拒绝"),
         }
+    }
+
+    /// 执行多语句脚本（FR-243）：拆分 → 预检 → 顺序执行，首错 / 取消中止。
+    pub async fn query_many(
+        &self,
+        sql: &str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> Result<MultiQueryResult, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        let (statements, prepared_list) =
+            prepare_statements(sql, options, SqlDialect::PostgreSql)?;
+        let driver = self.clone();
+        query_many_with(
+            statements,
+            prepared_list,
+            move |prepared, token| {
+                let driver = driver.clone();
+                Box::pin(async move { driver.execute_prepared(prepared, token).await })
+            },
+            cancel_token,
+        )
+        .await
     }
 
     /// 浏览表数据（FR-242）：服务端筛选 / 排序 / 分页，COUNT 超时降级 None。
@@ -795,6 +829,15 @@ impl Driver for PostgresDriver {
             query,
             cancel_token,
         ))
+    }
+
+    fn query_many<'a>(
+        &'a self,
+        sql: &'a str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, MultiQueryResult> {
+        Box::pin(PostgresDriver::query_many(self, sql, options, cancel_token))
     }
 
     fn close(&self) -> DriverCloseFuture<'_> {

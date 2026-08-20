@@ -30,6 +30,9 @@ function makeTab(overrides: Partial<QueryTab> = {}): QueryTab {
     selectedTable: null,
     transaction: null,
     browse: null,
+    multiResults: null,
+    activeResultIndex: 0,
+    lastErrorKey: null,
     ...overrides,
   };
 }
@@ -230,6 +233,78 @@ describe("session-store", () => {
       id: "c1",
       sessionId: "tx-1",
     });
+  });
+
+  it("多语句脚本分流到 queryMany 并展示多结果（FR-243）", async () => {
+    useSessionStore.setState({ openId: "c1", selectedDb: "app" });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_query") {
+        return Promise.reject({
+          key: "error.driver.multiple_statements",
+          line: null,
+        });
+      }
+      if (cmd === "db_query_many") {
+        return Promise.resolve({
+          statements: [
+            {
+              sql: "SELECT 1",
+              outcome: {
+                status: "ok",
+                rowSet: { columns: ["a"], rows: [["1"]], truncated: false },
+              },
+            },
+            {
+              sql: "SELECT 2",
+              outcome: {
+                status: "ok",
+                rowSet: { columns: ["b"], rows: [["2"]], truncated: false },
+              },
+            },
+          ],
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    await useSessionStore.getState().executeSql("SELECT 1; SELECT 2");
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "db_query_many",
+      expect.objectContaining({ id: "c1" }),
+    );
+    const tab = activeTab();
+    expect(tab.multiResults).toHaveLength(2);
+    expect(tab.activeResultIndex).toBe(0);
+    expect(tab.rowSet).toBeNull();
+
+    // 切换查看第二个结果集
+    useSessionStore.getState().setActiveResultIndex(tab.id, 1);
+    expect(activeTab().activeResultIndex).toBe(1);
+  });
+
+  it("多语句写未确认时保留错误 key 供 UI 重试（FR-243）", async () => {
+    useSessionStore.setState({ openId: "c1", selectedDb: "app" });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_query") {
+        return Promise.reject({
+          key: "error.driver.multiple_statements",
+          line: null,
+        });
+      }
+      if (cmd === "db_query_many") {
+        return Promise.reject({
+          key: "error.driver.write_requires_confirmation",
+          line: null,
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    await useSessionStore
+      .getState()
+      .executeSql("SELECT 1; UPDATE t SET a = 1");
+    expect(activeTab().lastErrorKey).toBe(
+      "error.driver.write_requires_confirmation",
+    );
+    expect(activeTab().multiResults).toBeNull();
   });
 
   it("浏览 tab 筛选 / 排序 / 翻页都重置页码并重新查询（FR-242）", async () => {

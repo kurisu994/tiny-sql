@@ -26,6 +26,7 @@ import {
   type IndexMeta,
   type RowSet,
   type SchemaMeta,
+  type StatementResult,
   type StoredConnection,
   type TableFilter,
   type TableMeta,
@@ -68,6 +69,12 @@ export interface QueryTab {
   transaction: TabTransaction | null;
   /** 表数据浏览（FR-242）：非空时本 tab 为浏览模式（无 SQL 编辑器，工具栏 + 分页） */
   browse: BrowseState | null;
+  /** 多语句执行结果（FR-243）：非空时结果区按多结果集展示 */
+  multiResults: StatementResult[] | null;
+  /** 多结果集中当前查看的结果下标 */
+  activeResultIndex: number;
+  /** 最近一次执行的错误 key（写确认重试等 UI 流程判断用） */
+  lastErrorKey: string | null;
 }
 
 /** tab 绑定的事务 session 状态（FR-244）。 */
@@ -118,6 +125,9 @@ function createTab(title?: string, sql = "SELECT 1"): QueryTab {
     selectedTable: null,
     transaction: null,
     browse: null,
+    multiResults: null,
+    activeResultIndex: 0,
+    lastErrorKey: null,
   };
 }
 
@@ -195,12 +205,19 @@ function errorKey(e: unknown): string {
   return typeof e === "string" ? e : String(e);
 }
 
+/** 提取命令错误 key（QueryCommandError 对象或裸字符串）。 */
+function commandErrorKey(e: unknown): string | null {
+  if (typeof e === "string") return e;
+  if (typeof e === "object" && e !== null && "key" in e) {
+    const key = Reflect.get(e, "key");
+    return typeof key === "string" ? key : null;
+  }
+  return null;
+}
+
 /** 判断错误是否为事务 session 失效（断链 / 重连导致的 session_broken）。 */
 function isSessionBrokenError(e: unknown): boolean {
-  if (typeof e === "object" && e !== null && "key" in e) {
-    return Reflect.get(e, "key") === "error.driver.session_broken";
-  }
-  return e === "error.driver.session_broken";
+  return commandErrorKey(e) === "error.driver.session_broken";
 }
 
 /** 静默关闭事务 session：close 幂等，失败（连接已断）不影响本地状态清理。 */
@@ -424,6 +441,8 @@ interface SessionState {
   browseSetPageSize: (tabId: string, pageSize: number) => Promise<void>;
   /** 浏览 tab：按当前状态重新查询 */
   browseRefresh: (tabId: string) => Promise<void>;
+  /** 多结果集：切换当前查看的结果下标（FR-243） */
+  setActiveResultIndex: (tabId: string, index: number) => void;
   markHopStatus: (payload: HopStatusPayload) => void;
   markHopRtt: (payload: HopRttPayload) => void;
   markHopLost: (hopIndex: number) => void;
@@ -1317,6 +1336,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     await browseTabData(get, set, tabId);
   },
 
+  setActiveResultIndex: (tabId, index) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab?.multiResults || index < 0 || index >= tab.multiResults.length) return;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, { activeResultIndex: index }),
+    }));
+  },
+
   markHopStatus: (payload) =>
     set((s) => {
       if (
@@ -1418,6 +1445,8 @@ async function runTabQuery(
       currentQueryId: queryId,
       queryErrorMsg: null,
       rowSet: null,
+      multiResults: null,
+      lastErrorKey: null,
     }),
   }));
   try {
@@ -1435,12 +1464,56 @@ async function runTabQuery(
       rowSet = result.rowSet;
       inTransaction = result.inTransaction;
     } else {
-      rowSet = await dbApi.query(openId, sql, {
-        queryId,
-        rowLimit: options.rowLimit,
-        allowWrite: options.allowWrite ?? false,
-        schema,
-      });
+      try {
+        rowSet = await dbApi.query(openId, sql, {
+          queryId,
+          rowLimit: options.rowLimit,
+          allowWrite: options.allowWrite ?? false,
+          schema,
+        });
+      } catch (singleError) {
+        // 多语句脚本分流：拆分后逐条执行（FR-243）；事务 tab 不支持执行全部
+        if (commandErrorKey(singleError) !== "error.driver.multiple_statements") {
+          throw singleError;
+        }
+        const multi = await dbApi.queryMany(openId, sql, {
+          queryId,
+          allowWrite: options.allowWrite ?? false,
+          schema,
+        });
+        const tab = get().tabs.find((t) => t.id === tabId);
+        if (!tab || tab.currentQueryId !== queryId) return;
+        if (invalidatesMetadataCache(sql)) {
+          invalidateMetadataRequests();
+          metadataCache.clearConnection(openId);
+          set((s) => ({
+            expandedTable: null,
+            tableColumns: [],
+            columnsByTable: {}, indexesByTable: {}, constraintsByTable: {},
+            loadingColumns: false,
+          }));
+        }
+        const firstOk = multi.statements.findIndex(
+          (stmt) => stmt.outcome.status === "ok",
+        );
+        set((s) => ({
+          tabs: patchTab(s.tabs, tabId, {
+            multiResults: multi.statements,
+            activeResultIndex: firstOk >= 0 ? firstOk : 0,
+            loadingData: false,
+            queryRunning: false,
+            currentQueryId: null,
+            rowSet: null,
+            // 脚本中有语句失败时顶部提示（单条明细在结果区展示）
+            queryErrorMsg: multi.statements.some(
+              (stmt) => stmt.outcome.status === "error",
+            )
+              ? "脚本存在失败语句，后续语句已跳过"
+              : null,
+          }),
+        }));
+        return;
+      }
     }
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab || tab.currentQueryId !== queryId) return;
@@ -1457,6 +1530,7 @@ async function runTabQuery(
     set((s) => ({
       tabs: patchTab(s.tabs, tabId, {
         rowSet,
+        multiResults: null,
         loadingData: false,
         queryRunning: false,
         currentQueryId: null,
@@ -1477,6 +1551,8 @@ async function runTabQuery(
         queryRunning: false,
         currentQueryId: null,
         rowSet: null,
+        multiResults: null,
+        lastErrorKey: commandErrorKey(e),
         // session 失效（断链等）：清除事务状态，未提交已由服务端回滚
         transaction: isSessionBrokenError(e) ? null : tab.transaction,
       }),

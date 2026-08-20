@@ -526,6 +526,16 @@ pub trait Driver: Send + Sync {
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, TableBrowseResult>;
 
+    /// 执行多语句脚本（FR-243）：按方言拆分后逐条执行，首错 / 取消中止、
+    /// 后续语句标记 skipped。预检遇事务控制语句整体拒绝（pool 路径不执行事务）；
+    /// 写语句仍需 `allow_write` 确认，否则整体返回 WriteRequiresConfirmation。
+    fn query_many<'a>(
+        &'a self,
+        sql: &'a str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, MultiQueryResult>;
+
     /// 幂等关闭 driver 持有的连接资源。
     fn close(&self) -> DriverCloseFuture<'_>;
 }
@@ -943,6 +953,15 @@ impl MySqlDriver {
         if matches!(prepared.kind, PreparedSqlKind::TxControl(_)) {
             return Err(DriverError::TxRequiresSession);
         }
+        self.execute_prepared(&prepared, cancel_token).await
+    }
+
+    /// 按已分类语句在 pool 新连接上执行（`query` / `query_many` 共用）。
+    async fn execute_prepared(
+        &self,
+        prepared: &PreparedSql,
+        cancel_token: CancellationToken,
+    ) -> Result<RowSet, DriverError> {
         let mut conn = self
             .pool
             .acquire()
@@ -974,6 +993,30 @@ impl MySqlDriver {
             }
             PreparedSqlKind::TxControl(_) => unreachable!("TxControl 已在 prepare 后拒绝"),
         }
+    }
+
+    /// 执行多语句脚本（FR-243）：拆分 → 预检 → 顺序执行，首错 / 取消中止。
+    pub async fn query_many(
+        &self,
+        sql: &str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> Result<MultiQueryResult, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        let (statements, prepared_list) = prepare_statements(sql, options, SqlDialect::MySql)?;
+        let driver = self.clone();
+        query_many_with(
+            statements,
+            prepared_list,
+            move |prepared, token| {
+                let driver = driver.clone();
+                Box::pin(async move { driver.execute_prepared(prepared, token).await })
+            },
+            cancel_token,
+        )
+        .await
     }
 
     /// 浏览表数据（FR-242）：服务端筛选 / 排序 / 分页，COUNT 超时降级 None。
@@ -1296,6 +1339,15 @@ impl Driver for MySqlDriver {
             query,
             cancel_token,
         ))
+    }
+
+    fn query_many<'a>(
+        &'a self,
+        sql: &'a str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, MultiQueryResult> {
+        Box::pin(MySqlDriver::query_many(self, sql, options, cancel_token))
     }
 
     fn close(&self) -> DriverCloseFuture<'_> {
@@ -1626,12 +1678,253 @@ fn classify_tx_control(tokens: &[String]) -> Option<TxControl> {
 struct PreparedSql {
     sql: String,
     kind: PreparedSqlKind,
+    /// 客户端行数上限（Write + RETURNING 场景使用）
+    row_limit: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FetchPolicy {
     limit: usize,
     server_capped: bool,
+}
+
+/// 多语句脚本的单条执行结果（FR-243）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatementResult {
+    /// 语句原文（超长截断，仅用于展示）
+    pub sql: String,
+    pub outcome: StatementOutcome,
+}
+
+/// 单条语句的执行结局（FR-243）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum StatementOutcome {
+    #[serde(rename = "ok")]
+    Ok { row_set: RowSet },
+    #[serde(rename = "error")]
+    Error { key: String, line: Option<u32> },
+    /// 因前序失败或取消而未执行
+    #[serde(rename = "skipped")]
+    Skipped,
+}
+
+/// 多语句执行结果：与脚本语句一一对应（FR-243）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiQueryResult {
+    pub statements: Vec<StatementResult>,
+}
+
+/// 结果展示用的语句原文最大长度。
+const STATEMENT_SQL_MAX_CHARS: usize = 500;
+
+fn truncate_statement_sql(sql: &str) -> String {
+    if sql.chars().count() > STATEMENT_SQL_MAX_CHARS {
+        sql.chars().take(STATEMENT_SQL_MAX_CHARS).collect()
+    } else {
+        sql.to_string()
+    }
+}
+
+/// 按方言把多语句脚本拆分为单条语句（FR-243）。
+///
+/// 分号只在「普通」状态切分；字符串、标识符引号、行/块注释与 PostgreSQL
+/// dollar-quoted body 内的分号不算。拆分后空白语句丢弃；存在未闭合的引号 /
+/// 注释 / dollar-quote 时返回 `InvalidSql`（边界不确定即拒绝，绝不尽力执行）。
+fn split_statements(sql: &str, dialect: SqlDialect) -> Result<Vec<String>, DriverError> {
+    #[derive(PartialEq)]
+    enum State {
+        Normal,
+        SingleQuote,
+        DoubleQuote,
+        Backtick,
+        LineComment,
+        BlockComment,
+        DollarQuote,
+    }
+    let chars: Vec<(usize, char)> = sql.char_indices().collect();
+    let n = chars.len();
+    let mut state = State::Normal;
+    let mut dollar_tag: Vec<char> = Vec::new();
+    let mut statements: Vec<String> = Vec::new();
+    let mut stmt_start = 0usize;
+    let mut i = 0usize;
+
+    while i < n {
+        let (byte, ch) = chars[i];
+        match state {
+            State::Normal => match ch {
+                '\'' => state = State::SingleQuote,
+                '"' => state = State::DoubleQuote,
+                '`' if dialect == SqlDialect::MySql => state = State::Backtick,
+                '#' if dialect == SqlDialect::MySql => state = State::LineComment,
+                '-' if i + 1 < n && chars[i + 1].1 == '-' => {
+                    state = State::LineComment;
+                    i += 1;
+                }
+                '/' if i + 1 < n && chars[i + 1].1 == '*' => {
+                    state = State::BlockComment;
+                    i += 1;
+                }
+                '$' if dialect == SqlDialect::PostgreSql => {
+                    // 尝试解析 $tag$ 开界（空 tag 即 $$）
+                    let mut j = i + 1;
+                    if j < n && (chars[j].1.is_ascii_alphabetic() || chars[j].1 == '_') {
+                        while j < n && (chars[j].1.is_ascii_alphanumeric() || chars[j].1 == '_') {
+                            j += 1;
+                        }
+                    }
+                    if j < n && chars[j].1 == '$' {
+                        dollar_tag = chars[i..=j].iter().map(|(_, c)| *c).collect();
+                        state = State::DollarQuote;
+                        i = j;
+                    }
+                }
+                ';' => {
+                    let stmt = sql[stmt_start..byte].trim();
+                    if !stmt.is_empty() {
+                        statements.push(stmt.to_string());
+                    }
+                    stmt_start = byte + 1;
+                }
+                _ => {}
+            },
+            State::SingleQuote => {
+                if ch == '\\' {
+                    i += 1; // 双方言保守跳过转义字符
+                } else if ch == '\'' {
+                    if i + 1 < n && chars[i + 1].1 == '\'' {
+                        i += 1; // '' 转义
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::DoubleQuote => {
+                if ch == '"' {
+                    if i + 1 < n && chars[i + 1].1 == '"' {
+                        i += 1; // "" 转义
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::Backtick => {
+                if ch == '`' {
+                    if i + 1 < n && chars[i + 1].1 == '`' {
+                        i += 1; // `` 转义
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::LineComment => {
+                if ch == '\n' {
+                    state = State::Normal;
+                }
+            }
+            State::BlockComment => {
+                if ch == '*' && i + 1 < n && chars[i + 1].1 == '/' {
+                    state = State::Normal;
+                    i += 1;
+                }
+            }
+            State::DollarQuote => {
+                if ch == '$' {
+                    let tag_len = dollar_tag.len();
+                    if i + tag_len <= n
+                        && chars[i..i + tag_len]
+                            .iter()
+                            .map(|(_, c)| *c)
+                            .eq(dollar_tag.iter().copied())
+                    {
+                        state = State::Normal;
+                        i += tag_len - 1;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    if state != State::Normal {
+        return Err(DriverError::InvalidSql);
+    }
+    let tail = sql[stmt_start..].trim();
+    if !tail.is_empty() {
+        statements.push(tail.to_string());
+    }
+    if statements.is_empty() {
+        return Err(DriverError::InvalidSql);
+    }
+    Ok(statements)
+}
+
+/// 多语句执行的共享流程（FR-243）：拆分 → 逐条预检分类（遇事务控制语句整体
+/// 拒绝，pool 路径不执行事务）→ 顺序执行，首错 / 取消中止，剩余标记 skipped。
+async fn query_many_with<F>(
+    statements: Vec<String>,
+    prepared_list: Vec<PreparedSql>,
+    execute: F,
+    cancel_token: CancellationToken,
+) -> Result<MultiQueryResult, DriverError>
+where
+    F: for<'a> Fn(&'a PreparedSql, CancellationToken) -> DriverFuture<'a, RowSet>,
+{
+    let mut results: Vec<StatementResult> = Vec::with_capacity(statements.len());
+    let mut iter = statements.iter().zip(&prepared_list);
+    let mut stopped = false;
+    for (stmt, prepared) in iter.by_ref() {
+        if cancel_token.is_cancelled() {
+            stopped = true;
+            break;
+        }
+        match execute(prepared, cancel_token.clone()).await {
+            Ok(row_set) => results.push(StatementResult {
+                sql: truncate_statement_sql(stmt),
+                outcome: StatementOutcome::Ok { row_set },
+            }),
+            Err(error) => {
+                results.push(StatementResult {
+                    sql: truncate_statement_sql(stmt),
+                    outcome: StatementOutcome::Error {
+                        key: error.i18n_key().to_string(),
+                        line: error.sql_line(),
+                    },
+                });
+                stopped = true;
+                break;
+            }
+        }
+    }
+    if stopped {
+        for (stmt, _) in iter {
+            results.push(StatementResult {
+                sql: truncate_statement_sql(stmt),
+                outcome: StatementOutcome::Skipped,
+            });
+        }
+    }
+    Ok(MultiQueryResult { statements: results })
+}
+
+/// 多语句预检：拆分 + 逐条 guard 分类；事务控制语句整体拒绝（FR-243）。
+fn prepare_statements(
+    sql: &str,
+    options: QueryOptions,
+    dialect: SqlDialect,
+) -> Result<(Vec<String>, Vec<PreparedSql>), DriverError> {
+    let statements = split_statements(sql, dialect)?;
+    let mut prepared_list = Vec::with_capacity(statements.len());
+    for stmt in &statements {
+        let prepared = prepare_query_sql_for_dialect(stmt, options, dialect)?;
+        if matches!(prepared.kind, PreparedSqlKind::TxControl(_)) {
+            return Err(DriverError::TxRequiresSession);
+        }
+        prepared_list.push(prepared);
+    }
+    Ok((statements, prepared_list))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1714,6 +2007,7 @@ fn prepare_query_sql_for_dialect(
                     limit,
                     server_capped: true,
                 },
+                row_limit: limit,
             })
         } else {
             Ok(PreparedSql {
@@ -1722,6 +2016,7 @@ fn prepare_query_sql_for_dialect(
                     limit,
                     server_capped: false,
                 },
+                row_limit: limit,
             })
         }
     } else if is_metadata {
@@ -1736,12 +2031,14 @@ fn prepare_query_sql_for_dialect(
                 limit,
                 server_capped: false,
             },
+            row_limit: limit,
         })
     } else if let Some(tx) = classify_tx_control(&tokens) {
         // 事务控制语句不修改数据，免写确认；能否执行由 pool（拒绝）/ session（允许）路径分别决定
         Ok(PreparedSql {
             sql: stmt,
             kind: PreparedSqlKind::TxControl(tx),
+            row_limit: limit,
         })
     } else {
         if !options.allow_write {
@@ -1750,6 +2047,7 @@ fn prepare_query_sql_for_dialect(
         Ok(PreparedSql {
             sql: stmt,
             kind: PreparedSqlKind::Write,
+            row_limit: limit,
         })
     }
 }
@@ -2183,6 +2481,70 @@ mod tests {
             FilterValue::Text("042x".to_string())
         );
         assert_eq!(parse_filter_value(""), FilterValue::Text(String::new()));
+    }
+
+    #[test]
+    fn split_statements_handles_literals_comments_and_dollar_quotes() {
+        // 普通拆分
+        assert_eq!(
+            split_statements("SELECT 1; SELECT 2;", SqlDialect::MySql).unwrap(),
+            vec!["SELECT 1", "SELECT 2"]
+        );
+        // 字符串 / 注释 / 标识符内的分号不切
+        assert_eq!(
+            split_statements("SELECT ';' AS s; -- 注释;\nSELECT 2", SqlDialect::MySql).unwrap(),
+            vec!["SELECT ';' AS s", "-- 注释;\nSELECT 2"]
+        );
+        assert_eq!(
+            split_statements("SELECT `a;b` FROM t; SELECT 'it\\'s;x'", SqlDialect::MySql).unwrap(),
+            vec!["SELECT `a;b` FROM t", "SELECT 'it\\'s;x'"]
+        );
+        // 块注释与空语句
+        assert_eq!(
+            split_statements("/* ; */;; SELECT 1;;", SqlDialect::MySql).unwrap(),
+            vec!["/* ; */", "SELECT 1"]
+        );
+        // PG dollar-quoted body 内的分号不切
+        let pg_sql = "CREATE FUNCTION f() RETURNS void AS $body$ BEGIN RAISE NOTICE 'x;y'; END; $body$ LANGUAGE plpgsql; SELECT 1";
+        let parts = split_statements(pg_sql, SqlDialect::PostgreSql).unwrap();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].contains("RAISE NOTICE"));
+        assert_eq!(parts[1], "SELECT 1");
+        // $$ 空 tag
+        assert_eq!(
+            split_statements("DO $$ BEGIN RAISE NOTICE 'a;b'; END $$; SELECT 2", SqlDialect::PostgreSql).unwrap().len(),
+            2
+        );
+        // 未闭合 → 拒绝
+        assert!(split_statements("SELECT 'abc", SqlDialect::MySql).is_err());
+        assert!(split_statements("SELECT $body$ x", SqlDialect::PostgreSql).is_err());
+        assert!(split_statements("/* abc", SqlDialect::MySql).is_err());
+        // 纯空白/全分号 → InvalidSql
+        assert!(split_statements(" ; ; ", SqlDialect::MySql).is_err());
+        // PG 的 $1 占位符样式不误判为 dollar-quote
+        assert_eq!(
+            split_statements("SELECT $1::int; SELECT 2", SqlDialect::PostgreSql).unwrap().len(),
+            2
+        );
+    }
+
+    #[test]
+    fn prepare_statements_rejects_tx_control_in_scripts() {
+        let options = QueryOptions {
+            row_limit: 10,
+            allow_write: true,
+        };
+        let error = prepare_statements("SELECT 1; BEGIN; SELECT 2", options, SqlDialect::MySql)
+            .expect_err("脚本含事务语句必须整体拒绝");
+        assert!(matches!(error, DriverError::TxRequiresSession));
+        // 写语句未确认时整体拒绝且不执行
+        let error = prepare_statements(
+            "SELECT 1; UPDATE t SET a = 1",
+            QueryOptions::default(),
+            SqlDialect::MySql,
+        )
+        .expect_err("写语句未确认必须拒绝");
+        assert!(matches!(error, DriverError::WriteRequiresConfirmation));
     }
 
     #[test]

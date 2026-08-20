@@ -622,3 +622,75 @@ async fn list_indexes_and_constraints() {
         .expect("清理失败");
     driver.close().await;
 }
+
+// === FR-243 多语句执行 ===
+
+/// 多语句脚本：逐条执行、首错中止、写确认、事务语句拒绝。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn query_many_executes_statements_and_stops_on_error() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+
+    // 全读脚本：两条结果
+    let result = driver
+        .query_many(
+            "SELECT 1 AS a; SELECT ';' AS semi",
+            QueryOptions::default(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("多语句执行失败");
+    assert_eq!(result.statements.len(), 2);
+    assert!(matches!(
+        &result.statements[0].outcome,
+        db_driver::StatementOutcome::Ok { row_set } if row_set.rows[0][0].as_deref() == Some("1")
+    ));
+    assert!(matches!(
+        &result.statements[1].outcome,
+        db_driver::StatementOutcome::Ok { row_set } if row_set.rows[0][0].as_deref() == Some(";")
+    ));
+
+    // 首错中止：第二条失败后第三条 skipped
+    let result = driver
+        .query_many(
+            "SELECT 1; SELECT * FROM table_not_exists_999; SELECT 3",
+            QueryOptions::default(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("多语句应返回部分结果而非整体失败");
+    assert!(matches!(result.statements[0].outcome, db_driver::StatementOutcome::Ok { .. }));
+    assert!(matches!(
+        &result.statements[1].outcome,
+        db_driver::StatementOutcome::Error { key, .. } if key == "error.driver.query_failed"
+    ));
+    assert!(matches!(
+        result.statements[2].outcome,
+        db_driver::StatementOutcome::Skipped
+    ));
+
+    // 含写语句未确认 → 整体拒绝且不执行任何语句
+    let error = driver
+        .query_many(
+            "SELECT 1; DELETE FROM tx_session_probe",
+            QueryOptions::default(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("写语句未确认必须整体拒绝");
+    assert!(matches!(error, DriverError::WriteRequiresConfirmation));
+
+    // 含事务语句 → 整体拒绝
+    let error = driver
+        .query_many(
+            "SELECT 1; COMMIT",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("事务语句必须拒绝");
+    assert!(matches!(error, DriverError::TxRequiresSession));
+
+    driver.close().await;
+}

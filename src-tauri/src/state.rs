@@ -144,6 +144,20 @@ impl Driver for ActiveDriver {
         }
     }
 
+    fn query_many<'a>(
+        &'a self,
+        sql: &'a str,
+        options: QueryOptions,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, db_driver::MultiQueryResult> {
+        match self {
+            Self::MySql(driver) => Driver::query_many(driver, sql, options, cancel_token),
+            Self::PostgreSql(driver) => {
+                Driver::query_many(driver, sql, options, cancel_token)
+            }
+        }
+    }
+
     fn close(&self) -> DriverCloseFuture<'_> {
         match self {
             Self::MySql(driver) => Driver::close(driver),

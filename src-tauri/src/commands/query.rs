@@ -351,6 +351,67 @@ pub async fn db_browse_table(
     result
 }
 
+/// 执行多语句脚本（FR-243）：拆分后逐条执行，首错 / 取消中止。
+/// 事务控制语句整体拒绝（tx_requires_session 引导去事务 tab）；
+/// 写语句未确认时整体拒绝且不执行任何语句。
+#[tauri::command]
+pub async fn db_query_many(
+    state: State<'_, AppState>,
+    id: String,
+    sql: String,
+    query_id: Option<String>,
+    allow_write: Option<bool>,
+    schema: Option<String>,
+) -> Result<db_driver::MultiQueryResult, QueryCommandError> {
+    let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    let (driver, token) = {
+        let lifecycle = state.connection_lifecycle(&id);
+        let _lifecycle = lifecycle.lock().await;
+        let driver = driver_of(&state, &id)
+            .await
+            .map_err(QueryCommandError::from_key)?;
+        let token = CancellationToken::new();
+        state.queries.lock().await.insert(
+            query_id.clone(),
+            ActiveQuery {
+                connection_id: id.clone(),
+                cancel_token: token.clone(),
+            },
+        );
+        (driver, token)
+    };
+    let result = Driver::query_many(
+        &driver,
+        &sql,
+        QueryOptions {
+            row_limit: QUERY_RESULT_LIMIT,
+            allow_write: allow_write.unwrap_or(false),
+        },
+        token,
+    )
+    .await;
+    state.queries.lock().await.remove(&query_id);
+    // 脚本整体记一条历史；任何语句 error 即视为失败
+    let success = result
+        .as_ref()
+        .map(|multi| {
+            multi
+                .statements
+                .iter()
+                .all(|stmt| !matches!(stmt.outcome, db_driver::StatementOutcome::Error { .. }))
+        })
+        .unwrap_or(false);
+    record_history(
+        &state,
+        &id,
+        &driver,
+        &sql,
+        schema.as_deref(),
+        success,
+    );
+    result.map_err(QueryCommandError::from)
+}
+
 /// 取消正在执行的 SQL。若 query 已完成，幂等成功。
 #[tauri::command]
 pub async fn db_query_cancel(state: State<'_, AppState>, query_id: String) -> Result<(), String> {
