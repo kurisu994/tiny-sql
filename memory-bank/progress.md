@@ -9,7 +9,7 @@
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
 | v0.1.0 | ✅ 正式版已发布 | 2026-08-18 全平台 Release 成功，含安装包、签名更新产物与四平台 `latest.json` |
 | v0.2 | ✅ 正式版已发布 | 2026-08-20 发布 `v0.2.0`（发布提交 `4f6b07f`）；V2-CP1~CP5 全部关闭。范围：多 driver + PostgreSQL、主密码加密/TLS 诊断、schema intelligence、查询工作台、SSH RTT/重连；详见 CHANGELOG `0.2.0` 段 |
-| v0.3 | 🚧 编码完成待真实验收 | 2026-08-20 完成 Week 1-6 全部五项 FR（FR-244 事务 / FR-242 浏览分页 / FR-241 元数据树与搜索 / FR-243 多语句与格式化 / FR-240 SQL 文件）+ 文档与自动化门禁；`just check` 全绿、双 driver integration 20/20、本机构建成功；剩 T7.1/T7.2 真实 dogfooding 与正式发布 |
+| v0.3 | 🚧 T7.1 已通过，待 RC 试用 | 2026-08-20 完成 Week 1-6 全部五项 FR（FR-244 事务 / FR-242 浏览分页 / FR-241 元数据树与搜索 / FR-243 多语句与格式化 / FR-240 SQL 文件）+ 文档与自动化门禁；`just check` 全绿、双 driver integration 20/20、本机构建成功；2026-08-21 V3-T7.1 双 driver × 直连/1 跳/3 跳全功能真实回归用户实测通过；剩 V3-T7.2 RC 一周试用与正式发布 |
 | v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
 | v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
 

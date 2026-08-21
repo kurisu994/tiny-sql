@@ -2,9 +2,11 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-20
+**最后更新**：2026-08-21
 
 ## 当前状态
+
+**V3-T7.1 真实回归已通过（2026-08-21）**——用户实测 MySQL/PostgreSQL × 直连/1 跳/3 跳全功能（事务、筛选分页、多结果、对象搜索、SQL 文件）无问题；PLAN.md 已勾选，RELEASE_CHECKLIST v0.3 功能验收段已记录结果。v0.3 剩余仅为 V3-T7.2 RC 一周试用与 RC / 正式发布（V3-CP5）。
 
 **本轮优化：结果表格序号列冻结（2026-08-20）**——用户要求 `#` 序号列不随横向滚动。ResultTable 改用 Virtuoso `customScrollParent` 复用外层统一横纵滚动容器（原生 Virtuoso scroller 会截获 sticky 上下文，直接 sticky 对行无效），表头 `sticky top-0 z-20`、表头序号 `sticky left-0 z-30`、行序号 `sticky left-0 z-10` + `bg-background`（hover 用 group 同步行色）。tsc、vitest 93/93、Next build 全绿，CHANGELOG `[Unreleased]` 已补录；待用户 dev 实测后发布 v0.2.0。
 
@@ -127,9 +129,8 @@
 
 ## 下一步（按优先级）
 
-1. V3-T7.1：MySQL/PostgreSQL × 直连/1 跳/3 跳全功能真实回归（事务、筛选分页、多结果、对象搜索、SQL 文件）。
-2. V3-T7.2：作者 + 至少 2 位试用者使用 v0.3 RC ≥ 1 周（沿用 V2-T8.2 标准）。
-3. P0/P1 清零后 `just release v0.3.0-rc1` → RC 验收 → `just release v0.3.0`（V3-CP5）。
+1. V3-T7.2：作者 + 至少 2 位试用者使用 v0.3 RC ≥ 1 周（沿用 V2-T8.2 标准）。
+2. P0/P1 清零后 `just release v0.3.0-rc1` → RC 验收 → `just release v0.3.0`（V3-CP5）。
 
 ## 阻塞 / 风险
 

@@ -2,7 +2,7 @@
 title: tiny-sql 待办开发计划
 version: 0.2.0-draft-3
 status: draft
-last_updated: 2026-08-19
+last_updated: 2026-08-21
 ---
 
 # tiny-sql 待办开发计划
@@ -15,7 +15,7 @@ last_updated: 2026-08-19
 
 当前稳定版为 `v0.2.0`（2026-08-20 发布）：多 driver 架构 + PostgreSQL、主密码加密与 TLS 诊断、schema intelligence、查询工作台（历史/多 tab/导出/列宽/冻结序号列）、SSH RTT/重连/keepalive。V2 全部检查点已关闭，详见 [progress.md](../memory-bank/progress.md)。
 
-**v0.3 开发已于 2026-08-20 完成全部编码与自动化门禁（Week 1-6 + V3-T7.3 文档 + V3-T7.4 门禁）**：独占 session 可靠事务（FR-244）、服务端筛选排序分页（FR-242）、index/constraint 元数据树与对象搜索（FR-241）、多语句执行与 SQL 格式化（FR-243）、SQL 文件工作流（FR-240）。门禁事实：`just check` 全绿（db-driver 单测 35、app_lib 46、ssh-multihop 8、前端 vitest 102、Next build）；双 driver integration 20/20（MySQL 11 含事务/浏览/metadata/多语句、PG 9）；本机 dmg + updater 签名产物构建成功。剩余仅为 Week 7 真实环境 dogfooding（V3-T7.1/T7.2）与 RC / 正式发布。
+**v0.3 开发已于 2026-08-20 完成全部编码与自动化门禁（Week 1-6 + V3-T7.3 文档 + V3-T7.4 门禁）**：独占 session 可靠事务（FR-244）、服务端筛选排序分页（FR-242）、index/constraint 元数据树与对象搜索（FR-241）、多语句执行与 SQL 格式化（FR-243）、SQL 文件工作流（FR-240）。门禁事实：`just check` 全绿（db-driver 单测 35、app_lib 46、ssh-multihop 8、前端 vitest 102、Next build）；双 driver integration 20/20（MySQL 11 含事务/浏览/metadata/多语句、PG 9）；本机 dmg + updater 签名产物构建成功。V3-T7.1 双 driver × 直连/1 跳/3 跳全功能真实回归已于 2026-08-21 用户实测通过；剩余仅为 V3-T7.2 RC 一周试用与 RC / 正式发布。
 
 ---
 
@@ -124,7 +124,7 @@ Week 7  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### v0.3 Week 7 — 双 driver dogfooding 与发布（12h）
 
-- [ ] **V3-T7.1 [4h]** MySQL/PostgreSQL × 直连/1 跳/3 跳全功能回归：事务、筛选分页、多结果、对象搜索、SQL 文件。
+- [x] **V3-T7.1 [4h]** 双 driver × 直连/1 跳/3 跳全功能真实回归（2026-08-21）：用户实测事务、筛选分页、多结果、对象搜索、SQL 文件全部通过。
 - [ ] **V3-T7.2 [3h]** 作者 + 至少 2 位试用者使用 v0.3 RC ≥ 1 周（沿用 V2-T8.2 标准：0 数据丢失、0 凭据泄露、0 不可恢复 crash）。
 - [x] **V3-T7.3 [3h]** 文档（2026-08-20）：`REQUIREMENTS.md` §3.3、`ARCHITECTURE.md` session/事务与多语句/浏览章节、`RELEASE_CHECKLIST.md` v0.3 节、CHANGELOG 持续维护。
 - [x] **V3-T7.4 [2h]** 门禁（2026-08-20）：`just check` 全绿、双 driver integration 20/20、本机安装包 + updater 签名产物构建成功；全平台 RC 下载验收随 RC 发布执行。
