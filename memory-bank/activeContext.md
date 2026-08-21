@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+**里程碑：v0.3.0-rc1 已发布（2026-08-21）**——发布前 `just check` 与双 driver integration 20/20 全绿（本机 dmg 构建门禁前一日 T7.4 已过，中间仅文档变更）；`just release v0.3.0-rc1` 完成版本号更新（四文件 → `0.3.0-rc1`，预发布不切 CHANGELOG）、发布提交 `3e29e5a`、main 与 tag 推送成功。Release workflow run `32441320976` 四平台 bundle + Publish 全部成功；GitHub Release `v0.3.0-rc1` 为 prerelease、非草稿，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows `.exe(.sig)`、Linux `.AppImage(.sig)`，**未生成 `latest.json`**（不会成为更新源）；Release notes 取 CHANGELOG `[Unreleased]` 段已核对。剩全平台下载安装实测与 V3-T7.2 一周试用。
+
 **V3-T7.1 真实回归已通过（2026-08-21）**——用户实测 MySQL/PostgreSQL × 直连/1 跳/3 跳全功能（事务、筛选分页、多结果、对象搜索、SQL 文件）无问题；PLAN.md 已勾选，RELEASE_CHECKLIST v0.3 功能验收段已记录结果。v0.3 剩余仅为 V3-T7.2 RC 一周试用与 RC / 正式发布（V3-CP5）。
 
 **本轮优化：结果表格序号列冻结（2026-08-20）**——用户要求 `#` 序号列不随横向滚动。ResultTable 改用 Virtuoso `customScrollParent` 复用外层统一横纵滚动容器（原生 Virtuoso scroller 会截获 sticky 上下文，直接 sticky 对行无效），表头 `sticky top-0 z-20`、表头序号 `sticky left-0 z-30`、行序号 `sticky left-0 z-10` + `bg-background`（hover 用 group 同步行色）。tsc、vitest 93/93、Next build 全绿，CHANGELOG `[Unreleased]` 已补录；待用户 dev 实测后发布 v0.2.0。
@@ -129,8 +131,9 @@
 
 ## 下一步（按优先级）
 
-1. V3-T7.2：作者 + 至少 2 位试用者使用 v0.3 RC ≥ 1 周（沿用 V2-T8.2 标准）。
-2. P0/P1 清零后 `just release v0.3.0-rc1` → RC 验收 → `just release v0.3.0`（V3-CP5）。
+1. v0.3.0-rc1 全平台下载安装验收（V3-T7.4 遗留项，随 RC 发布执行）。
+2. V3-T7.2：作者 + 至少 2 位试用者使用 v0.3 RC ≥ 1 周（沿用 V2-T8.2 标准）。
+3. P0/P1 清零后 `just release v0.3.0`（V3-CP5）。
 
 ## 阻塞 / 风险
 
