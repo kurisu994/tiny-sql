@@ -1,6 +1,6 @@
 ---
 title: tiny-sql 路线图
-version: 0.3.0-draft-1
+version: 0.4.0-draft-1
 status: draft
 last_updated: 2026-08-22
 ---
@@ -18,10 +18,10 @@ v0.1  ✅ 已发布（2026-08-18）── MySQL + 3 跳 SSH + 拓扑图 + macOS/
 v0.2  ✅ 已发布（2026-08-20）── PG driver + passphrase 加密 + TLS 验收/UX + Schema-aware 智能联想
    │
    ▼
-v0.3  🚧 编码与验收完成，待正式发布 ── 查询工作台 + 元数据检索 + 服务端筛选分页 + 可靠事务
+v0.3  ✅ 已发布（2026-08-22）── 查询工作台 + 元数据检索 + 服务端筛选分页 + 可靠事务
    │
    ▼
-v0.4  ── 安全表格编辑 + Table/View 对象管理 + CSV/SQL dump 导入导出
+v0.4  🚧 编码与自动化门禁完成，rc1 试用中 ── 安全表格编辑 + 对象管理 + CSV/SQL dump 导入导出
    │
    ▼
 v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演进
@@ -38,7 +38,7 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 核心卖点：
 
 - 多级 SSH 跳板可视化拓扑（FR-015）
-- 每跳错误归因（FR-013；TunnelLost/ChannelDropped/AcceptLoopDied 公共错误已定义，后两类运行检测仍待补）
+- 每跳错误归因（FR-013；TunnelLost/ChannelDropped/AcceptLoopDied 三个 mid-session 变体均有独立运行检测路径与去重上报，v0.2 已收口）
 - 180s 内感知隧道断开（FR-014，keepalive 60s + 连续 3 次失败阈值）
 - MySQL 5.7 + 8.0 浏览 / SQL 执行 / 取消 / 只读保护
 - macOS / Windows / Linux x64 打包 / zh-CN only / 无 Apple Developer 代码签名
@@ -96,11 +96,11 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 
 > 从 Navicat 日常替代能力清单中，先剔除 v0.2 已规划的 SQL 历史（FR-106）、CSV/Excel 导出（FR-107）、column 树（FR-112）和多查询 tab（FR-109）。以下只登记剩余能力，避免同一功能跨版本重复承诺。
 
-### v0.3 — 查询与浏览效率（编码与验收完成，待正式发布）
+### v0.3 — 查询与浏览效率（已发布，2026-08-22）
 
-详细任务、依赖、检查点与测试矩阵见 [v0.3 开发计划](./PLAN.md#v03-开发计划)。
+详细任务、依赖、检查点与测试矩阵见 [v0.3 开发计划](./PLAN.md#v03-开发计划)（已随发布移出，历史见 [progress.md](../memory-bank/progress.md)）。
 
-**当前进度**：v0.3 全部五项 FR 已于 2026-08-20 完成编码与自动化门禁（Week 1-6 + V3-T7.3 文档 + V3-T7.4 门禁）；`just check` 全绿，双 driver integration 20/20，本机 dmg + updater 签名产物构建成功。V3-T7.1 双 driver × 直连/1 跳/3 跳全功能真实回归已于 2026-08-21 用户实测通过；`v0.3.0-rc1` 同日发布（发布提交 `3e29e5a`，四平台 prerelease，无 `latest.json`）。V3-T7.2 RC 一周试用已于 2026-08-22 关闭（0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，无阻塞 P0/P1）。剩余仅为 RC 下载安装验收收尾与正式发布。
+**发布事实**：v0.3 全部五项 FR 已于 2026-08-20 完成编码与自动化门禁（Week 1-6 + V3-T7.3 文档 + V3-T7.4 门禁）；`just check` 全绿，双 driver integration 20/20，本机 dmg + updater 签名产物构建成功。V3-T7.1 双 driver × 直连/1 跳/3 跳全功能真实回归已于 2026-08-21 用户实测通过；`v0.3.0-rc1` 同日发布（四平台 prerelease，无 `latest.json`）。V3-T7.2 RC 一周试用于 2026-08-22 关闭（0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，无阻塞 P0/P1）。`v0.3.0` 已于 2026-08-22 正式发布（发布提交 `0825da5`，Release run `32546492367` 四平台成功，非草稿非预发布，含四平台资产与 `latest.json`）。
 
 | ID | 功能 | 优先级 | 状态 | 范围边界 |
 |---|---|---|---|---|
@@ -110,14 +110,16 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 | FR-243 | 多结果 tab 与 SQL 格式化 | P1 | ✅ 已完成（Week 5） | 多查询 tab 仍由 v0.2 FR-109 负责；同一次执行可保留多个结果 |
 | FR-244 | 连接绑定的独占 session 与可靠事务 | P0 | ✅ 已完成（Week 1-2） | `BEGIN / COMMIT / ROLLBACK` 必须固定在同一 MySQL connection；是 v0.4 安全编辑的前置能力 |
 
-### v0.4 — 安全数据维护与对象管理
+### v0.4 — 安全数据维护与对象管理（编码与自动化门禁完成，rc1 试用中）
 
-详细任务、依赖、检查点与测试矩阵见 [v0.4 开发计划](./PLAN.md#v04-开发计划)（草案，待 v0.3.0 正式发布后生效）。
+详细任务、依赖、检查点与测试矩阵见 [v0.4 开发计划](./PLAN.md#v04-开发计划)。
+
+**当前进度**：Week 1-7 全部三项 FR + V4-T8.3 文档 + V4-T8.4 门禁已于 2026-08-22 完成，V4-CP0~CP4 全部收口；`just check` 全绿（双 driver integration 32/32），本机 dmg + updater 签名产物构建成功。`v0.4.0-rc1` 同日发布（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）。剩余仅为 V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（V4-CP5，均需用户参与）。
 
 | ID | 功能 | 优先级 | 范围边界 |
 |---|---|---|---|
 | FR-250 | 仅带主键单表的安全表格编辑 | P0 | 支持新增 / 修改 / 删除、dirty state、提交 / 放弃；不允许 JOIN / 聚合结果直接写回 |
-| FR-251 | Table / View 结构查看、DDL 预览与对象编辑 | P1 | 先做结构化表单 + SQL 预览，再逐步扩展索引、约束等对象设计；执行 DDL 前必须二次确认 |
+| FR-251 | 结构查看、DDL 预览与新建表 | P1 | v0.4 交付结构查看（列 / 索引 / 约束）、建表 DDL 预览（MySQL `SHOW CREATE TABLE`、PG 元数据重建）与新建表表单；View 结构与索引 / 约束设计器顺延；执行 DDL 前必须二次确认 |
 | FR-252 | CSV 导入与 SQL dump 导入 / 导出 | P1 | CSV/Excel 结果导出仍由 v0.2 FR-107 负责；本项补导入和完整 SQL 文件工作流 |
 
 ### v0.5+ — 管理、迁移与高级工作台
@@ -215,7 +217,7 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 ## 反馈通道
 
 - GitHub Issues：bug / feature request
-- GitHub Discussions：开放讨论 / v0.3 反馈与 v0.4 优先级投票
+- GitHub Discussions：开放讨论 / v0.4 反馈与 v0.5+ 优先级投票
 - V2EX / 掘金 帖子下评论
 
 24h 内首次回应是承诺。

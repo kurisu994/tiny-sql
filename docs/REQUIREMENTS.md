@@ -1,6 +1,6 @@
 ---
 title: tiny-sql 需求文档
-version: 0.1.0-draft-3
+version: 0.4.0-draft-1
 status: draft
 last_updated: 2026-08-22
 ---
@@ -9,7 +9,7 @@ last_updated: 2026-08-22
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-22）**：v0.3.0 已正式发布；在 v0.2 多 driver 基础上交付可靠事务、服务端筛选分页、index/constraint 元数据树与对象搜索、多语句执行与 SQL 格式化、SQL 文件工作流。后续版本范围以 [ROADMAP.md](./ROADMAP.md) 为准，实施计划以 [PLAN.md](./PLAN.md) 为准。
+> **实现快照（2026-08-22）**：v0.3.0 已正式发布；v0.4 三项 FR（表格安全编辑、结构查看 / DDL 预览 / 新建表、CSV 导入与 SQL dump 导入导出）编码与自动化门禁全部完成，`v0.4.0-rc1` 已发布（prerelease），待真实环境回归与正式发布。后续版本范围以 [ROADMAP.md](./ROADMAP.md) 为准，实施计划以 [PLAN.md](./PLAN.md) 为准。
 
 ## 1. 项目愿景
 
@@ -245,7 +245,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - 新建 / 编辑连接的 SSL 标签页支持 Disabled / Preferred / Required / Verify CA / Verify Identity。
 - CA、客户端证书、客户端私钥路径随连接加密保存；`connection_test` 与 `connection_open` 都把同一配置传给 `MySqlDriver::connect_with_settings`。
 - 默认 Disabled，避免部分内网 MySQL 声明 SSL 能力但握手配置不完整时连接失败。
-- **当前验收状态**：配置持久化、模式解析与 driver 接线已有代码/单测；真实 TLS 服务端、双向证书和错误提示仍待验收，因此不作为已完成的发布质量声明。
+- **当前验收状态**：配置持久化、模式解析与 driver 接线已有代码/单测；真实 TLS 服务端与双向证书正反例、错误提示已于 v0.2 验收通过（V2-T4.3）。
 
 #### 3.1.4 国际化与本地化
 
@@ -295,7 +295,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 - **FR-100** PostgreSQL driver（后端与 AppState/Tauri/UI 已接线，真实 driver integration 与 Tauri 直连/1 跳 SSH 应用验收均通过）
 - **FR-102** 加密 passphrase 存储（v0.2 已实现用户主密码 Argon2id 派生 key + v2 envelope + secrets.enc；迁移可回滚）
-- **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（模式/路径/证书选择器与 TLS 专项错误 key 已接线；真实 TLS 环境验收仍待 V2-T8.1）
+- **FR-103** MySQL TLS 真实环境验收、证书选择与错误诊断 UX 打磨（模式/路径/证书选择器与 TLS 专项错误 key 已接线；真实 TLS 环境正反例已验收，V2-T4.3）
 - **FR-104** Schema-aware 智能联想：按 MySQL/PostgreSQL 方言补全当前命名空间的 table、column 和 alias；已加载列满足 `target_id → target.id`、反向关系或同名 key/id 时，在输入 `JOIN` 后提供带 ON 条件的候选片段。
 - **FR-105** 实时隧道延迟动画（v0.2 已实现累计 SSH 协议 RTT/超时显示；非 ICMP、非单段延迟）
 - **FR-106** SQL 历史（v0.2 已实现：最近 100 条、含成功状态、加密落盘、可清空）
@@ -328,10 +328,10 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.4 开发计划](./PLAN.md#v04-开发计划)。
 
-> **实现状态（2026-08-22）**：三项 FR 代码与自动化门禁已全部完成，integration 双 driver 全绿（编辑批 7 项 + bulk_insert 3 项 + dump 往返 2 项）；待 V4-T8.1 真实环境回归与正式发布。
+> **实现状态（2026-08-22）**：三项 FR 代码与自动化门禁已全部完成，integration 双 driver 全绿（编辑批 7 项 + bulk_insert 3 项 + dump 往返 2 项）；`v0.4.0-rc1` 已发布（prerelease，四平台构建成功）；待 V4-T8.1 真实环境回归、V4-T8.2 一周试用与正式发布。
 
 - **FR-250** 仅带主键单表的安全表格编辑（P0）：在浏览 tab（FR-242）上进入编辑模式，新增 / 修改 / 删除先以 dirty state 暂存前端；「提交」时在独占 session（FR-244）上以单事务批量执行参数化 DML，「放弃」整体丢弃；编辑期不持有事务，避免长事务占用连接。仅显式主键表可编辑（复合主键支持），无主键表与 JOIN / 聚合结果禁止写回；提交前展示变更摘要并二次确认；MySQL / PostgreSQL 双方言。
-- **FR-251** Table / View 结构查看、DDL 预览与对象编辑（P1）：v0.4 范围为完整结构查看（列定义 + 已有索引 / 约束）、建表 DDL 预览（MySQL `SHOW CREATE TABLE`，PostgreSQL 由元数据拼装）与「新建表」结构化表单（生成 SQL 预览 → 二次确认后执行）；修改表与索引 / 约束设计器按反馈顺延，不在 v0.4 承诺。执行任何 DDL 必须先展示 SQL 预览并二次确认。
+- **FR-251** 结构查看、DDL 预览与新建表（P1）：v0.4 范围为完整结构查看（列定义 + 已有索引 / 约束）、建表 DDL 预览（MySQL `SHOW CREATE TABLE`，PostgreSQL 由元数据拼装）与「新建表」结构化表单（生成 SQL 预览 → 二次确认后执行）；修改表与索引 / 约束设计器按反馈顺延，不在 v0.4 承诺。执行任何 DDL 必须先展示 SQL 预览并二次确认。
 - **FR-252** CSV 导入与 SQL dump 导入 / 导出（P1）：CSV 导入带列映射预览、类型转换、批量参数化 INSERT 与错误行策略（中止 / 跳过并报告）；表 / 库级 SQL dump 导出为 INSERT 语句文件，导入按大文件流式拆分执行（复用 FR-243 分号状态机）并带进度与失败定位；禁止整文件读入内存。CSV / Excel 查询结果导出仍由 FR-107 负责，本项不含备份 / 恢复语义（FR-260）。
 
 实施顺序、验收门槛与降级规则见 [v0.4 开发计划](./PLAN.md#v04-开发计划)。

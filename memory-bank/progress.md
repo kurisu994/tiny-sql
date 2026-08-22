@@ -9,8 +9,8 @@
 | v0.0.3 | ✅ 预览版已发布 | 2026-07-03 全平台 Release 成功，含 updater 签名产物与 `latest.json` |
 | v0.1.0 | ✅ 正式版已发布 | 2026-08-18 全平台 Release 成功，含安装包、签名更新产物与四平台 `latest.json` |
 | v0.2 | ✅ 正式版已发布 | 2026-08-20 发布 `v0.2.0`（发布提交 `4f6b07f`）；V2-CP1~CP5 全部关闭。范围：多 driver + PostgreSQL、主密码加密/TLS 诊断、schema intelligence、查询工作台、SSH RTT/重连；详见 CHANGELOG `0.2.0` 段 |
-| v0.3 | 🚧 编码与验收完成，待正式发布 | 2026-08-20 完成 Week 1-6 全部五项 FR（FR-244 事务 / FR-242 浏览分页 / FR-241 元数据树与搜索 / FR-243 多语句与格式化 / FR-240 SQL 文件）+ 文档与自动化门禁；`just check` 全绿、双 driver integration 20/20、本机构建成功；2026-08-21 V3-T7.1 双 driver × 直连/1 跳/3 跳全功能真实回归用户实测通过；同日发布 `v0.3.0-rc1`（发布提交 `3e29e5a`，四平台 prerelease，无 `latest.json`）；2026-08-22 V3-T7.2 RC 一周试用关闭（沿用 V2-T8.2 标准：0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，无阻塞 P0/P1）；剩 RC 下载安装验收与正式发布 |
-| v0.4 | 规划 | 主键单表安全编辑、Table/View 对象管理、CSV 导入与 SQL dump |
+| v0.3 | ✅ 正式版已发布 | 2026-08-22 发布 `v0.3.0`（发布提交 `0825da5`，Release run `32546492367` 四平台成功，含四平台资产与 `latest.json`）。范围：可靠事务、服务端筛选分页、index/constraint 元数据树与对象搜索、多语句与格式化、SQL 文件工作流；详见 CHANGELOG `0.3.0` 段 |
+| v0.4 | 🚧 rc1 试用中 | 2026-08-22 完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑 / FR-251 结构查看、DDL 预览与新建表 / FR-252 CSV 导入与 SQL dump）+ 文档与自动化门禁；`just check` 全绿、integration 32/32、本机 dmg + updater 签名产物成功；同日发布 `v0.4.0-rc1`（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）；剩 GUI 真实回归、一周试用与正式发布（V4-CP5） |
 | v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。

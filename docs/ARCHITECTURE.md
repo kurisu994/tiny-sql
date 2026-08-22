@@ -1,8 +1,8 @@
 ---
 title: tiny-sql 架构设计
-version: 0.2.0-draft-1
+version: 0.4.0-draft-1
 status: draft
-last_updated: 2026-08-18
+last_updated: 2026-08-22
 ---
 
 # tiny-sql 架构设计
@@ -18,7 +18,7 @@ last_updated: 2026-08-18
 3. **SSH 多跳隧道的协议机制、状态机、错误模型**（§4）
 4. **前后端怎么对话**（§7 事件契约）
 
-不在本文范围：v0.2+ 的扩展（见 [ROADMAP.md](./ROADMAP.md)）；具体代码实现（去看 PR）。
+不在本文范围：具体代码实现（去看 PR）；后续版本规划见 [ROADMAP.md](./ROADMAP.md)。
 
 ---
 
@@ -49,9 +49,11 @@ tiny-sql/
 │       ├── lib.rs                # Tauri 入口 + 全部 #[tauri::command] 注册
 │       ├── commands/             # tauri command 层
 │       │   ├── connection.rs     # connection_create / list / update / delete / test / open / reconnect / close
-│       │   ├── query.rs          # db_list_* / db_query / db_query_many / db_browse_table / db_query_cancel + SQL 历史记录
+│       │   ├── query.rs          # db_list_* / db_query / db_query_many / db_browse_table / db_apply_table_edits / db_create_database
 │       │   ├── transaction.rs    # transaction_begin / query / commit / rollback / close（FR-244）
-│       │   ├── sql_file.rs       # sql_file_read / write / recent_*（FR-240）
+│       │   ├── import.rs         # csv_import_preview / db_import_csv（FR-252）
+│       │   ├── dump.rs           # db_export_dump / db_import_dump（FR-252）
+│       │   ├── sql_file.rs       # sql_file_read / write / recent_list / touch / remove（FR-240）
 │       │   ├── security.rs       # security_status / setup / unlock / lock / disable / reset（FR-102）
 │       │   ├── history.rs        # history_list / history_clear（FR-106）
 │       │   ├── export.rs         # db_export_query（CSV / Excel 流式导出，FR-107）
@@ -64,7 +66,7 @@ tiny-sql/
 │       │   └── ssh_known_hosts.rs # 自有 known_hosts.json
 │       ├── security.rs           # SecurityManager（主密码状态机 / 迁移回滚 / secrets map）
 │       ├── tofu.rs               # SshTofuManager（TOFU 决策通道）
-│       └── state.rs              # AppState（连接池注册表 / passphrase 缓存 / security / history）
+│       └── state.rs              # AppState（连接注册表 / 事务 session / passphrase 缓存 / security / history / recent_files）
 ├── src/                           # Next.js 16 前端
 │   ├── app/                       # App Router pages
 │   ├── components/
@@ -92,27 +94,30 @@ tiny-sql/
 │                          │  │                                │
 │  pub trait Driver        │  │  pub async fn open(           │
 │  pub struct MySqlDriver  │  │    hops: &[SshHop],           │
-│   - connect_with_settings│  │    target_host: &str,         │
+│  pub struct PostgresDriver│ │    target_host: &str,         │
 │   - ping                 │  │    target_port: u16,          │
 │   - list_databases       │  │    ctx: &TunnelContext,       │
-│   - list_tables          │  │  ) -> Result<SshTunnel, ...>  │
+│   - list_schemas         │  │  ) -> Result<SshTunnel, ...>  │
+│   - list_tables          │  │                                │
 │   - list_columns         │  │                                │
-│   - query_with_options   │  │                                │
-│     (取 CancellationToken)│  │                                │
-│   - cancel (control pool)│  │                                │
-│   (对象安全装箱 Future)   │  │  - 逐跳 SSH session 建立        │
-│   (用 sqlx::MySqlPool)   │  │  - 每跳 keepalive 60s/3 次      │
-│   (不知道 SSH 存在)      │  │  - TOFU 流程                   │
-│                          │  │  - 本地 127.0.0.1:0 listener   │
-│                          │  │  - copy_bidirectional 桥接     │
-│                          │  │  - SshTunnelError 含 hop_index │
+│   - list_indexes         │  │                                │
+│   - list_constraints     │  │                                │
+│   - query (可取消)        │  │                                │
+│   - query_many (多语句)   │  │  - 逐跳 SSH session 建立        │
+│   - browse_table         │  │  - 每跳 keepalive 60s/3 次      │
+│   - begin_session (事务)  │  │  - TOFU 流程                   │
+│   - apply_table_edits    │  │  - 本地 127.0.0.1:0 listener   │
+│   - bulk_insert_rows     │  │  - copy_bidirectional 桥接     │
+│   (对象安全装箱 Future)   │  │  - SshTunnelError 含 hop_index │
+│   (sqlx MySql/Pg pool)   │  │                                │
+│   (不知道 SSH 存在)      │  │                                │
 └──────────────────────────┘  └──────────────────────────────┘
 ```
 
 **分工原则**：
 
 - `ssh-multihop` **完全不知道 MySQL 存在**。它只知道"在本地监听一个端口，把流量转发到远端 host:port"。这是它未来能独立 publish 的前提。
-- `db-driver` **完全不知道 SSH 存在**。v0.2 已从 MySQL 真实调用面提取对象安全的最小 `Driver` 契约；连接创建和方言专属配置仍由具体 driver/factory 负责。
+- `db-driver` **完全不知道 SSH 存在**。已从 MySQL 真实调用面提取对象安全的最小 `Driver` 契约，`MySqlDriver` 与 `PostgresDriver` 双实现落地；连接创建和方言专属配置仍由具体 driver/factory 负责。
 - `src-tauri` 是组装层：走 SSH 时先打开隧道拿本地端口，再按配置创建 `MySqlDriver` 或 `PostgresDriver` 连 `127.0.0.1:port`，并在 `OpenConnection` 里绑定 driver 与 tunnel 生命周期。
 
 ### 1.3 Tauri + workspace 摩擦兜底
@@ -264,7 +269,7 @@ src-tauri/src/
 ### 2.2 关键设计决策
 
 - **本地 listener + sqlx**：sqlx 不支持注入自定义 `TcpStream`，所以必须走"本地端口 + URL"模式。详见 §4.5。
-- **多 MySQL 连接复用同一隧道**：1 个 tiny-sql 连接 = 1 个本地端口 = 1 个 MySqlPool（max=5）。Pool 里 5 条 TCP 都走同一个本地端口；每条 TCP 触发 listener accept 一次，spawn 一个 channel_open_direct_tcpip。所以**首跳 SSH session 上会有 5 个 direct-tcpip channel**（不是 5 个 SSH session）。
+- **多连接复用同一隧道**：1 个 tiny-sql 连接 = 1 个本地端口 = 1 个 pool（`MySqlPool` / `PgPool`，max=5）。Pool 里 5 条 TCP 都走同一个本地端口；每条 TCP 触发 listener accept 一次，spawn 一个 channel_open_direct_tcpip。所以**首跳 SSH session 上会有 5 个 direct-tcpip channel**（不是 5 个 SSH session）。
 - **隧道生命周期绑定 pool**：tunnel drop → listener drop → sqlx 连接全部报 connection refused → pool drop → AppState 清掉 driver。
 
 ### 2.3 前端依赖
@@ -274,8 +279,9 @@ src-tauri/src/
 | `next` 16.1.6 | App Router |
 | `react` 19.2.x | UI |
 | `@tauri-apps/api` 2.10.x | IPC + event |
-| `@tauri-apps/plugin-{process,updater}` 2.x | 重启应用 + 自动更新 |
-| `codemirror` + `@codemirror/lang-sql` / `lint` / `state` / `view` | SQL 编辑器、MySQL 高亮、基础 schema/table 补全和错误 gutter |
+| `@tauri-apps/plugin-{process,dialog,updater}` 2.x | 重启应用 + 文件选择器 + 自动更新 |
+| `codemirror` + `@codemirror/lang-sql` / `lint` / `state` / `view` | SQL 编辑器、双方言高亮、schema/table 补全和错误 gutter |
+| `sql-formatter` ^15 | SQL 格式化（按连接方言） |
 | `react-virtuoso` ^4.18 | 1000 行/10w 行虚拟滚动 |
 | `zustand` ^5 | 全局状态 |
 | `shadcn` + `radix-ui` + `tailwindcss` 4 | UI 组件 |
@@ -285,7 +291,7 @@ src-tauri/src/
 
 ### 2.4 前端 metadata cache（v0.2）
 
-`src/lib/metadata-cache.ts` 提供纯内存 LRU，默认最多 128 项、TTL 5 分钟。key 固定包含 `connectionId + driver + database + schema + resource + table?`，其中 resource 为 schemas / tables / columns；不能以同名 database/schema/table 复用其他连接或 driver 的结果。读取命中会提升最近使用顺序，过期项在读取时删除，进程退出后不保留。
+`src/lib/metadata-cache.ts` 提供纯内存 LRU，默认最多 128 项、TTL 5 分钟。key 固定包含 `connectionId + driver + database + schema + resource + table?`，其中 resource 为 schemas / tables / columns / indexes / constraints；不能以同名 database/schema/table 复用其他连接或 driver 的结果。读取命中会提升最近使用顺序，过期项在读取时删除，进程退出后不保留。
 
 `session-store` 在 schema、table、column 按需加载时先查 cache；连接重开/关闭、新建 database 及成功执行 CREATE / ALTER / DROP / TRUNCATE / RENAME / COMMENT 后清除该连接的全部 metadata。树顶部“刷新”会失效当前 database 下的分区并重新请求 database、schema、table 和当前展开列。
 
@@ -510,6 +516,11 @@ pub enum DriverError {
     DatabaseSwitchRequired,
     #[error("error.driver.schema_required")]
     SchemaRequired,
+    // v0.2：MySQL TLS 握手 / 证书校验失败（仅在用户显式启用 TLS 时分类）
+    #[error("error.driver.tls_handshake_failed")]
+    TlsHandshakeFailed,
+    #[error("error.driver.tls_verify_failed")]
+    TlsVerifyFailed,
     // v0.3：事务控制语句必须走独占 session
     #[error("error.driver.tx_requires_session")]
     TxRequiresSession,
@@ -578,7 +589,7 @@ pub enum DriverError {
 
 `DriverError` 的原始 sqlx 信息只保存在后端变体字段中，`Display` 与 Tauri IPC 均只输出稳定 i18n key；前端不得依赖或展示 driver 原文。这样调试信息不会因 `to_string()` 被意外带到用户界面，公共 key 仍保持只能新增、不能改名。
 
-**MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5）。`connect_with_settings` 用 `MySqlConnectOptions` 分字段传参（host/port/user/password/database + SSL + 超时），避免 URL 拼接带来的密码特殊字符编码问题；SSL 默认禁用，但用户显式选择 Preferred / Required / Verify CA / Verify Identity 时会把模式和证书路径传给 sqlx。该链路已有单元测试与配置接线，真实 TLS MySQL 服务器验收仍待 dogfooding。`connect_url` 接受 `mysql://` URL，仅用于 integration 测试等场景。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
+**MySqlDriver 实现**：内部用 `sqlx::MySqlPool`（max_connections = 5）。`connect_with_settings` 用 `MySqlConnectOptions` 分字段传参（host/port/user/password/database + SSL + 超时），避免 URL 拼接带来的密码特殊字符编码问题；SSL 默认禁用，但用户显式选择 Preferred / Required / Verify CA / Verify Identity 时会把模式和证书路径传给 sqlx。该链路已有单元测试与配置接线；真实 TLS MySQL 服务器（含双向证书）正反例已于 v0.2 验收通过（V2-T4.3）。`connect_url` 接受 `mysql://` URL，仅用于 integration 测试等场景。`list_databases` 查 `information_schema.schemata`，`list_tables` 查 `information_schema.tables`。
 
 **PostgresDriver 实现**：位于独立 `src/postgres.rs`。显式连接使用 `PgConnectOptions::new_without_pgpass()`，不会在密码为空时静默读取用户 `~/.pgpass`；metadata 分别查询 `pg_database`、`pg_namespace`、`pg_class` 与 `pg_attribute`，保留 database/schema 两层语义。query 支持 PostgreSQL `TABLE` / `VALUES`、dollar-quoted body、数据修改 CTE 与 DML `RETURNING`；结果覆盖 NULL、日期时间、整数/浮点/NUMERIC、JSON/JSONB、文本与 BYTEA。后端契约与 AppState/Tauri/UI 已接线；真实 Tauri 直连和 1 跳 SSH 验收已通过（V2-T3.4）。
 
@@ -626,7 +637,7 @@ impl OpenConnection {
 |---|---|---|---|
 | `connection_create` | `(name, config)` | `StoredConnection` | 后端生成 uuid，返回完整记录 |
 | `connection_update` | `(connection)` | `()` | 同上 |
-| `connection_list` | - | `Vec<StoredConnection>` | 按最近使用倒序；Week 2 简化返回完整配置（含明文 password）供前端编辑回显，落盘已整体加密 |
+| `connection_list` | - | `Vec<StoredConnection>` | 按最近使用倒序（从未使用排最后）；返回完整配置（含解密后的 password）供前端编辑回显，落盘已整体加密 |
 | `connection_delete` | `id` | `()` | 加密落盘后删 |
 | `connection_test` | `(config, passphrase?)` | `()` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；passphrase 只用于本次测试，不持久化或缓存 |
 | `connection_open` | `(id, passphrase?, remember_passphrase?)` | `session_id` | 建立持久连接并注册到 AppState；remember_passphrase 在主密码解锁时加密持久化 passphrase |
@@ -679,6 +690,8 @@ pub struct AppState {
     connection_lifecycles: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     /// 正在执行的 query 注册表（query_id → connection_id + cancel_token）
     pub queries: AsyncMutex<HashMap<String, ActiveQuery>>,
+    /// 活跃事务 session 注册表（session_id → session 句柄，FR-244）
+    pub sessions: AsyncMutex<HashMap<String, Arc<ActiveSession>>>,
     /// SSH known_hosts store
     pub known_hosts: Arc<SshKnownHostsStore>,
     /// TOFU 决策 manager（前端弹窗响应回调通道）
@@ -689,6 +702,8 @@ pub struct AppState {
     pub security: Arc<SecurityManager>,
     /// SQL 历史加密存储（FR-106，history.enc）
     pub history: HistoryStore,
+    /// 最近打开的 SQL 文件列表（FR-240，明文路径）
+    pub recent_files: RecentFilesStore,
 }
 ```
 
@@ -1067,8 +1082,7 @@ ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握�
 | `ssh:tofu-request` | `{connectionId, hopIndex, host, port, fingerprint}` | 后端遇到未知 host key | 弹 `SshTofuDialog` |
 | `ssh:hop-status` | `{connectionId, sessionId, hopIndex, status, reason?}`（status ∈ pending/connected/failed/lost） | 隧道每跳状态变化 | zustand 只接收当前 session 事件 → 拓扑节点重渲染 |
 | `ssh:hop-rtt` | `{connectionId, sessionId, hopIndex, state, rttMs}`（state ∈ measured/timeout/unavailable） | 每跳低频 SSH 协议探测完成 | zustand 只接收当前 session 事件 → 更新进入该跳的边指标，不改变节点状态 |
-| `query:result-chunk` | `{query_id, rows_partial, done: false}` | （规划未用）流式结果 | v0.1/v0.2 query 均全量返回 RowSet；v0.2 文件导出采用后端流式写出（db_export_query），不经 IPC |
-| `app:log` | `{level, message, target}` | 后端日志同步（tauri-plugin-log） | DevTools console |
+| `query:result-chunk` | `{query_id, rows_partial, done: false}` | （规划未用）流式结果 | 各版本 query 均全量返回 RowSet；文件导出采用后端流式写出（db_export_query / db_export_dump），不经 IPC |
 | `app:check-update` | `{}` | macOS 应用菜单「Check for Updates...」 | 触发手动检查更新 |
 
 ### 7.3 ssh:hop-status 详细 schema
@@ -1228,15 +1242,15 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 
 ## 9. 性能与扩展性预期
 
-| 维度 | v0.1 假设 | v0.2 规划 |
-|---|---|---|
-| schema 数量 | ≤ 30 | LRU cache + 搜索 |
-| 表数量/schema | ≤ 200 | 同上 + 分页 |
-| 单 query 结果集 | ≤ 10w 行（客户端截断） | 流式 chunk + 分页 |
-| 连接池大小 | 5（max_connections） | 用户可配置 |
-| SSH 跳数 | 测试到 3 跳（无硬上限） | 同 v0.1 |
-| 隧道吞吐 | 3 跳 ~60-80MB/s 单连接 | 不优化 |
-| 隧道断开感知 | 180s（keepalive 60s × 连续 3 次） | 间隔 + 阈值可配置 |
+| 维度 | 现状（v0.4） |
+|---|---|
+| schema 数量 | 无硬上限；128 项 LRU cache + 对象搜索（v0.2 FR-108 / v0.3 FR-241） |
+| 表数量/schema | 服务端筛选 / 排序 / 分页浏览（v0.3 FR-242） |
+| 单 query 结果集 | ≤ 10w 行（服务端 LIMIT 或客户端截断）；导出后端流式写文件 |
+| 连接池大小 | 5（max_connections，固定） |
+| SSH 跳数 | 测试到 3 跳（无硬上限） |
+| 隧道吞吐 | 3 跳 ~60-80MB/s 单连接（不优化） |
+| 隧道断开感知 | 默认 180s（keepalive 60s × 连续 3 次），间隔 + 阈值可配置（v0.2） |
 
 ---
 
@@ -1258,14 +1272,13 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
   just test-postgres-integration
   ```
   - `just test-integration` 顺序执行两个 driver；任一 URL 缺失都明确失败，避免假绿。
-- 当前真实 MySQL 5 项用例覆盖 ping、database/schema/table/column metadata、NULL/日期/数值/JSON、写确认，以及 `SELECT SLEEP(10)` 经独立 control pool 取消。
-- 当前真实 PostgreSQL 4 项用例覆盖 ping、四层 metadata、NULL/日期/数值/JSON、行数截断、写确认、`pg_sleep(10)` 原生取消及取消后 pool 恢复。
-- **CI 不跑 integration**（无外部数据库服务器）；正式版前保留人工双 driver 回归。
-- 3 跳故障测试 + 嵌入式 russh-server 测试推到连接核心稳定后（Week 3），v0.1 Week 2 先 mock 或单跳
+- 当前真实 MySQL 19 项用例覆盖 ping、四层 metadata、NULL/日期/数值/JSON、写确认、`SELECT SLEEP(10)` 经独立 control pool 取消，以及 v0.4 编辑批量 DML（5）、bulk 导入（2）、dump 风格 SQL 往返（1）。
+- 当前真实 PostgreSQL 13 项用例覆盖 ping、四层 metadata、NULL/日期/数值/JSON、行数截断、写确认、`pg_sleep(10)` 原生取消及取消后 pool 恢复，以及 v0.4 编辑批量 DML（2）、bulk 导入（1）、dump 往返（1）。
+- **CI 不跑 integration**（无外部数据库服务器）；正式版前保留人工双 driver 回归。3 跳真实故障 / 断链 / 重连回归已在 v0.2/v0.3 dogfooding 中覆盖。
 
 ### 10.3 端到端测试
 
-- **Playwright E2E 已推迟**（决策记录见 memory-bank）：原计划 Week 2 架齐 `playwright`（Tauri 2 模式）+ `vitest`，CI 跑 playwright headless；当前仓库无 playwright 依赖，前端单测（vitest）已覆盖 store / sql-guard / sql-editor / tauri-api，组件层仅 ConnectionForm 有冒烟渲染测试。
+- **Playwright E2E 已推迟**（决策记录见 memory-bank）：原计划 Week 2 架齐 `playwright`（Tauri 2 模式）+ `vitest`，CI 跑 playwright headless；当前仓库无 playwright 依赖，CI 不跑 E2E。前端单测（vitest）已覆盖 store / sql-guard / sql-editor / tauri-api / ddl / metadata-cache / column-widths 等模块，组件层有 ConnectionForm、EditableTable、SchemaBrowser、TopologyGraph、HistoryPanel、UpdateCheckResultDialog 等渲染与交互测试。
 - dogfooding（FR-041）作为补充 E2E 验证。
 
 **v0.1 历史 UI 缺口在 v0.2 的处理状态**：
@@ -1295,7 +1308,7 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 ### 11.2 与 redis-desktop-client 的不同
 
 - tiny-sql 是 workspace；redis-desktop-client 是单 crate
-- tiny-sql v0.2 用对象安全 `Driver` 契约承载 `MySqlDriver` / `PostgresDriver`；redis-desktop-client 直接用 `redis` crate
+- tiny-sql 用对象安全 `Driver` 契约承载 `MySqlDriver` / `PostgresDriver`；redis-desktop-client 直接用 `redis` crate
 - tiny-sql 用纯 CSS 线性拓扑图展示本机、SSH hop 与 MySQL 状态；redis-desktop-client 无此组件
 - tiny-sql 加 SSH keepalive 60s + 3 次阈值（FR-014）；redis-desktop-client 仅靠 russh 3600s inactivity timeout
 
