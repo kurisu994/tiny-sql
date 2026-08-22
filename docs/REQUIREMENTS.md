@@ -1,15 +1,15 @@
 ---
 title: tiny-sql 需求文档
-version: 0.1.0-draft-2
+version: 0.1.0-draft-3
 status: draft
-last_updated: 2026-08-20
+last_updated: 2026-08-22
 ---
 
 # tiny-sql 需求文档
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-20）**：v0.2.0 已正式发布；多 driver（MySQL + PostgreSQL）、主密码加密、schema intelligence、查询工作台、SSH RTT/重连等 v0.2 范围全部交付，V2 检查点全关闭。后续版本范围以 [ROADMAP.md](./ROADMAP.md) 为准，实施计划以 [PLAN.md](./PLAN.md) 为准。
+> **实现快照（2026-08-22）**：v0.3.0 已正式发布；在 v0.2 多 driver 基础上交付可靠事务、服务端筛选分页、index/constraint 元数据树与对象搜索、多语句执行与 SQL 格式化、SQL 文件工作流。后续版本范围以 [ROADMAP.md](./ROADMAP.md) 为准，实施计划以 [PLAN.md](./PLAN.md) 为准。
 
 ## 1. 项目愿景
 
@@ -321,6 +321,18 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-243** 多结果 tab 与 SQL 格式化（P1）：保持「单语句直接执行」护栏不变；「执行全部」由后端按方言分号状态机拆分逐条执行，每条独立 guard 分类与写确认，边界不确定即拒绝执行；一次执行保留多个结果集；多查询 tab 仍由 FR-109 负责。
 
 实施顺序、验收门槛与降级规则见 [v0.3 开发计划](./PLAN.md#v03-开发计划)。
+
+---
+
+### 3.4 v0.4 范围（安全数据维护与对象管理）
+
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.4 开发计划](./PLAN.md#v04-开发计划)。
+
+- **FR-250** 仅带主键单表的安全表格编辑（P0）：在浏览 tab（FR-242）上进入编辑模式，新增 / 修改 / 删除先以 dirty state 暂存前端；「提交」时在独占 session（FR-244）上以单事务批量执行参数化 DML，「放弃」整体丢弃；编辑期不持有事务，避免长事务占用连接。仅显式主键表可编辑（复合主键支持），无主键表与 JOIN / 聚合结果禁止写回；提交前展示变更摘要并二次确认；MySQL / PostgreSQL 双方言。
+- **FR-251** Table / View 结构查看、DDL 预览与对象编辑（P1）：v0.4 范围为完整结构查看（列定义 + 已有索引 / 约束）、建表 DDL 预览（MySQL `SHOW CREATE TABLE`，PostgreSQL 由元数据拼装）与「新建表」结构化表单（生成 SQL 预览 → 二次确认后执行）；修改表与索引 / 约束设计器按反馈顺延，不在 v0.4 承诺。执行任何 DDL 必须先展示 SQL 预览并二次确认。
+- **FR-252** CSV 导入与 SQL dump 导入 / 导出（P1）：CSV 导入带列映射预览、类型转换、批量参数化 INSERT 与错误行策略（中止 / 跳过并报告）；表 / 库级 SQL dump 导出为 INSERT 语句文件，导入按大文件流式拆分执行（复用 FR-243 分号状态机）并带进度与失败定位；禁止整文件读入内存。CSV / Excel 查询结果导出仍由 FR-107 负责，本项不含备份 / 恢复语义（FR-260）。
+
+实施顺序、验收门槛与降级规则见 [v0.4 开发计划](./PLAN.md#v04-开发计划)。
 
 ---
 
