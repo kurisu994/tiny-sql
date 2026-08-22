@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**里程碑：v0.4.0-rc1 已发布（2026-08-22）**——发布前 `just check` 与双 driver integration 32/32 全绿（本机 dmg + updater 签名产物构建成功）；`just release v0.4.0-rc1` 完成版本号更新（四文件 → `0.4.0-rc1`，预发布不切 CHANGELOG）、发布提交 `dbae167`、main 与 tag 推送成功。Release workflow run `32554496338` 四平台构建中；rc1 为 prerelease（无 `latest.json`），不影响 v0.3.0 用户。剩全平台下载安装验收、V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（均需用户参与）。
+**里程碑：v0.4.0-rc1 已发布（2026-08-22）**——发布前 `just check` 与双 driver integration 32/32 全绿（本机 dmg + updater 签名产物构建成功）；`just release v0.4.0-rc1` 完成版本号更新（四文件 → `0.4.0-rc1`，预发布不切 CHANGELOG）、发布提交 `dbae167`、main 与 tag 推送成功。Release workflow run `32554496338` 四平台全部成功；rc1 为 prerelease（非草稿，无 `latest.json`），不影响 v0.3.0 用户。剩全平台下载安装验收、V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（均需用户参与）。
 
 **v0.4 全部编码与自动化门禁完成（2026-08-22）**——按 PLAN.md v0.4 开发计划完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑、FR-251 结构查看/DDL 预览/新建表、FR-252 CSV 导入 + SQL dump 导出导入）+ V4-T8.3 文档 + V4-T8.4 门禁。门禁事实：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 125、Next build）；双 driver integration 32/32；本机 dmg + updater 签名产物构建成功。PLAN.md 逐节点已标注，V4-CP0~CP4 收口，仅 V4-CP5 待发布。
 
@@ -153,9 +153,8 @@
 
 ## 下一步（按优先级）
 
-1. 验证 Release run `32554496338` 四平台 bundle + Publish 成功，核对 rc1 资产（四平台安装包 + updater `.sig`，无 `latest.json`）。
-2. V4-T8.1：用户 GUI 实测 v0.4 全功能（检查项见 RELEASE_CHECKLIST v0.4 节）；V4-T8.2：rc1 一周试用（作者 + ≥2 位试用者）。
-3. `just release v0.4.0` 正式发布（V4-CP5）。
+1. V4-T8.1：用户 GUI 实测 v0.4 全功能（检查项见 RELEASE_CHECKLIST v0.4 节）；V4-T8.2：rc1 一周试用（作者 + ≥2 位试用者）。
+2. `just release v0.4.0` 正式发布（V4-CP5）。
 
 ## 阻塞 / 风险
 

@@ -22,7 +22,7 @@
 
 ### v0.4 正式发布追加条件
 
-> **v0.4.0-rc1 发布（2026-08-22）**：发布提交 `dbae167`、tag `v0.4.0-rc1` 已推送，Release workflow 四平台构建中；rc1 为 prerelease（无 `latest.json`），不影响 v0.3.0 用户。RC 前本地检查与自动化门禁全绿（`just check`、integration 32/32、本机 dmg + updater 签名产物）；GUI 真实环境回归与一周试用随 RC 进行。
+> **v0.4.0-rc1 发布结果（2026-08-22）**：发布提交 `dbae167`、tag `v0.4.0-rc1`；Release workflow run `32554496338` 四平台全部成功。GitHub Release `v0.4.0-rc1` 为 prerelease（非草稿），含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)`，**无 `latest.json`**（不会成为更新源）。RC 前本地检查与自动化门禁全绿（`just check`、integration 32/32、本机 dmg + updater 签名产物）；剩 GUI 真实环境回归（V4-T8.1）、一周试用（V4-T8.2）与正式发布。
 
 - RC 试用 ≥ 1 周（沿用 V2-T8.2 标准）且 P0/P1 清零；未完成 P1 降级项明确移入 v0.4.1 或 v0.5，不在 Release notes 承诺。
 - `ARCHITECTURE.md` 已含编辑内核 / 批量插入 / dump 流式分句章节；`REQUIREMENTS.md` §3.4 已收口。
