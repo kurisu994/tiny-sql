@@ -22,6 +22,8 @@
 
 ### v0.4 正式发布追加条件
 
+> **v0.4.0-rc1 发布（2026-08-22）**：发布提交 `dbae167`、tag `v0.4.0-rc1` 已推送，Release workflow 四平台构建中；rc1 为 prerelease（无 `latest.json`），不影响 v0.3.0 用户。RC 前本地检查与自动化门禁全绿（`just check`、integration 32/32、本机 dmg + updater 签名产物）；GUI 真实环境回归与一周试用随 RC 进行。
+
 - RC 试用 ≥ 1 周（沿用 V2-T8.2 标准）且 P0/P1 清零；未完成 P1 降级项明确移入 v0.4.1 或 v0.5，不在 Release notes 承诺。
 - `ARCHITECTURE.md` 已含编辑内核 / 批量插入 / dump 流式分句章节；`REQUIREMENTS.md` §3.4 已收口。
 
