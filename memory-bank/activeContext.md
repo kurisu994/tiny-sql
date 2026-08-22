@@ -6,6 +6,10 @@
 
 ## 当前状态
 
+**里程碑：v0.3.0 发布流程已执行（2026-08-22）**——用户确认跳过 rc1 全平台下载安装验收直接正式发布；`just release v0.3.0` 完成版本号更新（四文件 → `0.3.0`）、CHANGELOG 切出 `0.3.0 — 2026-08-22` 段、发布提交 `0825da5`、main 与 tag 推送成功。Release workflow run `32546492367` 触发，四平台 bundle 与 Publish 结果待验证；验证后需核对 Release 资产与 `latest.json`、记录发布结果到 RELEASE_CHECKLIST / ROADMAP / progress。
+
+**本轮规划：v0.4 开发计划已立项（2026-08-22，提交 `68df6ef`）**——`REQUIREMENTS.md` 新增 §3.4 v0.4 范围章节（FR-250/251/252 锚点）；`PLAN.md` 新增 v0.4 开发计划（8 周约 99h：Week 1-3 安全表格编辑 FR-250、Week 4-5 结构查看/DDL 预览/新建表 FR-251、Week 6-7 CSV 导入与 dump FR-252、Week 8 dogfooding 发布），含 V4-CP0~CP5 检查点、降级链与 V4-R01~R07 风险表；同时按用户要求将已发布的 v0.3 开发计划整章移出 PLAN（历史由 progress.md 保存），PLAN 文件头更新至 v0.3.0 已发布。ROADMAP v0.4 章节已接 PLAN 链接。功能代码待 V4-CP0 收口（v0.3.0 发布验证 + 无阻塞反馈）后开工。
+
 **本轮文档同步：ROADMAP 对齐 v0.3 事实（2026-08-22）**——`docs/ROADMAP.md` 版本头升至 `0.3.0-draft-1`，路线总览改为 v0.1/v0.2 已发布、v0.3 编码与验收完成待正式发布；v0.1 章节改标题为「已发布」、v0.2 章节补「发布事实」段并把 5 个挂在开发期「待验收」状态的单元格（FR-100/102/103/105/110）统一收口为完成态；v0.3 章节升级为「编码与验收完成，待正式发布」，补完整进度说明（Week 1-6 完成、T7.1 真实回归、rc1、T7.2 RC 一周试用关闭），功能表加状态列（五项 FR 全 ✅）；工程部分「下一步增加 PostgresDriver」改为双实现已落地，反馈通道由「v0.2 优先级投票」改为「v0.3 反馈与 v0.4 优先级投票」。
 
 **里程碑：v0.3.0-rc1 已发布（2026-08-21）**——发布前 `just check` 与双 driver integration 20/20 全绿（本机 dmg 构建门禁前一日 T7.4 已过，中间仅文档变更）；`just release v0.3.0-rc1` 完成版本号更新（四文件 → `0.3.0-rc1`，预发布不切 CHANGELOG）、发布提交 `3e29e5a`、main 与 tag 推送成功。Release workflow run `32441320976` 四平台 bundle + Publish 全部成功；GitHub Release `v0.3.0-rc1` 为 prerelease、非草稿，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows `.exe(.sig)`、Linux `.AppImage(.sig)`，**未生成 `latest.json`**（不会成为更新源）；Release notes 取 CHANGELOG `[Unreleased]` 段已核对。剩全平台下载安装实测与 V3-T7.2 一周试用。
@@ -91,6 +95,10 @@
 
 ## 近期决策
 
+- v0.4 编辑语义（FR-250）：编辑期 dirty 暂存前端不持有事务（延续 V3-R01 长事务教训），「提交」时才在独占 session 上以单事务批量执行参数化 DML，任一条失败整体回滚；UPDATE/DELETE 影响行数校验（0 行即冲突提示），v0.4 不做原值全比对乐观锁。
+- v0.4 收窄决策：FR-251 仅承诺结构查看 + DDL 预览 + 新建表表单，修改表与索引/约束设计器顺延；FR-252 统一文本导入不做类型推断、dump 流式执行禁止整文件读入、不含备份恢复语义（FR-260）。
+- v0.3.0 发布前用户确认跳过 rc1 全平台下载安装验收（rc1 与正式版同一套代码，仅版本号与 CHANGELOG 切分差异），直接正式发布。
+
 - v0.3 工程落地教训：MySQL 事务/会话管理语句（START TRANSACTION/RESET CONNECTION）不支持 prepared 协议（1295），必须 `sqlx::raw_sql` + `Executor::execute` 规避装箱 Future HRTB 推导限制；PG 清理会话不能用 DISCARD ALL（会清掉 sqlx prepared statement cache），改用 ROLLBACK + `RESET ALL; CLOSE ALL; DISCARD TEMP`；PG 列级 NOT NULL 在 pg_constraint 里是 CHECK 类型，断言/展示需预期多条 CHECK。
 - v0.3 前端确认复用模式：store 记录 `lastErrorKey`，UI 层按 key 补弹确认重试（多语句写确认回填）；browse/transaction 等 command 参数超 7 个时打包 input 结构体（clippy too_many_arguments）。
 - V2-T8.2 于 RC 发布当日由用户确认提前关闭，未执行满一周试用；文档如实记录关闭依据，不写成“试用满一周通过”。
@@ -133,8 +141,9 @@
 
 ## 下一步（按优先级）
 
-1. v0.3.0-rc1 全平台下载安装验收（V3-T7.4 遗留项，随 RC 发布执行）。
-2. `just release v0.3.0` 正式发布（V3-CP5）。
+1. 验证 Release run `32546492367` 四平台 bundle + Publish 成功，核对 GitHub Release `v0.3.0` 资产与正式版 `latest.json`（version/notes/四平台 URL）。
+2. 记录 v0.3.0 发布结果：RELEASE_CHECKLIST v0.3 节、ROADMAP v0.3 章节改「已发布」、progress.md。
+3. v0.4 Week 1（V4-T1.1 编辑内核后端契约）待 V4-CP0 收口（发布验证 + 无阻塞 P0/P1 反馈）后开工。
 
 ## 阻塞 / 风险
 
