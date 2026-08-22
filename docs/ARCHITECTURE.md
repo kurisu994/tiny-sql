@@ -462,6 +462,18 @@ pub trait Driver: Send + Sync {
     fn query_many<'a>(&'a self, sql: &'a str, options: QueryOptions,
         cancel_token: CancellationToken) -> DriverFuture<'a, MultiQueryResult>;
 
+    /// v0.4（FR-250）：短事务批量应用表编辑；后端权威校验主键，
+    /// 失败整体回滚并定位语句序号；影响行数 ≠ 1 报冲突
+    fn apply_table_edits<'a>(&'a self, scope: &'a MetadataScope, table: &'a str,
+        pk_columns: &'a [String], edits: &'a [TableEdit], cancel_token: CancellationToken)
+        -> DriverFuture<'a, ApplyEditsResult>;
+
+    /// v0.4（FR-252）：批量插入（不要求主键）；中止模式批内事务回滚，
+    /// 跳过模式逐行 autocommit 收集失败行号
+    fn bulk_insert_rows<'a>(&'a self, scope: &'a MetadataScope, table: &'a str,
+        columns: &'a [String], rows: &'a [Vec<Option<String>>], transactional: bool,
+        cancel_token: CancellationToken) -> DriverFuture<'a, BulkInsertResult>;
+
     /// 关闭主 pool 和 control pool
     fn close(&self) -> DriverCloseFuture<'_>;
 }
@@ -505,6 +517,13 @@ pub enum DriverError {
     SessionNotInTransaction,
     #[error("error.driver.session_broken")]
     SessionBroken,
+    // v0.4：表格编辑与批量导入
+    #[error("error.driver.no_primary_key")]
+    NoPrimaryKey,
+    #[error("error.driver.edit_apply_failed")]
+    EditApplyFailed { index: usize, detail: String },
+    #[error("error.driver.edit_conflict")]
+    EditConflict { index: usize },
 }
 
 **v0.3 扩展点说明**：
@@ -528,6 +547,30 @@ pub enum DriverError {
 - **服务端浏览（FR-242）**：`browse_table` 生成 WHERE（列引用转义 + 值参数化，
   数值智能绑定适配 PG 严格类型）/ ORDER BY（列白名单）/ LIMIT+1 / OFFSET；
   COUNT 走独立连接并行查询，5s 超时降级 `total = None`。
+
+**v0.4 扩展点说明**：
+
+- **表格安全编辑（FR-250）**：`apply_table_edits` 以短事务批量应用编辑——后端权威
+  校验 `pk_columns` 与表真实主键一致（不一致 / 无主键返回 `no_primary_key`），
+  `BEGIN → 逐条参数化 DML → COMMIT`，任一失败整体 `ROLLBACK` 并返回
+  `edit_apply_failed { index }`（index 可安全暴露给前端定位 dirty 行）；
+  UPDATE / DELETE 影响行数 ≠ 1 返回 `edit_conflict { index }` 并回滚（0 行即
+  他端并发改动，>1 行说明定位条件不唯一）。编辑期不持有事务：dirty 暂存前端，
+  提交才短暂占用一条连接，与 FR-244 长事务 session 互不占用；关闭 / 断链时
+  dirty 丢失由 UI 确认拦截，绝不向新 session 隐式重放。失败路径 `ROLLBACK`
+  失败则 `close_on_drop` 销毁连接，杜绝脏连接回池（MySQL）与协议残留（PG 取消
+  后直接销毁）。
+- **批量插入（FR-252）**：`bulk_insert_rows` 参数化逐行 INSERT，不要求表有主键
+  （CSV 导入无主键表合法）。中止模式批内单事务、失败回滚并定位批内行号；
+  跳过模式逐行 autocommit、失败行收集行号继续。值统一文本由数据库隐式转换，
+  不做类型推断。
+- **SQL dump（FR-252）**：导出为 command 层组合（`list_tables` / `list_columns` /
+  `browse_table` 分页 + MySQL `SHOW CREATE TABLE` / PG 简化重建 DDL），后端流式
+  写文件；字符串转义按方言——PG `standard_conforming_strings=on` 时反斜杠是普通
+  字符不转义（integration 实测修正），MySQL 转义反斜杠 + 单引号双写。导入侧
+  `StatementSplitter` 是流式增量分句器（`split_statements` 状态机的逐字符可挂起
+  版本，跨块 lookahead 用字符队列等待），64KiB 块读取逐条执行，禁止整文件载入；
+  失败中止并返回语句序号（原始错误不外泄）。
 
 ```
 
@@ -598,6 +641,11 @@ impl OpenConnection {
 | `db_query_cancel` | `query_id` | `()` | 取消正在跑的 query |
 | `db_query_many` | `(id, sql, query_id?, allow_write?, schema?)` | `MultiQueryResult` | 多语句脚本逐条执行（FR-243）；首错/取消中止，后续 skipped |
 | `db_browse_table` | `(id, database, schema?, table, filters, order?, limit?, offset?)` | `TableBrowseResult` | 服务端筛选/排序/分页浏览表数据（FR-242）；列名白名单强制校验 |
+| `db_apply_table_edits` | `(id, database, schema?, table, pk_columns, edits)` | `ApplyEditsResult` | 短事务批量应用表编辑（FR-250）；列白名单强制，失败/冲突错误携带 `editIndex` |
+| `csv_import_preview` | `(path, has_header, max_rows?)` | `CsvPreview` | CSV 解析预览（表头 + 前 N 行 + 总行数，FR-252） |
+| `db_import_csv` | `(id, database, schema?, table, path, mapping, has_header, skip_errors)` | `CsvImportResult` | CSV 分批导入（FR-252）；中止模式批内事务回滚，跳过模式收集失败行号 |
+| `db_export_dump` | `(id, database, schema?, table?, path)` | `ExportDumpResult` | SQL dump 导出：DDL + 多行 VALUES INSERT 流式写文件（FR-252） |
+| `db_import_dump` | `(id, database, schema?, path)` | `ImportDumpResult` | SQL dump 导入：流式分句逐条执行（FR-252）；失败返回语句序号 + 截断预览 |
 | `db_list_indexes` | `(id, database, schema?, table)` | `Vec<IndexMeta>` | 列出表的索引（FR-241） |
 | `db_list_constraints` | `(id, database, schema?, table)` | `Vec<ConstraintMeta>` | 列出表的约束（FR-241） |
 | `transaction_begin` | `(id)` | `session_id` | 建立独占 session 并 BEGIN（FR-244） |

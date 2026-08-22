@@ -2,6 +2,31 @@
 
 > 本文件用于各版本 dogfooding、RC 和正式发布。不要在这里记录真实 host、用户名、库名、表名、IP 或公司环境细节；真实记录写到被忽略的 `docs/dogfooding-log.md`。
 
+## v0.4 发布检查清单
+
+### v0.4 RC 前本地检查
+
+- `just check` 全绿（Rust fmt/clippy/workspace 测试、Vitest、Next build）。
+- `just test-integration` 双 driver 全绿（含 v0.4 新增：编辑批提交/回滚/冲突/无主键拒绝/复合主键、bulk_insert 中止/跳过模式、dump 风格 SQL 往返）。
+- `just build` 产出本机安装包与 updater artifact / `.sig`。
+- `CHANGELOG.md` 的 `[Unreleased]` 段覆盖 v0.4 全部用户可见变更。
+
+### v0.4 功能验收（对应 PLAN.md V4-CP1~CP4）
+
+- 表格编辑（FR-250）：MySQL/PostgreSQL 各自进入编辑模式 → 新增/修改/删除混合 dirty → 提交生效；提交失败（如主键重复）整体回滚且数据无残留；他端删除同行后提交报冲突；无主键表无编辑入口；复合主键表可编辑；翻页/筛选/排序/关闭 tab 有 dirty 时确认拦截；NULL 与空串提交后严格区分。
+- 结构查看与 DDL 预览（FR-251）：双方言列/索引/约束整合展示正确；MySQL DDL 为 `SHOW CREATE TABLE` 原文；PG DDL 标注为重建预览。
+- 新建表（FR-251）：双方言表单 → SQL 预览 → 确认执行 → 树刷新可见；类型白名单拒绝注入字符。
+- CSV 导入（FR-252）：引号/内嵌换行/BOM 文件解析正确；列映射同名自动匹配；中止模式失败整批回滚；跳过模式报告失败行号；无主键表可导入；NULL/空串往返一致。
+- SQL dump（FR-252）：表级导出→导入闭环数据一致；整库导出覆盖全部 BASE TABLE；大文件导入不整读内存；导入失败报告语句序号；含注释/dollar-quoted body 的 dump 不误判分号。
+- 双 driver × 直连 / 1 跳 / 3 跳回归上述全部功能。
+
+### v0.4 正式发布追加条件
+
+- RC 试用 ≥ 1 周（沿用 V2-T8.2 标准）且 P0/P1 清零；未完成 P1 降级项明确移入 v0.4.1 或 v0.5，不在 Release notes 承诺。
+- `ARCHITECTURE.md` 已含编辑内核 / 批量插入 / dump 流式分句章节；`REQUIREMENTS.md` §3.4 已收口。
+
+---
+
 ## v0.3 发布检查清单
 
 ### v0.3 RC 前本地检查

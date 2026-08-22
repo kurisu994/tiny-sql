@@ -126,10 +126,10 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### v0.4 Week 8 — 双 driver dogfooding 与发布（12h）
 
-- **V4-T8.1 [4h]** 双 driver × 直连/1 跳/3 跳全功能真实回归：编辑提交/回滚、无主键拒绝、结构查看/DDL 预览、新建表、CSV 导入、dump 闭环。
-- **V4-T8.2 [3h]** 作者 + 至少 2 位试用者使用 v0.4 RC ≥ 1 周：0 数据丢失、0 凭据泄露、0 不可恢复 crash。
-- **V4-T8.3 [3h]** 文档：REQUIREMENTS §3.4 收口、ARCHITECTURE 编辑/导入导出章节、RELEASE_CHECKLIST v0.4 节、CHANGELOG 持续维护。
-- **V4-T8.4 [2h]** 门禁：`just check` 全绿、双 driver integration 全绿、本机安装包 + updater 签名产物构建成功；全平台 RC 下载验收随 RC 发布执行。
+- [ ] **V4-T8.1 [4h]** 双 driver × 直连/1 跳/3 跳全功能真实回归：编辑提交/回滚、无主键拒绝、结构查看/DDL 预览、新建表、CSV 导入、dump 闭环。（待用户实测）
+- [ ] **V4-T8.2 [3h]** 作者 + 至少 2 位试用者使用 v0.4 RC ≥ 1 周：0 数据丢失、0 凭据泄露、0 不可恢复 crash。（待 RC 发布后启动）
+- [x] **V4-T8.3 [3h]** 文档（2026-08-22）：`REQUIREMENTS.md` §3.4 收口标注、`ARCHITECTURE.md` 补 v0.4 扩展点（编辑内核 / 批量插入 / dump 流式分句）与契约签名 / 错误变体 / command 列表、`RELEASE_CHECKLIST.md` v0.4 节、CHANGELOG `[Unreleased]` 已覆盖 v0.4 全部用户可见变更。
+- [x] **V4-T8.4 [2h]** 门禁（2026-08-22）：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 118、Next build）；双 driver integration 32/32（MySQL 19 含编辑批 5 / bulk 2 / dump 往返 1，PG 13 含编辑批 2 / bulk 1 / dump 往返 1）；本机 dmg + updater 签名产物构建成功。
 
 验收：**V4-CP5** 发布门槛全部通过；未完成 P1 降级项明确移入 v0.4.1 或 v0.5，不在 Release notes 虚假承诺。
 

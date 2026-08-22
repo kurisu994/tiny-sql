@@ -6,7 +6,11 @@
 
 ## 当前状态
 
-**里程碑：v0.3.0 发布流程已执行（2026-08-22）**——用户确认跳过 rc1 全平台下载安装验收直接正式发布；`just release v0.3.0` 完成版本号更新（四文件 → `0.3.0`）、CHANGELOG 切出 `0.3.0 — 2026-08-22` 段、发布提交 `0825da5`、main 与 tag 推送成功。Release workflow run `32546492367` 触发，四平台 bundle 与 Publish 结果待验证；验证后需核对 Release 资产与 `latest.json`、记录发布结果到 RELEASE_CHECKLIST / ROADMAP / progress。
+**里程碑：v0.4 全部编码与自动化门禁完成（2026-08-22）**——按 PLAN.md v0.4 开发计划完成 Week 1-7 全部三项 FR（提交 `9e8dc2e` 编辑内核 / `288257d` 编辑 UI 闭环 / `cfe918b` 结构查看 DDL 预览 / `2b01f6f` 新建表 / `c34e5e8` CSV 导入 / `840fbea` dump 导出导入）+ V4-T8.3 文档 + V4-T8.4 门禁。门禁事实：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 118、Next build）；双 driver integration 32/32（MySQL 19、PG 13，含编辑批提交/回滚/冲突/无主键拒绝/复合主键、bulk_insert 双模式、dump 风格 SQL 双方言往返）；本机 dmg + updater 签名产物构建成功。剩余仅为 V4-T8.1 真实环境回归、V4-T8.2 RC 一周试用与 RC/正式发布（均需用户参与）。
+
+**v0.4 关键技术决策**（详见「近期决策」）：编辑期不持事务（dirty 暂存前端，提交才短事务批量执行）；UPDATE/DELETE 影响行数 ≠ 1 即冲突回滚；CSV 无引号 NULL 与导出闭环；dump 字符串转义按方言（PG 不转义反斜杠）；StatementSplitter 流式增量分句（split_statements 重构为基于它）。
+
+**里程碑：v0.3.0 发布流程已执行（2026-08-22）**——用户确认跳过 rc1 全平台下载安装验收直接正式发布；`just release v0.3.0` 完成版本号更新（四文件 → `0.3.0`）、CHANGELOG 切出 `0.3.0 — 2026-08-22` 段、发布提交 `0825da5`、main 与 tag 推送成功。Release workflow run `32546492367` 四平台全部成功；GitHub Release `v0.3.0` 非草稿非预发布，含四平台资产与 `latest.json`（version 0.3.0，四平台 URL 已核对）。
 
 **本轮规划：v0.4 开发计划已立项（2026-08-22，提交 `68df6ef`）**——`REQUIREMENTS.md` 新增 §3.4 v0.4 范围章节（FR-250/251/252 锚点）；`PLAN.md` 新增 v0.4 开发计划（8 周约 99h：Week 1-3 安全表格编辑 FR-250、Week 4-5 结构查看/DDL 预览/新建表 FR-251、Week 6-7 CSV 导入与 dump FR-252、Week 8 dogfooding 发布），含 V4-CP0~CP5 检查点、降级链与 V4-R01~R07 风险表；同时按用户要求将已发布的 v0.3 开发计划整章移出 PLAN（历史由 progress.md 保存），PLAN 文件头更新至 v0.3.0 已发布。ROADMAP v0.4 章节已接 PLAN 链接。功能代码待 V4-CP0 收口（v0.3.0 发布验证 + 无阻塞反馈）后开工。
 
@@ -95,6 +99,12 @@
 
 ## 近期决策
 
+- v0.4 主键列禁止编辑（UPDATE 主键会破坏定位），新增行除外（必须能填主键）；单元格编辑用 Enter 保存 / Shift+Enter 置 NULL / Esc 取消，不做内嵌工具按钮。
+- v0.4 浏览 tab 翻页/筛选/排序/刷新时有 dirty 需确认丢弃（防止新数据与 dirty 悬空对不上）；退出编辑模式保留 dirty（不丢）。
+- v0.4 CSV 解析手写 RFC 4180 状态机（不引 csv crate，dependencies 规则）；空值语义与导出闭环（无引号 NULL → SQL NULL）。
+- v0.4 dump 导出 PG 用简化重建 DDL（列/默认值/主键，不含索引外键），标注面向数据迁移；完整结构以结构视图 DDL 预览为准。
+- v0.4 StatementSplitter 流式分句器：lookahead（-- / /* / '' / $tag$）跨块用字符队列挂起，EOF 未闭合拒绝；split_statements 重构为基于它（43 单测含逐字喂入一致性）。
+- v0.4 dump 字符串转义按方言：PG standard_conforming_strings=on 反斜杠不转义（integration 实测发现修正）；换行以真换行嵌入字面量（双方言支持）。
 - v0.4 编辑语义（FR-250）：编辑期 dirty 暂存前端不持有事务（延续 V3-R01 长事务教训），「提交」时才在独占 session 上以单事务批量执行参数化 DML，任一条失败整体回滚；UPDATE/DELETE 影响行数校验（0 行即冲突提示），v0.4 不做原值全比对乐观锁。
 - v0.4 收窄决策：FR-251 仅承诺结构查看 + DDL 预览 + 新建表表单，修改表与索引/约束设计器顺延；FR-252 统一文本导入不做类型推断、dump 流式执行禁止整文件读入、不含备份恢复语义（FR-260）。
 - v0.3.0 发布前用户确认跳过 rc1 全平台下载安装验收（rc1 与正式版同一套代码，仅版本号与 CHANGELOG 切分差异），直接正式发布。
@@ -141,9 +151,9 @@
 
 ## 下一步（按优先级）
 
-1. 验证 Release run `32546492367` 四平台 bundle + Publish 成功，核对 GitHub Release `v0.3.0` 资产与正式版 `latest.json`（version/notes/四平台 URL）。
-2. 记录 v0.3.0 发布结果：RELEASE_CHECKLIST v0.3 节、ROADMAP v0.3 章节改「已发布」、progress.md。
-3. v0.4 Week 1（V4-T1.1 编辑内核后端契约）待 V4-CP0 收口（发布验证 + 无阻塞 P0/P1 反馈）后开工。
+1. V4-T8.1：双 driver × 直连/1 跳/3 跳真实环境回归（用户实测 v0.4 全功能，检查项见 RELEASE_CHECKLIST v0.4 节）。
+2. `just release v0.4.0-rc1` 发布 RC → 全平台下载安装验收 → V4-T8.2 一周试用。
+3. `just release v0.4.0` 正式发布（V4-CP5）。
 
 ## 阻塞 / 风险
 
