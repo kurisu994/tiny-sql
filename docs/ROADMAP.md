@@ -1,8 +1,8 @@
 ---
 title: tiny-sql 路线图
-version: 0.1.0-draft-2
+version: 0.3.0-draft-1
 status: draft
-last_updated: 2026-08-19
+last_updated: 2026-08-22
 ---
 
 # tiny-sql 路线图
@@ -12,13 +12,13 @@ last_updated: 2026-08-19
 ## 路线总览
 
 ```
-v0.1  (5-6 周) ── MySQL + 3 跳 SSH + 拓扑图 + macOS/Windows/Linux 打包 + 自动更新
+v0.1  ✅ 已发布（2026-08-18）── MySQL + 3 跳 SSH + 拓扑图 + macOS/Windows/Linux 打包 + 自动更新
    │
    ▼
-v0.2  (首发后 2-3 个月) ── PG driver + passphrase 加密 + TLS 验收/UX + Schema-aware 智能联想
+v0.2  ✅ 已发布（2026-08-20）── PG driver + passphrase 加密 + TLS 验收/UX + Schema-aware 智能联想
    │
    ▼
-v0.3  ── 查询工作台 + 元数据检索 + 服务端筛选分页 + 可靠事务
+v0.3  🚧 编码与验收完成，待正式发布 ── 查询工作台 + 元数据检索 + 服务端筛选分页 + 可靠事务
    │
    ▼
 v0.4  ── 安全表格编辑 + Table/View 对象管理 + CSV/SQL dump 导入导出
@@ -31,7 +31,7 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 
 ---
 
-## v0.1 — 本次范围（5-6 周）
+## v0.1 — 已发布（2026-08-18）
 
 详见 [REQUIREMENTS.md 3.1](./REQUIREMENTS.md#31-v01-范围5-6-周--60-75-小时) 与 [PLAN.md](./PLAN.md)。
 
@@ -48,22 +48,22 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 
 ---
 
-## v0.2 — 首发后 2-3 个月
-
-启动条件：现有 dogfooding、v0.1.0 全平台发布验收与应用内升级闭环不重做；PostgreSQL 版本基线已固化，V2-CP0 已通过。v0.1 代码承诺缺口与 Week 1 并行，但必须在 V2-CP1 前处理或收窄承诺。
+## v0.2 — 已发布（2026-08-20）
 
 详细任务、依赖、检查点与测试矩阵见 [v0.2 开发计划](./PLAN.md#v02-开发计划)。
+
+**发布事实**：`v0.2.0` 已于 2026-08-20 正式发布。Week 1-6 全部功能（下表）+ V2-T7.4 决策 + 文档收口完成；`just check` 全绿，双 driver integration 全过，全平台构建与应用内升级闭环验收通过。
 
 ### 功能
 
 | ID | 功能 | 优先级 | 状态 |
 |---|---|---|---|
-| **FR-100** | PostgreSQL driver | P0 | ✅ 代码与 integration 完成，真实 Tauri 验收待 V2-T3.4 |
-| **FR-102** | 加密 passphrase 存储（用户主密码 Argon2id 派生 key） | P0 | ✅ 代码与测试完成，支持迁移回滚与锁定 |
-| **FR-103** | MySQL TLS 证书选择与错误诊断（模式/证书选择器/错误分类已接线） | P1 | 🚧 代码完成，真实 TLS 环境验收待 V2-T4.3 |
+| **FR-100** | PostgreSQL driver | P0 | ✅ 已完成（含 V2-T3.4 真实 Tauri 验收） |
+| **FR-102** | 加密 passphrase 存储（用户主密码 Argon2id 派生 key） | P0 | ✅ 已完成（支持迁移回滚与锁定） |
+| **FR-103** | MySQL TLS 证书选择与错误诊断（模式/证书选择器/错误分类已接线） | P1 | ✅ 已完成（含 V2-T4.3 真实 TLS 正反例验收） |
 | **FR-104** | Schema-aware 智能联想（双方言补全 + 启发式 JOIN + ON） | P1 | ✅ 已完成（Week 5） |
-| **FR-105** | 每跳累计 SSH 协议 RTT/超时显示 | P1 | ✅ 代码完成，真实多跳链路待 RC 验收 |
-| **FR-110** | 隧道断开后的幂等「重连」按钮 | P1 | ✅ 代码完成，真实断链待 RC 验收 |
+| **FR-105** | 每跳累计 SSH 协议 RTT/超时显示 | P1 | ✅ 已完成（含真实多跳链路验收） |
+| **FR-110** | 隧道断开后的幂等「重连」按钮 | P1 | ✅ 已完成（含真实断链验收） |
 | **FR-111** | 结果表格列宽拖拽调整（localStorage 持久化 + 恢复默认） | P2 | ✅ 已完成（Week 6） |
 | **FR-112** | schema 树列清单展示（按需展开 + 完整元信息） | P1 | ✅ 已完成（Week 5） |
 | **FR-106** | SQL 历史（最近 100 条加密落盘 + 回填 + 清空） | P1 | ✅ 已完成（Week 6） |
@@ -75,7 +75,7 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 
 ### 工程
 
-- **Driver 契约**：V2-T1.1 已从 `MySqlDriver` 真实调用面提取对象安全的最小契约；下一步增加 `PostgresDriver` 并根据双实现反馈继续收窄（NFR-042）
+- **Driver 契约**：V2-T1.1 已从 `MySqlDriver` 真实调用面提取对象安全的最小契约，v0.2 内已新增 `PostgresDriver` 双实现并按反馈收窄（NFR-042）
 - `AppState` 的活跃连接注册表从具体 `MySqlDriver` 扩展到可容纳多 driver；隧道生命周期仍留在 `src-tauri::OpenConnection` 组合层
 - keepalive 间隔 + 失败阈值可配置，FR-014 的 60s / 连续 3 次（180s）改为默认值
 - 评估 Apple Developer 代码签名 / notarization（$99/年），降低首次打开摩擦
@@ -96,17 +96,19 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 
 > 从 Navicat 日常替代能力清单中，先剔除 v0.2 已规划的 SQL 历史（FR-106）、CSV/Excel 导出（FR-107）、column 树（FR-112）和多查询 tab（FR-109）。以下只登记剩余能力，避免同一功能跨版本重复承诺。
 
-### v0.3 — 查询与浏览效率
+### v0.3 — 查询与浏览效率（编码与验收完成，待正式发布）
 
 详细任务、依赖、检查点与测试矩阵见 [v0.3 开发计划](./PLAN.md#v03-开发计划)。
 
-| ID | 功能 | 优先级 | 范围边界 |
-|---|---|---|---|
-| FR-240 | 保存 / 打开 SQL 文件与最近文件 | P1 | SQL 历史仍由 v0.2 FR-106 负责 |
-| FR-241 | index / constraint 元数据树与数据库对象搜索 | P1 | column 树仍由 v0.2 FR-112 负责 |
-| FR-242 | 表数据服务端筛选、排序和分页 | P0 | 避免先拉全表再在前端处理 |
-| FR-243 | 多结果 tab 与 SQL 格式化 | P1 | 多查询 tab 仍由 v0.2 FR-109 负责；同一次执行可保留多个结果 |
-| FR-244 | 连接绑定的独占 session 与可靠事务 | P0 | `BEGIN / COMMIT / ROLLBACK` 必须固定在同一 MySQL connection；是 v0.4 安全编辑的前置能力 |
+**当前进度**：v0.3 全部五项 FR 已于 2026-08-20 完成编码与自动化门禁（Week 1-6 + V3-T7.3 文档 + V3-T7.4 门禁）；`just check` 全绿，双 driver integration 20/20，本机 dmg + updater 签名产物构建成功。V3-T7.1 双 driver × 直连/1 跳/3 跳全功能真实回归已于 2026-08-21 用户实测通过；`v0.3.0-rc1` 同日发布（发布提交 `3e29e5a`，四平台 prerelease，无 `latest.json`）。V3-T7.2 RC 一周试用已于 2026-08-22 关闭（0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，无阻塞 P0/P1）。剩余仅为 RC 下载安装验收收尾与正式发布。
+
+| ID | 功能 | 优先级 | 状态 | 范围边界 |
+|---|---|---|---|---|
+| FR-240 | 保存 / 打开 SQL 文件与最近文件 | P1 | ✅ 已完成（Week 6） | SQL 历史仍由 v0.2 FR-106 负责 |
+| FR-241 | index / constraint 元数据树与数据库对象搜索 | P1 | ✅ 已完成（Week 4） | column 树仍由 v0.2 FR-112 负责 |
+| FR-242 | 表数据服务端筛选、排序和分页 | P0 | ✅ 已完成（Week 3） | 避免先拉全表再在前端处理 |
+| FR-243 | 多结果 tab 与 SQL 格式化 | P1 | ✅ 已完成（Week 5） | 多查询 tab 仍由 v0.2 FR-109 负责；同一次执行可保留多个结果 |
+| FR-244 | 连接绑定的独占 session 与可靠事务 | P0 | ✅ 已完成（Week 1-2） | `BEGIN / COMMIT / ROLLBACK` 必须固定在同一 MySQL connection；是 v0.4 安全编辑的前置能力 |
 
 ### v0.4 — 安全数据维护与对象管理
 
@@ -211,7 +213,7 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 ## 反馈通道
 
 - GitHub Issues：bug / feature request
-- GitHub Discussions：开放讨论 / v0.2 优先级投票
+- GitHub Discussions：开放讨论 / v0.3 反馈与 v0.4 优先级投票
 - V2EX / 掘金 帖子下评论
 
 24h 内首次回应是承诺。

@@ -2,9 +2,11 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-21
+**最后更新**：2026-08-22
 
 ## 当前状态
+
+**本轮文档同步：ROADMAP 对齐 v0.3 事实（2026-08-22）**——`docs/ROADMAP.md` 版本头升至 `0.3.0-draft-1`，路线总览改为 v0.1/v0.2 已发布、v0.3 编码与验收完成待正式发布；v0.1 章节改标题为「已发布」、v0.2 章节补「发布事实」段并把 5 个挂在开发期「待验收」状态的单元格（FR-100/102/103/105/110）统一收口为完成态；v0.3 章节升级为「编码与验收完成，待正式发布」，补完整进度说明（Week 1-6 完成、T7.1 真实回归、rc1、T7.2 RC 一周试用关闭），功能表加状态列（五项 FR 全 ✅）；工程部分「下一步增加 PostgresDriver」改为双实现已落地，反馈通道由「v0.2 优先级投票」改为「v0.3 反馈与 v0.4 优先级投票」。
 
 **里程碑：v0.3.0-rc1 已发布（2026-08-21）**——发布前 `just check` 与双 driver integration 20/20 全绿（本机 dmg 构建门禁前一日 T7.4 已过，中间仅文档变更）；`just release v0.3.0-rc1` 完成版本号更新（四文件 → `0.3.0-rc1`，预发布不切 CHANGELOG）、发布提交 `3e29e5a`、main 与 tag 推送成功。Release workflow run `32441320976` 四平台 bundle + Publish 全部成功；GitHub Release `v0.3.0-rc1` 为 prerelease、非草稿，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows `.exe(.sig)`、Linux `.AppImage(.sig)`，**未生成 `latest.json`**（不会成为更新源）；Release notes 取 CHANGELOG `[Unreleased]` 段已核对。剩全平台下载安装实测与 V3-T7.2 一周试用。
 
