@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPostgresCreateTablePreview } from "@/lib/ddl";
+import {
+  buildCreateTableSql,
+  buildPostgresCreateTablePreview,
+  isValidDataType,
+  validateCreateTable,
+  type CreateTableInput,
+} from "@/lib/ddl";
 import type { ColumnMeta, ConstraintMeta, IndexMeta } from "@/lib/tauri-api";
 
 function col(overrides: Partial<ColumnMeta> = {}): ColumnMeta {
@@ -89,5 +95,111 @@ describe("buildPostgresCreateTablePreview", () => {
       [],
     );
     expect(ddl).toBe('CREATE TABLE "public"."logs" (\n  "msg" text\n);');
+  });
+});
+
+describe("buildCreateTableSql（FR-251 新建表）", () => {
+  function input(overrides: Partial<CreateTableInput> = {}): CreateTableInput {
+    return {
+      driver: "mysql",
+      database: "app",
+      table: "users",
+      columns: [
+        { name: "id", dataType: "int", nullable: false, defaultValue: "", primaryKey: true, autoIncrement: true },
+        { name: "name", dataType: "varchar(50)", nullable: false, defaultValue: "", primaryKey: false, autoIncrement: false },
+        { name: "note", dataType: "text", nullable: true, defaultValue: "", primaryKey: false, autoIncrement: false },
+      ],
+      ...overrides,
+    };
+  }
+
+  it("MySQL：全限定表名、NOT NULL、AUTO_INCREMENT、PRIMARY KEY 与表注释", () => {
+    const sql = buildCreateTableSql(input({ comment: "用户表" }));
+    expect(sql).toBe(
+      "CREATE TABLE `app`.`users` (\n" +
+        "  `id` int NOT NULL AUTO_INCREMENT,\n" +
+        "  `name` varchar(50) NOT NULL,\n" +
+        "  `note` text,\n" +
+        "  PRIMARY KEY (`id`)\n" +
+        ") COMMENT = '用户表';",
+    );
+  });
+
+  it("PostgreSQL：schema 限定、双引号、无 AUTO_INCREMENT", () => {
+    const sql = buildCreateTableSql(
+      input({
+        driver: "postgresql",
+        schema: "audit",
+        columns: [
+          { name: "id", dataType: "integer", nullable: false, defaultValue: "", primaryKey: true, autoIncrement: false },
+          { name: "email", dataType: "character varying(255)", nullable: false, defaultValue: "''", primaryKey: false, autoIncrement: false },
+        ],
+      }),
+    );
+    expect(sql).toContain('CREATE TABLE "audit"."users" (');
+    expect(sql).toContain('"id" integer NOT NULL');
+    expect(sql).toContain(`"email" character varying(255) NOT NULL DEFAULT ''`);
+    expect(sql).toContain('PRIMARY KEY ("id")');
+    expect(sql).not.toContain("AUTO_INCREMENT");
+  });
+
+  it("复合主键与默认值表达式", () => {
+    const sql = buildCreateTableSql(
+      input({
+        columns: [
+          { name: "a", dataType: "int", nullable: false, defaultValue: "", primaryKey: true, autoIncrement: false },
+          { name: "b", dataType: "int", nullable: false, defaultValue: "0", primaryKey: true, autoIncrement: false },
+          { name: "ts", dataType: "timestamp", nullable: false, defaultValue: "CURRENT_TIMESTAMP", primaryKey: false, autoIncrement: false },
+        ],
+      }),
+    );
+    expect(sql).toContain("PRIMARY KEY (`a`, `b`)");
+    expect(sql).toContain("`ts` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP");
+  });
+
+  it("validateCreateTable 拒绝空表名 / 重复列 / 可空主键 / 非法类型", () => {
+    expect(validateCreateTable(input({ table: "  " }))).toBe("表名不能为空");
+    expect(validateCreateTable(input({ columns: [] }))).toBe("至少需要一列");
+    expect(
+      validateCreateTable(
+        input({
+          columns: [
+            { name: "id", dataType: "int", nullable: false, defaultValue: "", primaryKey: true, autoIncrement: false },
+            { name: "ID", dataType: "int", nullable: false, defaultValue: "", primaryKey: false, autoIncrement: false },
+          ],
+        }),
+      ),
+    ).toBe("列名不能重复");
+    expect(
+      validateCreateTable(
+        input({
+          columns: [
+            { name: "id", dataType: "int", nullable: true, defaultValue: "", primaryKey: true, autoIncrement: false },
+          ],
+        }),
+      ),
+    ).toBe("主键列「id」必须 NOT NULL");
+    expect(
+      validateCreateTable(
+        input({
+          columns: [
+            { name: "x", dataType: "int; DROP TABLE t", nullable: false, defaultValue: "", primaryKey: false, autoIncrement: false },
+          ],
+        }),
+      ),
+    ).toContain("类型不合法");
+    expect(validateCreateTable(input())).toBeNull();
+  });
+
+  it("isValidDataType 白名单：常规类型通过，注入字符拒绝", () => {
+    expect(isValidDataType("int")).toBe(true);
+    expect(isValidDataType("varchar(255)")).toBe(true);
+    expect(isValidDataType("decimal(10, 2)")).toBe(true);
+    expect(isValidDataType("int unsigned")).toBe(true);
+    expect(isValidDataType("timestamp with time zone")).toBe(true);
+    expect(isValidDataType("character varying(50)")).toBe(true);
+    expect(isValidDataType("int); DROP")).toBe(false);
+    expect(isValidDataType("int --")).toBe(false);
+    expect(isValidDataType("")).toBe(false);
   });
 });

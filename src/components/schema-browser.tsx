@@ -5,6 +5,7 @@ import { Virtuoso } from "react-virtuoso";
 import { PlusIcon, XIcon } from "lucide-react";
 
 import { HistoryPanel } from "@/components/history-panel";
+import { CreateTableDialog } from "@/components/create-table-dialog";
 import { BrowseView } from "@/components/browse-view";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
 import { TopologyGraph } from "@/components/topology-graph";
@@ -94,6 +95,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [formatting, setFormatting] = useState(false);
+  const [createTableOpen, setCreateTableOpen] = useState(false);
   /** 打开 SQL 文件对话框（FR-240） */
   async function openFileDialog() {
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -478,15 +480,32 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         <aside className="w-72 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-100 bg-white/95 px-3 py-1.5 text-xs text-neutral-500 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
             <span>数据库对象</span>
-            <button
-              type="button"
-              onClick={refreshMetadata}
-              disabled={!connected || refreshingMetadata}
-              aria-label="刷新数据库对象"
-              className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
-            >
-              {refreshingMetadata ? "刷新中…" : "刷新"}
-            </button>
+            <div className="flex items-center gap-1">
+              {/* 新建表（FR-251）：需已选中 database（MySQL）/ schema（PostgreSQL） */}
+              <button
+                type="button"
+                onClick={() => setCreateTableOpen(true)}
+                disabled={
+                  !connected ||
+                  !selectedDb ||
+                  (connection.driver === "postgresql" && !selectedSchema)
+                }
+                aria-label="新建表"
+                title="新建表"
+                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+              >
+                新建表
+              </button>
+              <button
+                type="button"
+                onClick={refreshMetadata}
+                disabled={!connected || refreshingMetadata}
+                aria-label="刷新数据库对象"
+                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+              >
+                {refreshingMetadata ? "刷新中…" : "刷新"}
+              </button>
+            </div>
           </div>
           {connected && (
             <div className="border-b border-neutral-100 px-2 py-1.5 dark:border-neutral-800">
@@ -964,6 +983,17 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           )}
         </section>
       </div>
+
+      {/* 新建表对话框（FR-251） */}
+      {selectedDb && (
+        <CreateTableDialog
+          open={createTableOpen}
+          driver={connection.driver}
+          database={selectedDb}
+          schema={connection.driver === "postgresql" ? selectedSchema : null}
+          onOpenChange={setCreateTableOpen}
+        />
+      )}
     </div>
   );
 }
