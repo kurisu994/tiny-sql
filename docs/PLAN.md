@@ -17,7 +17,7 @@ last_updated: 2026-08-22
 
 # v0.4 开发计划
 
-> 本节为 2026-08-22 起草的草案，待 v0.3.0 正式发布与用户确认后生效。
+> 本节于 2026-08-22 生效（V4-CP0 已收口）。
 
 **周期与预算**：8 周，约 96-100h，按作者业余时间 12-13h/周。
 
@@ -31,11 +31,11 @@ last_updated: 2026-08-22
 
 ## V4.1 Phase 0：启动准入（不计入 8 周预算）
 
-- [ ] v0.3.0 正式版已发布：V3 全检查点关闭、CHANGELOG 切出 `0.3.0` 段、全平台 `latest.json` 验收。
-- [ ] RC/正式反馈产生的 v0.3.x 补丁：正式发布前无阻塞 P0/P1；后续真实用户反馈按常规流程走 v0.3.x 补丁，不混入 v0.4 承诺。
+- [x] v0.3.0 正式版已发布（2026-08-22）：Release run `32546492367` 四平台全部成功，Release 非草稿非预发布，四平台资产与 `latest.json`（version 0.3.0）已核对。
+- [x] RC/正式反馈产生的 v0.3.x 补丁：发布前无阻塞 P0/P1；后续真实用户反馈按常规流程走 v0.3.x 补丁，不混入 v0.4 承诺。
 - [x] `REQUIREMENTS.md` 已补 v0.4 范围章节（2026-08-22，§3.4）。
 
-**V4-CP0 全部收口后，v0.4 Week 1 才可以开工。**
+**V4-CP0 已于 2026-08-22 全部收口，v0.4 Week 1 开工。**
 
 RC/发布等待期间可以提前做 v0.4 契约设计（文档级工作）；真实用户反馈的 P0/P1 修复始终优先于 v0.4 任何任务。
 
@@ -64,14 +64,14 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ## V4.3 分周任务与验收
 
-### v0.4 Week 1 — 编辑内核后端（13h）
+### v0.4 Week 1 — 编辑内核后端（13h）✅ 已完成（2026-08-22）
 
-- **V4-T1.1 [3h]** Driver 契约最小扩展：表主键元信息查询（复用 FR-241 constraint metadata，无主键显式返回空）；编辑批量执行接口：独占 session 上 `BEGIN → 逐条参数化 DML → COMMIT`，任一条失败整体 `ROLLBACK` 并定位失败序号。
-- **V4-T1.2 [4h]** MySQL 实现：INSERT / UPDATE / DELETE 按主键 WHERE 全参数化；影响行数校验（UPDATE/DELETE 期望 1 行，0 行即冲突报错）；自增列、生成列、ON UPDATE 默认值的跳过规则。
-- **V4-T1.3 [4h]** PostgreSQL 实现：同上语义，标识符双引号引用、schema 限定；`RETURNING` 不回传编辑结果（保持契约最小）。
-- **V4-T1.4 [2h]** 单测与 integration：增/删/改混合批量提交生效、中途失败整体回滚、0 影响行冲突报错、无主键表拒绝。
+- **V4-T1.1 [3h]** ✅ Driver 契约最小扩展：`apply_table_edits(scope, table, pk_columns, edits, cancel)`——后端权威校验主键（不一致/无主键返回 `NoPrimaryKey`），`BEGIN → 逐条参数化 DML → COMMIT`，任一失败整体 `ROLLBACK`；新增 `EditApplyFailed { index }`（定位失败语句）与 `EditConflict { index }`（影响行数 ≠ 1）稳定错误 key；`TableEdit`（Insert / Update / Delete）+ `EditCell`（None = NULL）类型。复用 FR-241 constraint metadata，不新增主键查询契约面。
+- **V4-T1.2 [4h]** ✅ MySQL 实现：短事务独占连接（`START TRANSACTION` text protocol），逐条参数化 INSERT/UPDATE/DELETE，`KILL QUERY` 取消 + 失败路径 `ROLLBACK` 失败则 `close_on_drop` 防脏连接回池；COMMIT 失败同样销毁连接杜绝「以为已提交」中间态。
+- **V4-T1.3 [4h]** ✅ PostgreSQL 实现：同语义（schema 限定、双引号标识符、`$N` 占位）；取消后连接协议不可信，直接 `close_on_drop` 由服务端兜底回滚（session 教训）。
+- **V4-T1.4 [2h]** ✅ 测试：单测 6 个（DML 生成 / 标识符转义 / NULL 与空串区分 / 占位符编号 / noop 跳过 / 错误 key 与 index）+ integration 7 个（MySQL 5：混合批提交、中途失败回滚、冲突回滚、无主键/主键不符拒绝、复合主键；PG 2：混合批 + 回滚/拒绝/复合主键）。真实双 driver integration 27/27 全绿（MySQL 16、PG 11），db-driver 单测 47/47，clippy 干净。
 
-验收：MySQL/PostgreSQL 现有测试全绿（零回归）；**V4-CP1** 通过后才进入 Week 2。
+验收：MySQL 现有测试全绿（零回归）；双 driver 编辑原语可用；**V4-CP1 已通过（2026-08-22）**，进入 Week 2。
 
 ### v0.4 Week 2 — 编辑模式 UI 与 dirty state（13h）
 

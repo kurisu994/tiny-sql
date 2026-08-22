@@ -89,6 +89,15 @@ pub enum DriverError {
     SessionNotInTransaction,
     #[error("error.driver.session_broken")]
     SessionBroken,
+    /// 表无主键或传入的主键列与实际主键不一致（FR-250），拒绝进入编辑执行。
+    #[error("error.driver.no_primary_key")]
+    NoPrimaryKey,
+    /// 编辑批第 `index` 条执行失败，整个事务已回滚；detail 只留后端，不跨 IPC。
+    #[error("error.driver.edit_apply_failed")]
+    EditApplyFailed { index: usize, detail: String },
+    /// 编辑批第 `index` 条 UPDATE/DELETE 影响行数不为 1（他端并发改动），已整体回滚。
+    #[error("error.driver.edit_conflict")]
+    EditConflict { index: usize },
 }
 
 impl DriverError {
@@ -116,6 +125,17 @@ impl DriverError {
             Self::TxRequiresSession => "error.driver.tx_requires_session",
             Self::SessionNotInTransaction => "error.driver.session_not_in_transaction",
             Self::SessionBroken => "error.driver.session_broken",
+            Self::NoPrimaryKey => "error.driver.no_primary_key",
+            Self::EditApplyFailed { .. } => "error.driver.edit_apply_failed",
+            Self::EditConflict { .. } => "error.driver.edit_conflict",
+        }
+    }
+
+    /// 编辑批失败 / 冲突时的语句序号（FR-250）；可安全暴露给前端定位 dirty 行。
+    pub fn edit_index(&self) -> Option<usize> {
+        match self {
+            Self::EditApplyFailed { index, .. } | Self::EditConflict { index } => Some(*index),
+            _ => None,
         }
     }
 }
@@ -358,6 +378,37 @@ pub struct TableBrowseResult {
     pub has_next_page: bool,
 }
 
+/// 编辑单元格值（FR-250）：列名 + 文本值，`None` 表示 SQL NULL。
+///
+/// 统一按文本传输，数值解析与筛选值（[`parse_filter_value`]）同规则；
+/// 列名由应用层按已加载 metadata 白名单校验后传入，driver 只做标识符引用转义。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditCell {
+    pub column: String,
+    pub value: Option<String>,
+}
+
+/// 单条表编辑操作（FR-250）。
+///
+/// - `Insert`：按 `values` 列集合插入一行（未提及的列走数据库默认值）。
+/// - `Update`：`pk` 主键定位 + `changes` 列新值；主键列本身不可修改。
+/// - `Delete`：`pk` 主键定位删除。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TableEdit {
+    Insert { values: Vec<EditCell> },
+    Update { pk: Vec<EditCell>, changes: Vec<EditCell> },
+    Delete { pk: Vec<EditCell> },
+}
+
+/// 编辑批应用结果（FR-250）：全部成功时返回应用条数。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyEditsResult {
+    pub applied: usize,
+}
+
 /// 索引元信息（FR-241）。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -458,6 +509,112 @@ fn quote_mysql_ident(name: &str) -> String {
     format!("`{}`", name.replace('`', "``"))
 }
 
+/// 生成「列 = 值」片段：NULL 值写 `IS NULL` 字面量（WHERE 用）或直接 `NULL`（SET 用），
+/// 不拼用户文本；非 NULL 值一律参数化绑定。
+fn edit_cell_eq(
+    cell: &EditCell,
+    binds: &mut Vec<FilterValue>,
+    quote: &impl Fn(&str) -> String,
+    placeholder: &impl Fn(usize) -> String,
+) -> String {
+    let column = quote(&cell.column);
+    match &cell.value {
+        None => format!("{column} IS NULL"),
+        Some(raw) => {
+            binds.push(parse_filter_value(raw));
+            format!("{column} = {}", placeholder(binds.len()))
+        }
+    }
+}
+
+/// 生成「列 = 值」赋值片段（INSERT / UPDATE SET 用）：NULL 写字面量 `NULL`。
+fn edit_cell_assign(
+    cell: &EditCell,
+    binds: &mut Vec<FilterValue>,
+    quote: &impl Fn(&str) -> String,
+    placeholder: &impl Fn(usize) -> String,
+) -> String {
+    let column = quote(&cell.column);
+    match &cell.value {
+        None => format!("{column} = NULL"),
+        Some(raw) => {
+            binds.push(parse_filter_value(raw));
+            format!("{column} = {}", placeholder(binds.len()))
+        }
+    }
+}
+
+/// 由编辑操作生成参数化 DML（FR-250）。`table_sql` 为已按方言引用的全限定表名。
+/// 返回 `None` 表示该条无需执行（如 Update 无变更列 —— 前端不应产生，防御性跳过）。
+fn build_edit_sql(
+    edit: &TableEdit,
+    table_sql: &str,
+    quote: impl Fn(&str) -> String,
+    placeholder: impl Fn(usize) -> String,
+) -> Option<(String, Vec<FilterValue>)> {
+    let mut binds: Vec<FilterValue> = Vec::new();
+    match edit {
+        TableEdit::Insert { values } => {
+            if values.is_empty() {
+                return None;
+            }
+            let columns = values
+                .iter()
+                .map(|cell| quote(&cell.column))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let placeholders = values
+                .iter()
+                .map(|cell| match &cell.value {
+                    None => "NULL".to_string(),
+                    Some(raw) => {
+                        binds.push(parse_filter_value(raw));
+                        placeholder(binds.len())
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some((
+                format!("INSERT INTO {table_sql} ({columns}) VALUES ({placeholders})"),
+                binds,
+            ))
+        }
+        TableEdit::Update { pk, changes } => {
+            if pk.is_empty() || changes.is_empty() {
+                return None;
+            }
+            let set_clause = changes
+                .iter()
+                .map(|cell| edit_cell_assign(cell, &mut binds, &quote, &placeholder))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let where_clause = pk
+                .iter()
+                .map(|cell| edit_cell_eq(cell, &mut binds, &quote, &placeholder))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            Some((
+                format!("UPDATE {table_sql} SET {set_clause} WHERE {where_clause}"),
+                binds,
+            ))
+        }
+        TableEdit::Delete { pk } => {
+            if pk.is_empty() {
+                return None;
+            }
+            let where_clause = pk
+                .iter()
+                .map(|cell| edit_cell_eq(cell, &mut binds, &quote, &placeholder))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            Some((
+                format!("DELETE FROM {table_sql} WHERE {where_clause}"),
+                binds,
+            ))
+        }
+    }
+}
+
 /// PostgreSQL 双引号标识符引用（内部双引号双写转义）。
 fn quote_pg_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
@@ -541,6 +698,23 @@ pub trait Driver: Send + Sync {
         options: QueryOptions,
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, MultiQueryResult>;
+
+    /// 在短事务中批量应用表编辑（FR-250）：后端权威校验 `pk_columns` 与表真实
+    /// 主键一致（不一致 / 无主键返回 [`DriverError::NoPrimaryKey`]），然后
+    /// `BEGIN` → 逐条参数化 DML → 全部成功 `COMMIT`；任一条失败整体 `ROLLBACK`
+    /// 并返回 [`DriverError::EditApplyFailed`]（携带失败序号）；UPDATE/DELETE
+    /// 影响行数不为 1 时返回 [`DriverError::EditConflict`] 并回滚。
+    ///
+    /// 事务为短时持有：调用期间独占一条连接，返回即释放，与 FR-244 的长事务
+    /// session 互不占用。取消语义与 `query` 相同，取消后事务回滚。
+    fn apply_table_edits<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        pk_columns: &'a [String],
+        edits: &'a [TableEdit],
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, ApplyEditsResult>;
 
     /// 幂等关闭 driver 持有的连接资源。
     fn close(&self) -> DriverCloseFuture<'_>;
@@ -1246,6 +1420,112 @@ impl MySqlDriver {
         }
     }
 
+    /// 批量应用表编辑（FR-250）：短事务独占一条连接，逐条参数化 DML，
+    /// 全部成功才 COMMIT；任一失败 / 取消 / 影响行数异常整体 ROLLBACK。
+    pub async fn apply_table_edits(
+        &self,
+        scope: &MetadataScope,
+        table: &str,
+        pk_columns: &[String],
+        edits: &[TableEdit],
+        cancel_token: CancellationToken,
+    ) -> Result<ApplyEditsResult, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        if edits.is_empty() {
+            return Ok(ApplyEditsResult { applied: 0 });
+        }
+        // 主键权威校验：传入列集合必须与表真实主键一致（顺序无关），杜绝前端过期元数据
+        let constraints = self.list_constraints(&scope.database, table).await?;
+        let actual: Option<std::collections::BTreeSet<&str>> = constraints
+            .iter()
+            .find(|c| c.constraint_type == "PRIMARY KEY")
+            .map(|c| c.columns.iter().map(String::as_str).collect());
+        let expected: std::collections::BTreeSet<&str> =
+            pk_columns.iter().map(String::as_str).collect();
+        match actual {
+            Some(actual) if !actual.is_empty() && actual == expected => {}
+            _ => return Err(DriverError::NoPrimaryKey),
+        }
+
+        let table_sql = format!(
+            "{}.{}",
+            quote_mysql_ident(&scope.database),
+            quote_mysql_ident(table)
+        );
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        let mysql_thread_id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        // 事务语句走 text protocol（MySQL 预处理协议不支持，1295 ER_UNSUPPORTED_PS）
+        conn.execute(sqlx::raw_sql("START TRANSACTION"))
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+
+        let mut applied = 0usize;
+        for (index, edit) in edits.iter().enumerate() {
+            let Some((sql, binds)) =
+                build_edit_sql(edit, &table_sql, quote_mysql_ident, |_| "?".to_string())
+            else {
+                continue;
+            };
+            let mut q = sqlx::query(&sql);
+            for value in &binds {
+                q = match value {
+                    FilterValue::Int(v) => q.bind(*v),
+                    FilterValue::Float(v) => q.bind(*v),
+                    FilterValue::Text(v) => q.bind(v.clone()),
+                };
+            }
+            let outcome = tokio::select! {
+                result = q.execute(&mut *conn) => result,
+                _ = cancel_token.cancelled() => {
+                    self.kill_query(mysql_thread_id).await;
+                    Self::rollback_or_close(&mut conn).await;
+                    return Err(DriverError::QueryCancelled);
+                }
+            };
+            let done = match outcome {
+                Ok(done) => done,
+                Err(error) => {
+                    Self::rollback_or_close(&mut conn).await;
+                    return Err(DriverError::EditApplyFailed {
+                        index,
+                        detail: error.to_string(),
+                    });
+                }
+            };
+            // UPDATE / DELETE 期望恰好命中 1 行：0 行即他端并发改动，>1 行说明
+            // 定位条件不唯一（如前端漏传主键列），两者都整体回滚报冲突
+            if !matches!(edit, TableEdit::Insert { .. }) && done.rows_affected() != 1 {
+                Self::rollback_or_close(&mut conn).await;
+                return Err(DriverError::EditConflict { index });
+            }
+            applied += 1;
+        }
+
+        if let Err(error) = conn.execute(sqlx::raw_sql("COMMIT")).await {
+            // COMMIT 失败销毁连接由服务端兜底回滚，杜绝「以为已提交」的中间态
+            conn.close_on_drop();
+            return Err(DriverError::QueryFailed(error.to_string()));
+        }
+        Ok(ApplyEditsResult { applied })
+    }
+
+    /// 编辑事务失败路径：尽力 ROLLBACK；ROLLBACK 也失败则销毁连接，
+    /// 防止带未提交事务的脏连接归还 pool 污染后续查询。
+    async fn rollback_or_close(conn: &mut sqlx::pool::PoolConnection<sqlx::MySql>) {
+        if conn.execute(sqlx::raw_sql("ROLLBACK")).await.is_err() {
+            conn.close_on_drop();
+        }
+    }
+
     /// 从独立 control pool 发 KILL QUERY；取消路径不再向用户暴露二次失败。
     async fn kill_query(&self, mysql_thread_id: u64) {
         let sql = format!("KILL QUERY {mysql_thread_id}");
@@ -1351,6 +1631,24 @@ impl Driver for MySqlDriver {
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, MultiQueryResult> {
         Box::pin(MySqlDriver::query_many(self, sql, options, cancel_token))
+    }
+
+    fn apply_table_edits<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        pk_columns: &'a [String],
+        edits: &'a [TableEdit],
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, ApplyEditsResult> {
+        Box::pin(MySqlDriver::apply_table_edits(
+            self,
+            scope,
+            table,
+            pk_columns,
+            edits,
+            cancel_token,
+        ))
     }
 
     fn close(&self) -> DriverCloseFuture<'_> {
@@ -2980,5 +3278,119 @@ mod tests {
             build_create_database_sql("app", Some("utf8mb4;DROP"), None),
             Err(DriverError::InvalidIdentifier)
         ));
+    }
+
+    // === FR-250 编辑内核：DML 生成 ===
+
+    fn cell(column: &str, value: Option<&str>) -> EditCell {
+        EditCell {
+            column: column.to_string(),
+            value: value.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn edit_sql_insert_parameterizes_values_and_writes_null_literal() {
+        let edit = TableEdit::Insert {
+            values: vec![cell("id", Some("42")), cell("name", Some("含;注入")), cell("note", None)],
+        };
+        let (sql, binds) =
+            build_edit_sql(&edit, "`app`.`users`", quote_mysql_ident, |_| "?".to_string())
+                .expect("Insert 应生成 SQL");
+        assert_eq!(
+            sql,
+            "INSERT INTO `app`.`users` (`id`, `name`, `note`) VALUES (?, ?, NULL)"
+        );
+        assert_eq!(binds.len(), 2);
+        assert!(matches!(binds[0], FilterValue::Int(42)));
+        assert!(matches!(&binds[1], FilterValue::Text(v) if v == "含;注入"));
+    }
+
+    #[test]
+    fn edit_sql_update_builds_set_and_pk_where() {
+        let edit = TableEdit::Update {
+            pk: vec![cell("id", Some("7"))],
+            changes: vec![cell("name", Some("new")), cell("score", Some("9.5")), cell("note", None)],
+        };
+        let (sql, binds) =
+            build_edit_sql(&edit, "\"public\".\"users\"", quote_pg_ident, |n| format!("${n}"))
+                .expect("Update 应生成 SQL");
+        assert_eq!(
+            sql,
+            "UPDATE \"public\".\"users\" SET \"name\" = $1, \"score\" = $2, \"note\" = NULL WHERE \"id\" = $3"
+        );
+        assert_eq!(binds.len(), 3);
+        assert!(matches!(&binds[0], FilterValue::Text(v) if v == "new"));
+        assert!(matches!(binds[1], FilterValue::Float(v) if (v - 9.5).abs() < f64::EPSILON));
+        assert!(matches!(binds[2], FilterValue::Int(7)));
+    }
+
+    #[test]
+    fn edit_sql_delete_uses_pk_where_with_is_null_fallback() {
+        let edit = TableEdit::Delete {
+            pk: vec![cell("id", Some("1")), cell("sub_id", None)],
+        };
+        let (sql, binds) =
+            build_edit_sql(&edit, "`app`.`t`", quote_mysql_ident, |_| "?".to_string())
+                .expect("Delete 应生成 SQL");
+        assert_eq!(
+            sql,
+            "DELETE FROM `app`.`t` WHERE `id` = ? AND `sub_id` IS NULL"
+        );
+        assert_eq!(binds.len(), 1);
+    }
+
+    #[test]
+    fn edit_sql_escapes_identifiers() {
+        let edit = TableEdit::Insert {
+            values: vec![cell("we`ird", Some("1"))],
+        };
+        let (sql, _) =
+            build_edit_sql(&edit, "`d``b`.`t`", quote_mysql_ident, |_| "?".to_string())
+                .expect("Insert 应生成 SQL");
+        assert_eq!(sql, "INSERT INTO `d``b`.`t` (`we``ird`) VALUES (?)");
+
+        let (sql, _) =
+            build_edit_sql(&edit, "\"s\".\"t\"", quote_pg_ident, |n| format!("${n}"))
+                .expect("PG Insert 应生成 SQL");
+        assert!(sql.contains("\"we`ird\""), "PG 列名应双引号引用: {sql}");
+    }
+
+    #[test]
+    fn edit_sql_skips_noop_edits() {
+        assert!(build_edit_sql(
+            &TableEdit::Insert { values: vec![] },
+            "`d`.`t`",
+            quote_mysql_ident,
+            |_| "?".to_string()
+        )
+        .is_none());
+        assert!(build_edit_sql(
+            &TableEdit::Update { pk: vec![cell("id", Some("1"))], changes: vec![] },
+            "`d`.`t`",
+            quote_mysql_ident,
+            |_| "?".to_string()
+        )
+        .is_none());
+        assert!(build_edit_sql(
+            &TableEdit::Delete { pk: vec![] },
+            "`d`.`t`",
+            quote_mysql_ident,
+            |_| "?".to_string()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn edit_errors_expose_stable_keys_and_index() {
+        assert_eq!(DriverError::NoPrimaryKey.i18n_key(), "error.driver.no_primary_key");
+        let failed = DriverError::EditApplyFailed { index: 2, detail: "dup".into() };
+        assert_eq!(failed.i18n_key(), "error.driver.edit_apply_failed");
+        assert_eq!(failed.edit_index(), Some(2));
+        assert_eq!(failed.sql_line(), None);
+        let conflict = DriverError::EditConflict { index: 0 };
+        assert_eq!(conflict.i18n_key(), "error.driver.edit_conflict");
+        assert_eq!(conflict.edit_index(), Some(0));
+        assert_eq!(DriverError::QueryCancelled.edit_index(), None);
     }
 }

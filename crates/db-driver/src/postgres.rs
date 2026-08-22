@@ -727,6 +727,110 @@ impl PostgresDriver {
         }
     }
 
+    /// 批量应用表编辑（FR-250）：短事务独占一条连接，逐条参数化 DML，
+    /// 全部成功才 COMMIT；任一失败 / 取消 / 影响行数异常整体回滚。
+    pub async fn apply_table_edits(
+        &self,
+        scope: &MetadataScope,
+        table: &str,
+        pk_columns: &[String],
+        edits: &[TableEdit],
+        cancel_token: CancellationToken,
+    ) -> Result<ApplyEditsResult, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        if edits.is_empty() {
+            return Ok(ApplyEditsResult { applied: 0 });
+        }
+        self.ensure_current_database(&scope.database).await?;
+        let schema = scope
+            .schema
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(DriverError::SchemaRequired)?;
+        // 主键权威校验：传入列集合必须与表真实主键一致（顺序无关），杜绝前端过期元数据
+        let constraints = self.list_constraints(scope, table).await?;
+        let actual: Option<std::collections::BTreeSet<&str>> = constraints
+            .iter()
+            .find(|c| c.constraint_type == "PRIMARY KEY")
+            .map(|c| c.columns.iter().map(String::as_str).collect());
+        let expected: std::collections::BTreeSet<&str> =
+            pk_columns.iter().map(String::as_str).collect();
+        match actual {
+            Some(actual) if !actual.is_empty() && actual == expected => {}
+            _ => return Err(DriverError::NoPrimaryKey),
+        }
+
+        let table_sql = format!("{}.{}", quote_pg_ident(schema), quote_pg_ident(table));
+        let mut conn = self.pool.acquire().await.map_err(query_failed)?;
+        let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(query_failed)?;
+        conn.execute(sqlx::raw_sql("BEGIN"))
+            .await
+            .map_err(query_failed)?;
+
+        let mut applied = 0usize;
+        for (index, edit) in edits.iter().enumerate() {
+            let Some((sql, binds)) = build_edit_sql(edit, &table_sql, quote_pg_ident, |n| {
+                format!("${n}")
+            }) else {
+                continue;
+            };
+            let mut q = sqlx::query(&sql);
+            for value in &binds {
+                q = match value {
+                    FilterValue::Int(v) => q.bind(*v),
+                    FilterValue::Float(v) => q.bind(*v),
+                    FilterValue::Text(v) => q.bind(v.clone()),
+                };
+            }
+            let outcome = tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => {
+                    // PG 取消后连接协议状态不可信（session 教训），直接销毁由服务端兜底回滚
+                    self.cancel_backend(backend_pid).await;
+                    conn.close_on_drop();
+                    return Err(DriverError::QueryCancelled);
+                }
+                result = q.execute(&mut *conn) => result,
+            };
+            let done = match outcome {
+                Ok(done) => done,
+                Err(error) => {
+                    Self::rollback_or_close(&mut conn).await;
+                    return Err(DriverError::EditApplyFailed {
+                        index,
+                        detail: error.to_string(),
+                    });
+                }
+            };
+            // UPDATE / DELETE 期望恰好命中 1 行：0 行即他端并发改动，>1 行说明
+            // 定位条件不唯一，两者都整体回滚报冲突
+            if !matches!(edit, TableEdit::Insert { .. }) && done.rows_affected() != 1 {
+                Self::rollback_or_close(&mut conn).await;
+                return Err(DriverError::EditConflict { index });
+            }
+            applied += 1;
+        }
+
+        if let Err(error) = conn.execute(sqlx::raw_sql("COMMIT")).await {
+            // COMMIT 失败销毁连接由服务端兜底回滚，杜绝「以为已提交」的中间态
+            conn.close_on_drop();
+            return Err(query_failed(error));
+        }
+        Ok(ApplyEditsResult { applied })
+    }
+
+    /// 编辑事务失败路径：尽力 ROLLBACK；失败销毁连接（服务端在连接关闭时兜底回滚）。
+    async fn rollback_or_close(conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>) {
+        if conn.execute(sqlx::raw_sql("ROLLBACK")).await.is_err() {
+            conn.close_on_drop();
+        }
+    }
+
     async fn ensure_current_database(&self, database: &str) -> Result<(), DriverError> {
         let current: String = sqlx::query_scalar("SELECT current_database()")
             .fetch_one(&self.pool)
@@ -845,6 +949,24 @@ impl Driver for PostgresDriver {
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, MultiQueryResult> {
         Box::pin(PostgresDriver::query_many(self, sql, options, cancel_token))
+    }
+
+    fn apply_table_edits<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        pk_columns: &'a [String],
+        edits: &'a [TableEdit],
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, ApplyEditsResult> {
+        Box::pin(PostgresDriver::apply_table_edits(
+            self,
+            scope,
+            table,
+            pk_columns,
+            edits,
+            cancel_token,
+        ))
     }
 
     fn close(&self) -> DriverCloseFuture<'_> {

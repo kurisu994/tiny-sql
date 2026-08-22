@@ -656,3 +656,218 @@ async fn postgres_query_many_handles_dollar_quotes_and_errors() {
 
     driver.close().await;
 }
+
+// === FR-250 编辑内核：apply_table_edits ===
+
+use db_driver::{EditCell, TableEdit};
+
+fn pg_cell(column: &str, value: Option<&str>) -> EditCell {
+    EditCell {
+        column: column.to_string(),
+        value: value.map(str::to_string),
+    }
+}
+
+async fn pg_current_scope(driver: &PostgresDriver) -> MetadataScope {
+    let current: String = driver
+        .query("SELECT current_database()")
+        .await
+        .expect("取当前库失败")
+        .rows[0][0]
+        .clone()
+        .expect("current_database 不为 NULL");
+    MetadataScope::postgresql(current, "public".to_string())
+}
+
+/// 建一张编辑测试表（表名全局唯一，并发测试互不干扰）。
+async fn pg_setup_edit_table(driver: &PostgresDriver, table: &str, ddl: &str) {
+    for sql in [format!("DROP TABLE IF EXISTS {table}"), ddl.to_string()] {
+        driver
+            .query_with_options(&sql, write_opts(), CancellationToken::new())
+            .await
+            .unwrap_or_else(|e| panic!("建表语句失败 {sql}: {e:?}"));
+    }
+}
+
+/// 编辑批全流程：混合 Insert/Update/Delete 提交生效；NULL 与空串区分。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_apply_table_edits_commits_mixed_batch() {
+    let driver = connect().await;
+    pg_setup_edit_table(
+        &driver,
+        "edit_batch",
+        "CREATE TABLE edit_batch (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+    )
+    .await;
+    let scope = pg_current_scope(&driver).await;
+    let pk = vec!["id".to_string()];
+
+    let edits = vec![
+        TableEdit::Insert {
+            values: vec![pg_cell("id", Some("1")), pg_cell("name", Some("alpha")), pg_cell("note", None)],
+        },
+        TableEdit::Insert {
+            values: vec![pg_cell("id", Some("2")), pg_cell("name", Some("")), pg_cell("note", Some("n2"))],
+        },
+        TableEdit::Update {
+            pk: vec![pg_cell("id", Some("1"))],
+            changes: vec![pg_cell("name", Some("beta")), pg_cell("note", Some("含;分号"))],
+        },
+        TableEdit::Insert {
+            values: vec![pg_cell("id", Some("3")), pg_cell("name", Some("gamma")), pg_cell("note", None)],
+        },
+        TableEdit::Delete {
+            pk: vec![pg_cell("id", Some("3"))],
+        },
+    ];
+    let result = driver
+        .apply_table_edits(&scope, "edit_batch", &pk, &edits, CancellationToken::new())
+        .await
+        .expect("编辑批应成功");
+    assert_eq!(result.applied, 5);
+
+    let rows = driver
+        .query_with_options(
+            "SELECT id, name, note FROM edit_batch ORDER BY id",
+            read_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("读取失败");
+    assert_eq!(rows.rows.len(), 2, "Delete 应移除 id=3");
+    assert_eq!(rows.rows[0][1].as_deref(), Some("beta"), "id=1 Update 应生效");
+    assert_eq!(rows.rows[0][2].as_deref(), Some("含;分号"));
+    assert_eq!(rows.rows[1][1].as_deref(), Some(""), "空串不能变成 NULL");
+    assert_eq!(rows.rows[1][2].as_deref(), Some("n2"), "note 值应保留");
+
+    driver.close().await;
+}
+
+/// 中途失败整体回滚；无主键与主键不符拒绝；复合主键 Update。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_apply_table_edits_rolls_back_and_rejects_bad_pk() {
+    let driver = connect().await;
+    pg_setup_edit_table(
+        &driver,
+        "edit_rollback",
+        "CREATE TABLE edit_rollback (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+    )
+    .await;
+    pg_setup_edit_table(&driver, "edit_nopk", "CREATE TABLE edit_nopk (id INT, name VARCHAR(50))").await;
+    pg_setup_edit_table(
+        &driver,
+        "edit_composite",
+        "CREATE TABLE edit_composite (a INT, b INT, val VARCHAR(50), PRIMARY KEY (a, b))",
+    )
+    .await;
+    let scope = pg_current_scope(&driver).await;
+    let pk = vec!["id".to_string()];
+
+    driver
+        .apply_table_edits(
+            &scope,
+            "edit_rollback",
+            &pk,
+            &[TableEdit::Insert {
+                values: vec![pg_cell("id", Some("9")), pg_cell("name", Some("seed")), pg_cell("note", None)],
+            }],
+            CancellationToken::new(),
+        )
+        .await
+        .expect("种子行应成功");
+
+    let edits = vec![
+        TableEdit::Insert {
+            values: vec![pg_cell("id", Some("10")), pg_cell("name", Some("x")), pg_cell("note", None)],
+        },
+        TableEdit::Insert {
+            values: vec![pg_cell("id", Some("9")), pg_cell("name", Some("dup")), pg_cell("note", None)],
+        },
+    ];
+    let error = driver
+        .apply_table_edits(&scope, "edit_rollback", &pk, &edits, CancellationToken::new())
+        .await
+        .expect_err("主键重复必须失败");
+    match error {
+        DriverError::EditApplyFailed { index, .. } => assert_eq!(index, 1, "失败序号应为第 2 条"),
+        other => panic!("应为 EditApplyFailed，实际 {other:?}"),
+    }
+
+    let rows = driver
+        .query_with_options(
+            "SELECT COUNT(*) FROM edit_rollback",
+            read_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("读取失败");
+    assert_eq!(rows.rows[0][0].as_deref(), Some("1"), "回滚后只剩种子行");
+
+    // UPDATE 0 影响行 → EditConflict
+    let error = driver
+        .apply_table_edits(
+            &scope,
+            "edit_rollback",
+            &pk,
+            &[TableEdit::Update {
+                pk: vec![pg_cell("id", Some("999"))],
+                changes: vec![pg_cell("name", Some("ghost"))],
+            }],
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("0 影响行必须报冲突");
+    assert!(matches!(error, DriverError::EditConflict { index: 0 }));
+
+    // 无主键表拒绝
+    let error = driver
+        .apply_table_edits(
+            &scope,
+            "edit_nopk",
+            &["id".to_string()],
+            &[TableEdit::Delete { pk: vec![pg_cell("id", Some("1"))] }],
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("无主键表必须拒绝");
+    assert!(matches!(error, DriverError::NoPrimaryKey));
+
+    // 主键列不符拒绝
+    let error = driver
+        .apply_table_edits(
+            &scope,
+            "edit_rollback",
+            &["name".to_string()],
+            &[TableEdit::Delete { pk: vec![pg_cell("id", Some("1"))] }],
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("主键列不符必须拒绝");
+    assert!(matches!(error, DriverError::NoPrimaryKey));
+
+    // 复合主键 Update
+    let edits = vec![
+        TableEdit::Insert {
+            values: vec![pg_cell("a", Some("1")), pg_cell("b", Some("2")), pg_cell("val", Some("y"))],
+        },
+        TableEdit::Update {
+            pk: vec![pg_cell("a", Some("1")), pg_cell("b", Some("2"))],
+            changes: vec![pg_cell("val", Some("y2"))],
+        },
+    ];
+    let result = driver
+        .apply_table_edits(
+            &scope,
+            "edit_composite",
+            &["a".to_string(), "b".to_string()],
+            &edits,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("复合主键编辑批应成功");
+    assert_eq!(result.applied, 2);
+
+    driver.close().await;
+}

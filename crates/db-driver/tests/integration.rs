@@ -739,3 +739,283 @@ async fn query_many_executes_statements_and_stops_on_error() {
 
     driver.close().await;
 }
+
+// === FR-250 编辑内核：apply_table_edits ===
+
+use db_driver::{EditCell, TableEdit};
+
+fn cell(column: &str, value: Option<&str>) -> EditCell {
+    EditCell {
+        column: column.to_string(),
+        value: value.map(str::to_string),
+    }
+}
+
+fn probe_scope() -> MetadataScope {
+    let url = test_url();
+    let database = url.rsplit('/').next().expect("URL 必含 database");
+    MetadataScope::mysql(database)
+}
+
+/// 建一张编辑测试表（DROP IF EXISTS 保证可重复执行；表名全局唯一，并发测试互不干扰）。
+async fn setup_edit_table(driver: &MySqlDriver, table: &str, ddl: &str) {
+    for sql in [format!("DROP TABLE IF EXISTS {table}"), ddl.to_string()] {
+        driver
+            .query_with_options(&sql, write_opts(), CancellationToken::new())
+            .await
+            .unwrap_or_else(|e| panic!("建表语句失败 {sql}: {e:?}"));
+    }
+}
+
+async fn count_rows(driver: &MySqlDriver, table: &str) -> String {
+    driver
+        .query_with_options(
+            &format!("SELECT COUNT(*) FROM {table}"),
+            read_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("COUNT 读取失败")
+        .rows[0][0]
+        .clone()
+        .expect("COUNT 不应为 NULL")
+}
+
+/// 编辑批全流程：Insert×2 + Update + Delete 混合提交生效；NULL 与空串区分。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn apply_table_edits_commits_mixed_batch() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    setup_edit_table(
+        &driver,
+        "edit_batch",
+        "CREATE TABLE edit_batch (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+    )
+    .await;
+    let scope = probe_scope();
+    let pk = vec!["id".to_string()];
+
+    let edits = vec![
+        TableEdit::Insert {
+            values: vec![cell("id", Some("1")), cell("name", Some("alpha")), cell("note", None)],
+        },
+        TableEdit::Insert {
+            values: vec![cell("id", Some("2")), cell("name", Some("")), cell("note", Some("n2"))],
+        },
+        TableEdit::Update {
+            pk: vec![cell("id", Some("1"))],
+            changes: vec![cell("name", Some("beta")), cell("note", Some("含;分号"))],
+        },
+        TableEdit::Insert {
+            values: vec![cell("id", Some("3")), cell("name", Some("gamma")), cell("note", None)],
+        },
+        TableEdit::Delete {
+            pk: vec![cell("id", Some("3"))],
+        },
+    ];
+    let result = driver
+        .apply_table_edits(&scope, "edit_batch", &pk, &edits, CancellationToken::new())
+        .await
+        .expect("编辑批应成功");
+    assert_eq!(result.applied, 5);
+
+    let rows = driver
+        .query_with_options(
+            "SELECT id, name, note FROM edit_batch ORDER BY id",
+            read_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("读取失败");
+    assert_eq!(rows.rows.len(), 2, "Delete 应移除 id=3");
+    assert_eq!(rows.rows[0][1].as_deref(), Some("beta"), "id=1 Update 应生效");
+    assert_eq!(rows.rows[0][2].as_deref(), Some("含;分号"));
+    assert_eq!(rows.rows[1][1].as_deref(), Some(""), "空串不能变成 NULL");
+    assert_eq!(rows.rows[1][2].as_deref(), Some("n2"), "note 值应保留");
+
+    driver.close().await;
+}
+
+/// 中途失败整体回滚：第二条 Insert 主键重复，第一条也不能残留。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn apply_table_edits_rolls_back_on_mid_failure() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    setup_edit_table(
+        &driver,
+        "edit_rollback",
+        "CREATE TABLE edit_rollback (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+    )
+    .await;
+    let scope = probe_scope();
+    let pk = vec!["id".to_string()];
+
+    driver
+        .apply_table_edits(
+            &scope,
+            "edit_rollback",
+            &pk,
+            &[TableEdit::Insert {
+                values: vec![cell("id", Some("9")), cell("name", Some("seed")), cell("note", None)],
+            }],
+            CancellationToken::new(),
+        )
+        .await
+        .expect("种子行应成功");
+
+    let edits = vec![
+        TableEdit::Insert {
+            values: vec![cell("id", Some("10")), cell("name", Some("x")), cell("note", None)],
+        },
+        TableEdit::Insert {
+            values: vec![cell("id", Some("9")), cell("name", Some("dup")), cell("note", None)],
+        },
+    ];
+    let error = driver
+        .apply_table_edits(&scope, "edit_rollback", &pk, &edits, CancellationToken::new())
+        .await
+        .expect_err("主键重复必须失败");
+    match error {
+        DriverError::EditApplyFailed { index, .. } => assert_eq!(index, 1, "失败序号应为第 2 条"),
+        other => panic!("应为 EditApplyFailed，实际 {other:?}"),
+    }
+
+    assert_eq!(count_rows(&driver, "edit_rollback").await, "1", "回滚后只剩种子行");
+
+    driver.close().await;
+}
+
+/// UPDATE 命中 0 行（他端已删）报 EditConflict 并整体回滚。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn apply_table_edits_conflict_rolls_back_batch() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    setup_edit_table(
+        &driver,
+        "edit_conflict",
+        "CREATE TABLE edit_conflict (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+    )
+    .await;
+    let scope = probe_scope();
+    let pk = vec!["id".to_string()];
+
+    let edits = vec![
+        TableEdit::Insert {
+            values: vec![cell("id", Some("1")), cell("name", Some("a")), cell("note", None)],
+        },
+        TableEdit::Update {
+            pk: vec![cell("id", Some("999"))],
+            changes: vec![cell("name", Some("ghost"))],
+        },
+    ];
+    let error = driver
+        .apply_table_edits(&scope, "edit_conflict", &pk, &edits, CancellationToken::new())
+        .await
+        .expect_err("0 影响行必须报冲突");
+    match error {
+        DriverError::EditConflict { index } => assert_eq!(index, 1),
+        other => panic!("应为 EditConflict，实际 {other:?}"),
+    }
+
+    assert_eq!(count_rows(&driver, "edit_conflict").await, "0", "冲突必须整体回滚");
+
+    driver.close().await;
+}
+
+/// 无主键表与主键列不符均拒绝 NoPrimaryKey。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn apply_table_edits_rejects_missing_or_mismatched_pk() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    setup_edit_table(&driver, "edit_nopk", "CREATE TABLE edit_nopk (id INT, name VARCHAR(50))").await;
+    setup_edit_table(
+        &driver,
+        "edit_pk_check",
+        "CREATE TABLE edit_pk_check (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+    )
+    .await;
+    let scope = probe_scope();
+    let edits = vec![TableEdit::Delete {
+        pk: vec![cell("id", Some("1"))],
+    }];
+
+    let error = driver
+        .apply_table_edits(
+            &scope,
+            "edit_nopk",
+            &["id".to_string()],
+            &edits,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("无主键表必须拒绝");
+    assert!(matches!(error, DriverError::NoPrimaryKey));
+
+    let error = driver
+        .apply_table_edits(
+            &scope,
+            "edit_pk_check",
+            &["name".to_string()],
+            &edits,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("主键列不符必须拒绝");
+    assert!(matches!(error, DriverError::NoPrimaryKey));
+
+    driver.close().await;
+}
+
+/// 复合主键：按 (a, b) 定位 Update / Delete。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn apply_table_edits_supports_composite_pk() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    setup_edit_table(
+        &driver,
+        "edit_composite",
+        "CREATE TABLE edit_composite (a INT, b INT, val VARCHAR(50), PRIMARY KEY (a, b))",
+    )
+    .await;
+    let scope = probe_scope();
+    let pk = vec!["a".to_string(), "b".to_string()];
+
+    let edits = vec![
+        TableEdit::Insert {
+            values: vec![cell("a", Some("1")), cell("b", Some("1")), cell("val", Some("x"))],
+        },
+        TableEdit::Insert {
+            values: vec![cell("a", Some("1")), cell("b", Some("2")), cell("val", Some("y"))],
+        },
+        TableEdit::Update {
+            pk: vec![cell("a", Some("1")), cell("b", Some("2"))],
+            changes: vec![cell("val", Some("y2"))],
+        },
+        TableEdit::Delete {
+            pk: vec![cell("a", Some("1")), cell("b", Some("1"))],
+        },
+    ];
+    let result = driver
+        .apply_table_edits(&scope, "edit_composite", &pk, &edits, CancellationToken::new())
+        .await
+        .expect("复合主键编辑批应成功");
+    assert_eq!(result.applied, 4);
+
+    let rows = driver
+        .query_with_options(
+            "SELECT a, b, val FROM edit_composite",
+            read_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("读取失败");
+    assert_eq!(rows.rows.len(), 1);
+    assert_eq!(rows.rows[0][2].as_deref(), Some("y2"));
+
+    driver.close().await;
+}
