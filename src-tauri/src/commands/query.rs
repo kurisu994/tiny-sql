@@ -19,12 +19,14 @@ use crate::state::{ActiveDriver, ActiveQuery, AppState};
 /// 历史记录中 SQL 文本的最大长度，防止超长语句撑爆加密历史文件。
 const HISTORY_SQL_MAX_CHARS: usize = 4000;
 
-/// 查询命令返回给前端的安全错误载荷，只包含稳定 key 与可选行号。
+/// 查询命令返回给前端的安全错误载荷，只包含稳定 key、可选行号与可选编辑语句序号。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryCommandError {
     key: String,
     line: Option<u32>,
+    /// 编辑批失败 / 冲突的语句序号（FR-250），仅编辑相关错误携带。
+    edit_index: Option<usize>,
 }
 
 impl QueryCommandError {
@@ -32,6 +34,7 @@ impl QueryCommandError {
         Self {
             key: key.into(),
             line: None,
+            edit_index: None,
         }
     }
 }
@@ -41,6 +44,7 @@ impl From<DriverError> for QueryCommandError {
         Self {
             key: error.i18n_key().to_string(),
             line: error.sql_line(),
+            edit_index: error.edit_index(),
         }
     }
 }
@@ -366,6 +370,85 @@ pub async fn db_browse_table(
         )
         .await
         .map_err(QueryCommandError::from)
+    }
+    .await;
+    state.queries.lock().await.remove(&query_id);
+    result
+}
+
+/// 编辑批输入（FR-250）：主键列 + 编辑操作列表。打包结构以满足 command 参数约束。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyTableEditsInput {
+    pub database: String,
+    pub schema: Option<String>,
+    pub table: String,
+    pub pk_columns: Vec<String>,
+    pub edits: Vec<db_driver::TableEdit>,
+}
+
+/// 批量应用表编辑（FR-250）：后端再次校验列白名单后交给 driver 短事务执行。
+/// 错误载荷携带 `editIndex` 供前端定位失败 / 冲突的 dirty 行。
+#[tauri::command]
+pub async fn db_apply_table_edits(
+    state: State<'_, AppState>,
+    id: String,
+    input: ApplyTableEditsInput,
+) -> Result<db_driver::ApplyEditsResult, QueryCommandError> {
+    let ApplyTableEditsInput {
+        database,
+        schema,
+        table,
+        pk_columns,
+        edits,
+    } = input;
+    let query_id = Uuid::new_v4().to_string();
+    let (driver, token) = {
+        let lifecycle = state.connection_lifecycle(&id);
+        let _lifecycle = lifecycle.lock().await;
+        let driver = driver_of(&state, &id)
+            .await
+            .map_err(QueryCommandError::from_key)?;
+        let token = CancellationToken::new();
+        state.queries.lock().await.insert(
+            query_id.clone(),
+            ActiveQuery {
+                connection_id: id.clone(),
+                cancel_token: token.clone(),
+            },
+        );
+        (driver, token)
+    };
+    let scope = metadata_scope(Driver::kind(&driver), database, schema)
+        .map_err(QueryCommandError::from_key)?;
+    let result = async {
+        // 列白名单：编辑涉及的列必须属于该表已加载列（与 db_browse_table 同策略）
+        let columns = Driver::list_columns(&driver, &scope, &table)
+            .await
+            .map_err(QueryCommandError::from)?;
+        let known: std::collections::HashSet<&str> =
+            columns.iter().map(|c| c.name.as_str()).collect();
+        let invalid = !pk_columns.iter().all(|c| known.contains(c.as_str()))
+            || edits.iter().any(|edit| match edit {
+                db_driver::TableEdit::Insert { values } => {
+                    values.iter().any(|cell| !known.contains(cell.column.as_str()))
+                }
+                db_driver::TableEdit::Update { pk, changes } => pk
+                    .iter()
+                    .chain(changes.iter())
+                    .any(|cell| !known.contains(cell.column.as_str())),
+                db_driver::TableEdit::Delete { pk } => {
+                    pk.iter().any(|cell| !known.contains(cell.column.as_str()))
+                }
+            });
+        if invalid {
+            return Err(QueryCommandError::from_key(
+                "error.driver.invalid_identifier",
+            ));
+        }
+        Driver::apply_table_edits(&driver, &scope, &table, &pk_columns, &edits, token)
+            .await
+            .map_err(QueryCommandError::from)
     }
     .await;
     state.queries.lock().await.remove(&query_id);

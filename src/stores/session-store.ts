@@ -21,6 +21,7 @@ import {
   type ColumnMeta,
   type ConstraintMeta,
   type DatabaseMeta,
+  type EditCell,
   type HopStatusPayload,
   type HopRttPayload,
   type IndexMeta,
@@ -28,6 +29,7 @@ import {
   type SchemaMeta,
   type StatementResult,
   type StoredConnection,
+  type TableEdit,
   type TableFilter,
   type TableMeta,
   type TableOrder,
@@ -98,11 +100,34 @@ export interface BrowseState {
   /** 满足筛选的总行数；COUNT 超时/失败为 null（降级未知总数分页） */
   total: number | null;
   hasNextPage: boolean;
+  /** 是否可编辑（表有显式主键；FR-250） */
+  editable: boolean;
+  /** 主键列（顺序与后端约束一致；FR-250） */
+  pkColumns: string[];
+  /** 是否处于编辑模式（FR-250） */
+  editMode: boolean;
+  /** 待提交的编辑操作（dirty state；FR-250） */
+  pendingEdits: PendingEdit[];
+  /** 编辑批正在提交 */
+  submitting: boolean;
 }
 
-/** tab 是否有未执行的修改（关闭前需要确认）。浏览 tab 无 SQL 编辑，恒不 dirty。 */
+/** 单条待提交的表编辑（FR-250）。 */
+export interface PendingEdit {
+  /** 行标识：现有行主键值 JSON；新增行为临时 id（"__new_xxx"） */
+  rowKey: string;
+  kind: "insert" | "update" | "delete";
+  /** 原始行快照（update/delete 定位主键与恢复用；insert 为 null） */
+  original: Record<string, string | null> | null;
+  /** insert：用户填写的列值；update：变更列值；delete：空 */
+  values: Record<string, string | null>;
+}
+
+/** tab 是否有未执行的修改（关闭前需要确认）。浏览 tab 编辑模式下有 pendingEdits 即 dirty。 */
 export function isTabDirty(tab: QueryTab): boolean {
-  if (tab.browse) return false;
+  if (tab.browse) {
+    return tab.browse.editMode && tab.browse.pendingEdits.length > 0;
+  }
   return tab.sqlText !== tab.initialSql;
 }
 
@@ -256,8 +281,7 @@ async function browsePatchAndRefresh(
 /**
  * 浏览 tab 数据查询（FR-242）：服务端筛选 / 排序 / 分页。
  * 与 runTabQuery 相同的迟到守卫：只有 tab 当前 query_id 仍匹配时才写回。
- */
-async function browseTabData(get: Get, set: Set, tabId: string): Promise<void> {
+ */async function browseTabData(get: Get, set: Set, tabId: string): Promise<void> {
   const openId = get().openId;
   const tab = get().tabs.find((t) => t.id === tabId);
   const browse = tab?.browse;
@@ -316,6 +340,125 @@ async function browseTabData(get: Get, set: Set, tabId: string): Promise<void> {
       }),
     }));
   }
+}
+
+/**
+ * 异步探测浏览表主键（FR-250）：PRIMARY KEY 约束存在才标记可编辑。
+ * 失败静默（浏览不受影响），不阻塞浏览数据加载。
+ */
+async function resolveBrowseEditable(get: Get, set: Set, tabId: string): Promise<void> {
+  const openId = get().openId;
+  const tab = get().tabs.find((t) => t.id === tabId);
+  const browse = tab?.browse;
+  const database = get().selectedDb;
+  if (!openId || !tab || !browse || !database) return;
+  const schema =
+    get().activeConnection?.driver === "postgresql"
+      ? get().selectedSchema
+      : null;
+  try {
+    const constraints = await dbApi.listConstraints(
+      openId,
+      database,
+      schema,
+      browse.table,
+    );
+    const pk = constraints.find((c) => c.constraintType === "PRIMARY KEY");
+    if (!pk || pk.columns.length === 0) return;
+    const current = get().tabs.find((t) => t.id === tabId);
+    if (!current?.browse || current.browse.table !== browse.table) return;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        browse: {
+          ...current.browse!,
+          editable: true,
+          pkColumns: pk.columns,
+        },
+      }),
+    }));
+  } catch {
+    // 主键探测失败不打断浏览
+  }
+}
+
+/** 从浏览行值构造主键定位 JSON（FR-250）；主键列不在行数据时返回 null。 */
+export function rowKeyOf(
+  row: Array<string | null>,
+  columns: string[],
+  pkColumns: string[],
+): string | null {
+  if (pkColumns.length === 0) return null;
+  const parts: string[] = [];
+  for (const pk of pkColumns) {
+    const index = columns.indexOf(pk);
+    if (index === -1) return null;
+    const value = row[index];
+    // 主键不应为 NULL；防御性返回 null 视为不可定位
+    if (value === null) return null;
+    parts.push(JSON.stringify(value));
+  }
+  return parts.join("\u0001");
+}
+
+/** 把一行浏览数据转为列值映射（FR-250）。 */
+export function rowValuesOf(
+  row: Array<string | null>,
+  columns: string[],
+): Record<string, string | null> {
+  const values: Record<string, string | null> = {};
+  columns.forEach((column, index) => {
+    values[column] = row[index];
+  });
+  return values;
+}
+
+/** 从主键 JSON 还原主键 EditCell 列表（FR-250）。 */
+function pkCellsFromKey(
+  rowKey: string,
+  pkColumns: string[],
+): EditCell[] {
+  const parts = rowKey.split("\u0001");
+  return pkColumns.map((column, index) => {
+    const raw = parts[index];
+    let value: string | null = null;
+    if (raw !== undefined) {
+      try {
+        value = JSON.parse(raw) as string;
+      } catch {
+        value = raw;
+      }
+    }
+    return { column, value };
+  });
+}
+
+/** 把 pendingEdits 转为后端 TableEdit 批（FR-250）。 */
+function buildTableEdits(pending: PendingEdit[], pkColumns: string[]): TableEdit[] {
+  const edits: TableEdit[] = [];
+  for (const edit of pending) {
+    if (edit.kind === "insert") {
+      const values = Object.entries(edit.values)
+        .filter(([, value]) => value !== null)
+        .map(([column, value]) => ({ column, value }));
+      edits.push({ kind: "insert", values });
+    } else if (edit.kind === "update") {
+      const changes = Object.entries(edit.values).map(([column, value]) => ({
+        column,
+        value,
+      }));
+      edits.push({
+        kind: "update",
+        pk: pkCellsFromKey(edit.rowKey, pkColumns),
+        changes,
+      });
+    } else {
+      edits.push({
+        kind: "delete",
+        pk: pkCellsFromKey(edit.rowKey, pkColumns),
+      });
+    }
+  }
+  return edits;
 }
 
 function initialHopStatuses(
@@ -445,6 +588,23 @@ interface SessionState {
   browseSetPageSize: (tabId: string, pageSize: number) => Promise<void>;
   /** 浏览 tab：按当前状态重新查询 */
   browseRefresh: (tabId: string) => Promise<void>;
+  /** 浏览 tab：进入 / 退出编辑模式（FR-250；无主键表禁止进入） */
+  browseSetEditMode: (tabId: string, editMode: boolean) => void;
+  /** 浏览 tab：单元格编辑（FR-250）——已有行记 update dirty，新增草稿行更新其值 */
+  browseApplyCellEdit: (
+    tabId: string,
+    rowKey: string,
+    column: string,
+    value: string | null,
+  ) => void;
+  /** 浏览 tab：追加新增行草稿（FR-250） */
+  browseAddRow: (tabId: string) => void;
+  /** 浏览 tab：标记行删除 / 撤销删除（FR-250） */
+  browseToggleDelete: (tabId: string, rowKey: string) => void;
+  /** 浏览 tab：提交全部 pendingEdits（FR-250）；成功返回 true 并刷新数据 */
+  browseCommitEdits: (tabId: string) => Promise<boolean>;
+  /** 浏览 tab：放弃全部 pendingEdits（FR-250） */
+  browseDiscardEdits: (tabId: string) => void;
   /** 多结果集：切换当前查看的结果下标（FR-243） */
   setActiveResultIndex: (tabId: string, index: number) => void;
   /** 打开 SQL 文件为新 tab（FR-240）；已打开同路径 tab 时直接激活。
@@ -1153,12 +1313,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       pageSize: 1000,
       total: null,
       hasNextPage: false,
+      editable: false,
+      pkColumns: [],
+      editMode: false,
+      pendingEdits: [],
+      submitting: false,
     };
     set((s) => ({
       tabs: [...s.tabs, tab],
       activeTabId: tab.id,
     }));
     await browseTabData(get, set, tab.id);
+    // 异步探测主键（FR-250）：有显式主键才允许进入编辑模式
+    void resolveBrowseEditable(get, set, tab.id);
   },
 
   newTab: (sql) => {
@@ -1348,6 +1515,191 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   browseRefresh: async (tabId) => {
     await browseTabData(get, set, tabId);
+  },
+
+  browseSetEditMode: (tabId, editMode) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab?.browse) return;
+    if (editMode && !tab.browse.editable) return;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        browse: {
+          ...tab.browse!,
+          editMode,
+          // 退出编辑模式时保留 dirty（关闭/切换筛选才提示），但离开编辑态视觉
+        },
+      }),
+    }));
+  },
+
+  browseApplyCellEdit: (tabId, rowKey, column, value) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    const browse = tab?.browse;
+    if (!tab || !browse || !browse.editMode) return;
+    const rowSet = tab.rowSet;
+    const columns = rowSet?.columns ?? [];
+    const rowIndex = rowSet?.rows.findIndex(
+      (row) => rowKeyOf(row, columns, browse.pkColumns) === rowKey,
+    );
+    const existing = browse.pendingEdits.find((e) => e.rowKey === rowKey);
+    set((s) => {
+      let pending = browse.pendingEdits;
+      if (rowIndex !== undefined && rowIndex !== -1 && rowSet && !existing) {
+        // 已有行首次编辑：记 update dirty（原值快照用于恢复与提交定位）
+        const original = rowValuesOf(rowSet.rows[rowIndex], columns);
+        pending = [
+          ...pending,
+          { rowKey, kind: "update", original, values: { [column]: value } },
+        ];
+      } else if (existing) {
+        // 已有 update / insert 草稿：合并变更列
+        pending = pending.map((e) =>
+          e.rowKey === rowKey
+            ? { ...e, values: { ...e.values, [column]: value } }
+            : e,
+        );
+      }
+      return {
+        tabs: patchTab(s.tabs, tabId, {
+          browse: { ...browse, pendingEdits: pending },
+        }),
+      };
+    });
+  },
+
+  browseAddRow: (tabId) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab?.browse || !tab.browse.editMode) return;
+    const browse = tab.browse;
+    const rowKey = `__new_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        browse: {
+          ...browse,
+          pendingEdits: [
+            ...browse.pendingEdits,
+            {
+              rowKey,
+              kind: "insert",
+              original: null,
+              values: {},
+            },
+          ],
+        },
+      }),
+    }));
+  },
+
+  browseToggleDelete: (tabId, rowKey) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    const browse = tab?.browse;
+    if (!tab || !browse || !browse.editMode) return;
+    const existing = browse.pendingEdits.find((e) => e.rowKey === rowKey);
+    set((s) => {
+      let pending: PendingEdit[];
+      if (existing?.kind === "delete") {
+        // 撤销删除：恢复为原始状态（若曾是 update 则还原原值快照）
+        pending = browse.pendingEdits.filter((e) => e.rowKey !== rowKey);
+      } else if (existing?.kind === "insert") {
+        // 删除新增草稿行：直接移除
+        pending = browse.pendingEdits.filter((e) => e.rowKey !== rowKey);
+      } else if (existing) {
+        // 有 update dirty 的行改删：整行删除覆盖原修改
+        pending = browse.pendingEdits.map((e) =>
+          e.rowKey === rowKey ? { ...e, kind: "delete", values: {} } : e,
+        );
+      } else {
+        const rowSet = tab.rowSet;
+        const columns = rowSet?.columns ?? [];
+        const rowIndex = rowSet?.rows.findIndex(
+          (row) => rowKeyOf(row, columns, browse.pkColumns) === rowKey,
+        );
+        if (rowIndex === undefined || rowIndex === -1 || !rowSet) return s;
+        pending = [
+          ...browse.pendingEdits,
+          {
+            rowKey,
+            kind: "delete",
+            original: rowValuesOf(rowSet.rows[rowIndex], columns),
+            values: {},
+          },
+        ];
+      }
+      return {
+        tabs: patchTab(s.tabs, tabId, {
+          browse: { ...browse, pendingEdits: pending },
+        }),
+      };
+    });
+  },
+
+  browseCommitEdits: async (tabId) => {
+    const openId = get().openId;
+    const tab = get().tabs.find((t) => t.id === tabId);
+    const browse = tab?.browse;
+    const database = get().selectedDb;
+    if (!openId || !tab || !browse || !browse.editMode || !database) return false;
+    if (browse.pendingEdits.length === 0 || browse.submitting) return false;
+    const schema =
+      get().activeConnection?.driver === "postgresql"
+        ? get().selectedSchema
+        : null;
+    const edits = buildTableEdits(browse.pendingEdits, browse.pkColumns);
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        queryErrorMsg: null,
+        browse: { ...browse, submitting: true },
+      }),
+    }));
+    try {
+      await dbApi.applyTableEdits(openId, {
+        database,
+        schema,
+        table: browse.table,
+        pkColumns: browse.pkColumns,
+        edits,
+      });
+      const current = get().tabs.find((t) => t.id === tabId);
+      if (!current?.browse) return false;
+      const nextBrowse: BrowseState = {
+        ...current.browse,
+        pendingEdits: [],
+        submitting: false,
+      };
+      set((s) => ({
+        tabs: patchTab(s.tabs, tabId, {
+          rowSet: null,
+          browse: nextBrowse,
+        }),
+      }));
+      // 提交成功后重新拉取数据（回到当前页）
+      await browseTabData(get, set, tabId);
+      return true;
+    } catch (e) {
+      const current = get().tabs.find((t) => t.id === tabId);
+      if (!current?.browse) return false;
+      const nextBrowse: BrowseState = {
+        ...current.browse,
+        submitting: false,
+      };
+      set((s) => ({
+        tabs: patchTab(s.tabs, tabId, {
+          queryErrorMsg: translateError(e),
+          browse: nextBrowse,
+        }),
+      }));
+      return false;
+    }
+  },
+
+  browseDiscardEdits: (tabId) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab?.browse) return;
+    set((s) => ({
+      tabs: patchTab(s.tabs, tabId, {
+        browse: { ...tab.browse!, pendingEdits: [] },
+      }),
+    }));
   },
 
   setActiveResultIndex: (tabId, index) => {

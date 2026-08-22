@@ -109,6 +109,7 @@ pub fn run() {
             commands::query::db_query_cancel,
             commands::query::db_query_many,
             commands::query::db_browse_table,
+            commands::query::db_apply_table_edits,
             commands::ssh_tofu::ssh_tofu_decision,
             commands::security::security_status,
             commands::security::security_setup,

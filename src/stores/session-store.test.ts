@@ -1488,3 +1488,174 @@ describe("session-store", () => {
     expect(isTabDirty(makeTab({ sqlText: "SELECT 2" }))).toBe(true);
   });
 });
+
+describe("browse 编辑模式（FR-250）", () => {
+  /** 初始化一个已加载数据的浏览 tab（带主键 users 表） */
+  async function setupBrowseTab() {
+    useSessionStore.setState({ openId: "c1", selectedDb: "app" });
+    routeInvoke({
+      db_browse_table: {
+        rowSet: {
+          columns: ["id", "name"],
+          rows: [
+            ["1", "alpha"],
+            ["2", "beta"],
+          ],
+          truncated: false,
+        },
+        total: 2,
+        hasNextPage: false,
+      },
+      db_list_constraints: [
+        { name: "PRIMARY", constraintType: "PRIMARY KEY", columns: ["id"], reference: null },
+      ],
+    });
+    await useSessionStore.getState().selectTable("users");
+    // resolveBrowseEditable 是异步 fire-and-forget，等一拍让约束查询落 store
+    await new Promise((done) => setTimeout(done, 0));
+    return activeTab().id;
+  }
+
+  it("主键探测后标记 editable；无主键表禁止进入编辑模式", async () => {
+    const tabId = await setupBrowseTab();
+    expect(activeTab().browse?.editable).toBe(true);
+    expect(activeTab().browse?.pkColumns).toEqual(["id"]);
+
+    useSessionStore.getState().browseSetEditMode(tabId, true);
+    expect(activeTab().browse?.editMode).toBe(true);
+  });
+
+  it("单元格编辑记 update dirty；再次编辑合并变更列", async () => {
+    const tabId = await setupBrowseTab();
+    useSessionStore.getState().browseSetEditMode(tabId, true);
+
+    // 行 1 主键 JSON.stringify("1") 即 "\"1\""
+    const rowKey1 = '"1"';
+    useSessionStore.getState().browseApplyCellEdit(tabId, rowKey1, "name", "gamma");
+    let browse = activeTab().browse!;
+    expect(browse.pendingEdits).toHaveLength(1);
+    expect(browse.pendingEdits[0]).toMatchObject({
+      rowKey: rowKey1,
+      kind: "update",
+      values: { name: "gamma" },
+      original: { id: "1", name: "alpha" },
+    });
+
+    // 再改 id=1 的另一列（若存在）—— 本表只有 id/name，改 name 再覆盖
+    useSessionStore.getState().browseApplyCellEdit(tabId, rowKey1, "name", "delta");
+    browse = activeTab().browse!;
+    expect(browse.pendingEdits).toHaveLength(1);
+    expect(browse.pendingEdits[0].values.name).toBe("delta");
+
+    // 行 2 编辑独立 dirty
+    useSessionStore.getState().browseApplyCellEdit(tabId, '"2"', "name", "sigma");
+    browse = activeTab().browse!;
+    expect(browse.pendingEdits).toHaveLength(2);
+  });
+
+  it("新增行草稿：填值成为 insert dirty；删除草稿直接移除", async () => {
+    const tabId = await setupBrowseTab();
+    useSessionStore.getState().browseSetEditMode(tabId, true);
+    useSessionStore.getState().browseAddRow(tabId);
+    let browse = activeTab().browse!;
+    expect(browse.pendingEdits).toHaveLength(1);
+    expect(browse.pendingEdits[0].kind).toBe("insert");
+    const rowKey = browse.pendingEdits[0].rowKey;
+    expect(rowKey.startsWith("__new_")).toBe(true);
+
+    useSessionStore.getState().browseApplyCellEdit(tabId, rowKey, "id", "99");
+    useSessionStore.getState().browseApplyCellEdit(tabId, rowKey, "name", "newbie");
+    browse = activeTab().browse!;
+    expect(browse.pendingEdits[0].values).toEqual({ id: "99", name: "newbie" });
+
+    // toggleDelete 对 insert 草稿直接移除
+    useSessionStore.getState().browseToggleDelete(tabId, rowKey);
+    expect(activeTab().browse!.pendingEdits).toHaveLength(0);
+  });
+
+  it("删除标记 / 撤销删除；编辑后再删覆盖为 delete", async () => {
+    const tabId = await setupBrowseTab();
+    useSessionStore.getState().browseSetEditMode(tabId, true);
+
+    const rowKey1 = '"1"';
+    useSessionStore.getState().browseApplyCellEdit(tabId, rowKey1, "name", "gamma");
+    useSessionStore.getState().browseToggleDelete(tabId, rowKey1);
+    let browse = activeTab().browse!;
+    expect(browse.pendingEdits).toHaveLength(1);
+    expect(browse.pendingEdits[0].kind).toBe("delete");
+
+    // 撤销删除
+    useSessionStore.getState().browseToggleDelete(tabId, rowKey1);
+    expect(activeTab().browse!.pendingEdits).toHaveLength(0);
+  });
+
+  it("isTabDirty 对浏览编辑 dirty 生效", async () => {
+    const tabId = await setupBrowseTab();
+    useSessionStore.getState().browseSetEditMode(tabId, true);
+    expect(isTabDirty(activeTab())).toBe(false);
+    useSessionStore.getState().browseApplyCellEdit(tabId, '"1"', "name", "gamma");
+    expect(isTabDirty(activeTab())).toBe(true);
+  });
+
+  it("提交成功清空 dirty 并刷新数据；失败保留 dirty 并展示错误", async () => {
+    const tabId = await setupBrowseTab();
+    useSessionStore.getState().browseSetEditMode(tabId, true);
+    useSessionStore.getState().browseApplyCellEdit(tabId, '"1"', "name", "gamma");
+
+    // 提交成功
+    routeInvoke({
+      db_apply_table_edits: { applied: 1 },
+      db_browse_table: {
+        rowSet: {
+          columns: ["id", "name"],
+          rows: [["1", "gamma"], ["2", "beta"]],
+          truncated: false,
+        },
+        total: 2,
+        hasNextPage: false,
+      },
+      db_list_constraints: [
+        { name: "PRIMARY", constraintType: "PRIMARY KEY", columns: ["id"], reference: null },
+      ],
+    });
+    const ok = await useSessionStore.getState().browseCommitEdits(tabId);
+    expect(ok).toBe(true);
+    expect(activeTab().browse!.pendingEdits).toHaveLength(0);
+    expect(activeTab().rowSet?.rows[0][1]).toBe("gamma");
+    expect(mockInvoke).toHaveBeenCalledWith("db_apply_table_edits", {
+      id: "c1",
+      input: {
+        database: "app",
+        schema: null,
+        table: "users",
+        pkColumns: ["id"],
+        edits: [
+          { kind: "update", pk: [{ column: "id", value: "1" }], changes: [{ column: "name", value: "gamma" }] },
+        ],
+      },
+    });
+
+    // 提交失败：保留 dirty + 错误信息
+    useSessionStore.getState().browseSetEditMode(tabId, true);
+    useSessionStore.getState().browseApplyCellEdit(tabId, '"2"', "name", "oops");
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "db_apply_table_edits"
+        ? Promise.reject({ key: "error.driver.edit_conflict", line: null, editIndex: 0 })
+        : Promise.resolve(undefined),
+    );
+    const failed = await useSessionStore.getState().browseCommitEdits(tabId);
+    expect(failed).toBe(false);
+    expect(activeTab().browse!.pendingEdits).toHaveLength(1);
+    expect(activeTab().queryErrorMsg).toContain("已被其他会话修改或删除");
+  });
+
+  it("放弃清空全部 dirty", async () => {
+    const tabId = await setupBrowseTab();
+    useSessionStore.getState().browseSetEditMode(tabId, true);
+    useSessionStore.getState().browseApplyCellEdit(tabId, '"1"', "name", "gamma");
+    useSessionStore.getState().browseAddRow(tabId);
+    expect(activeTab().browse!.pendingEdits).toHaveLength(2);
+    useSessionStore.getState().browseDiscardEdits(tabId);
+    expect(activeTab().browse!.pendingEdits).toHaveLength(0);
+  });
+});

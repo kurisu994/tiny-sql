@@ -155,6 +155,24 @@ impl Driver for ActiveDriver {
         }
     }
 
+    fn apply_table_edits<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        pk_columns: &'a [String],
+        edits: &'a [db_driver::TableEdit],
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, db_driver::ApplyEditsResult> {
+        match self {
+            Self::MySql(driver) => {
+                Driver::apply_table_edits(driver, scope, table, pk_columns, edits, cancel_token)
+            }
+            Self::PostgreSql(driver) => {
+                Driver::apply_table_edits(driver, scope, table, pk_columns, edits, cancel_token)
+            }
+        }
+    }
+
     fn close(&self) -> DriverCloseFuture<'_> {
         match self {
             Self::MySql(driver) => Driver::close(driver),

@@ -123,6 +123,9 @@ export const ERROR_ZH: Record<string, string> = {
     "事务语句（BEGIN/COMMIT/ROLLBACK）请在事务 tab 中执行",
   "error.driver.session_not_in_transaction": "当前没有进行中的事务",
   "error.driver.session_broken": "事务会话已失效（连接已断开），未提交修改已回滚",
+  "error.driver.no_primary_key": "该表没有主键，无法进行表格编辑",
+  "error.driver.edit_apply_failed": "编辑提交失败，已整体回滚，未应用任何修改",
+  "error.driver.edit_conflict": "该行已被其他会话修改或删除，提交已取消，请刷新后重试",
   "error.connection.not_found": "连接配置不存在",
   "error.connection.not_open": "连接尚未打开",
   "error.security.locked": "已锁定，请先输入主密码解锁",
@@ -145,12 +148,16 @@ export function translateError(e: unknown): string {
   const payload = parseCommandError(e);
   const key = payload?.key ?? (typeof e === "string" ? e : String(e));
   const message = ERROR_ZH[key] ?? key;
-  return payload?.line ? `${message}（第 ${payload.line} 行）` : message;
+  const parts: string[] = [];
+  if (payload?.line) parts.push(`第 ${payload.line} 行`);
+  if (typeof payload?.editIndex === "number") parts.push(`第 ${payload.editIndex + 1} 条变更`);
+  return parts.length ? `${message}（${parts.join("，")}）` : message;
 }
 
 interface CommandErrorPayload {
   key: string;
   line: number | null;
+  editIndex: number | null;
 }
 
 function parseCommandError(value: unknown): CommandErrorPayload | null {
@@ -164,7 +171,13 @@ function parseCommandError(value: unknown): CommandErrorPayload | null {
     typeof rawLine === "number" && Number.isInteger(rawLine) && rawLine > 0
       ? rawLine
       : null;
-  return { key, line };
+  const rawEditIndex = Reflect.get(value, "editIndex");
+  const editIndex =
+    typeof rawEditIndex === "number" && Number.isInteger(rawEditIndex) &&
+    rawEditIndex >= 0
+      ? rawEditIndex
+      : null;
+  return { key, line, editIndex };
 }
 
 // === 应用更新 ===
@@ -422,6 +435,17 @@ export const dbApi = {
         offset: input.offset ?? null,
       },
     }),
+  applyTableEdits: (id: string, input: ApplyTableEditsInput) =>
+    invoke<ApplyEditsResult>("db_apply_table_edits", {
+      id,
+      input: {
+        database: input.database,
+        schema: input.schema ?? null,
+        table: input.table,
+        pkColumns: input.pkColumns,
+        edits: input.edits,
+      },
+    }),
   queryMany: (id: string, sql: string, options: QueryOptions = {}) =>
     invoke<MultiQueryResult>("db_query_many", {
       id,
@@ -473,6 +497,32 @@ export interface TableBrowseResult {
   /** 满足筛选的总行数；COUNT 超时/失败为 null（降级未知总数分页） */
   total: number | null;
   hasNextPage: boolean;
+}
+
+/** 编辑单元格值（FR-250）：None = SQL NULL */
+export interface EditCell {
+  column: string;
+  value: string | null;
+}
+
+/** 单条表编辑操作（FR-250；与后端 TableEdit serde tag 一致） */
+export type TableEdit =
+  | { kind: "insert"; values: EditCell[] }
+  | { kind: "update"; pk: EditCell[]; changes: EditCell[] }
+  | { kind: "delete"; pk: EditCell[] };
+
+/** 编辑批输入（FR-250） */
+export interface ApplyTableEditsInput {
+  database: string;
+  schema?: string | null;
+  table: string;
+  pkColumns: string[];
+  edits: TableEdit[];
+}
+
+/** 编辑批应用结果（FR-250） */
+export interface ApplyEditsResult {
+  applied: number;
 }
 
 /** 多语句脚本的单条执行结果（FR-243） */

@@ -348,17 +348,21 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     }
   }
 
-  /** 关闭 tab：dirty、执行中或有未提交事务时先确认（FR-109 / FR-244） */
+  /** 关闭 tab：dirty、执行中或有未提交事务时先确认（FR-109 / FR-244 / FR-250） */
   async function closeTabWithConfirm(tab: QueryTab) {
     const txOpen = tab.transaction?.inTransaction ?? false;
+    const browseDirty = tab.browse?.editMode && tab.browse.pendingEdits.length > 0;
     if (isTabDirty(tab) || tab.queryRunning || txOpen) {
+      const message = tab.queryRunning
+        ? `「${tab.title}」正在执行查询，关闭将取消该查询。确定关闭？`
+        : txOpen
+          ? `「${tab.title}」有未提交的事务，关闭将回滚全部未提交修改。确定关闭？`
+          : browseDirty
+            ? `「${tab.title}」有 ${tab.browse!.pendingEdits.length} 条未提交表格编辑，关闭后将丢失。确定关闭？`
+            : `「${tab.title}」有未执行的修改，关闭后将丢失。确定关闭？`;
       const ok = await confirm({
         title: "关闭查询",
-        message: tab.queryRunning
-          ? `「${tab.title}」正在执行查询，关闭将取消该查询。确定关闭？`
-          : txOpen
-            ? `「${tab.title}」有未提交的事务，关闭将回滚全部未提交修改。确定关闭？`
-            : `「${tab.title}」有未执行的修改，关闭后将丢失。确定关闭？`,
+        message,
         confirmText: "关闭",
         danger: true,
       });
