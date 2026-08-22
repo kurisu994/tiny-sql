@@ -774,9 +774,9 @@ impl PostgresDriver {
 
         let mut applied = 0usize;
         for (index, edit) in edits.iter().enumerate() {
-            let Some((sql, binds)) = build_edit_sql(edit, &table_sql, quote_pg_ident, |n| {
-                format!("${n}")
-            }) else {
+            let Some((sql, binds)) =
+                build_edit_sql(edit, &table_sql, quote_pg_ident, |n| format!("${n}"))
+            else {
                 continue;
             };
             let mut q = sqlx::query(&sql);
@@ -822,6 +822,96 @@ impl PostgresDriver {
             return Err(query_failed(error));
         }
         Ok(ApplyEditsResult { applied })
+    }
+
+    /// 批量插入行（FR-252）：参数化逐行 INSERT；transactional 时批内单事务，
+    /// 失败整体回滚并定位批内行号；非事务模式逐行 autocommit 收集失败行。
+    pub async fn bulk_insert_rows(
+        &self,
+        scope: &MetadataScope,
+        table: &str,
+        columns: &[String],
+        rows: &[Vec<Option<String>>],
+        transactional: bool,
+        cancel_token: CancellationToken,
+    ) -> Result<BulkInsertResult, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        if rows.is_empty() {
+            return Ok(BulkInsertResult {
+                inserted: 0,
+                failed_rows: vec![],
+            });
+        }
+        if columns.is_empty() {
+            return Err(DriverError::InvalidSql);
+        }
+        self.ensure_current_database(&scope.database).await?;
+        let schema = scope
+            .schema
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(DriverError::SchemaRequired)?;
+        let table_sql = format!("{}.{}", quote_pg_ident(schema), quote_pg_ident(table));
+        let mut conn = self.pool.acquire().await.map_err(query_failed)?;
+        let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(query_failed)?;
+        if transactional {
+            conn.execute(sqlx::raw_sql("BEGIN"))
+                .await
+                .map_err(query_failed)?;
+        }
+
+        let mut inserted = 0usize;
+        let mut failed_rows: Vec<usize> = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
+            let (sql, binds) = build_insert_row(&table_sql, columns, row, quote_pg_ident, |n| {
+                format!("${n}")
+            });
+            let mut q = sqlx::query(&sql);
+            for value in &binds {
+                q = match value {
+                    FilterValue::Int(v) => q.bind(*v),
+                    FilterValue::Float(v) => q.bind(*v),
+                    FilterValue::Text(v) => q.bind(v.clone()),
+                };
+            }
+            let outcome = tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => {
+                    // PG 取消后连接协议状态不可信，直接销毁由服务端兜底回滚
+                    self.cancel_backend(backend_pid).await;
+                    conn.close_on_drop();
+                    return Err(DriverError::QueryCancelled);
+                }
+                result = q.execute(&mut *conn) => result,
+            };
+            match outcome {
+                Ok(_) => inserted += 1,
+                Err(error) if transactional => {
+                    Self::rollback_or_close(&mut conn).await;
+                    return Err(DriverError::EditApplyFailed {
+                        index,
+                        detail: error.to_string(),
+                    });
+                }
+                Err(_) => failed_rows.push(index),
+            }
+        }
+
+        if transactional {
+            if let Err(error) = conn.execute(sqlx::raw_sql("COMMIT")).await {
+                conn.close_on_drop();
+                return Err(query_failed(error));
+            }
+        }
+        Ok(BulkInsertResult {
+            inserted,
+            failed_rows,
+        })
     }
 
     /// 编辑事务失败路径：尽力 ROLLBACK；失败销毁连接（服务端在连接关闭时兜底回滚）。
@@ -965,6 +1055,26 @@ impl Driver for PostgresDriver {
             table,
             pk_columns,
             edits,
+            cancel_token,
+        ))
+    }
+
+    fn bulk_insert_rows<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        columns: &'a [String],
+        rows: &'a [Vec<Option<String>>],
+        transactional: bool,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, BulkInsertResult> {
+        Box::pin(PostgresDriver::bulk_insert_rows(
+            self,
+            scope,
+            table,
+            columns,
+            rows,
+            transactional,
             cancel_token,
         ))
     }

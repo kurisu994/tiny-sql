@@ -430,9 +430,9 @@ pub async fn db_apply_table_edits(
             columns.iter().map(|c| c.name.as_str()).collect();
         let invalid = !pk_columns.iter().all(|c| known.contains(c.as_str()))
             || edits.iter().any(|edit| match edit {
-                db_driver::TableEdit::Insert { values } => {
-                    values.iter().any(|cell| !known.contains(cell.column.as_str()))
-                }
+                db_driver::TableEdit::Insert { values } => values
+                    .iter()
+                    .any(|cell| !known.contains(cell.column.as_str())),
                 db_driver::TableEdit::Update { pk, changes } => pk
                     .iter()
                     .chain(changes.iter())

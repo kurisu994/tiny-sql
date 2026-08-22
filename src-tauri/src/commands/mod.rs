@@ -5,6 +5,7 @@
 pub mod connection;
 pub mod export;
 pub mod history;
+pub mod import;
 pub mod query;
 pub mod security;
 pub mod sql_file;

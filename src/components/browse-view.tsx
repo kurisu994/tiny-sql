@@ -4,10 +4,16 @@ import { useState } from "react";
 import { CheckIcon, PencilIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 
 import { EditableTable } from "@/components/editable-table";
+import { ImportCsvDialog } from "@/components/import-csv-dialog";
 import { ResultTable } from "@/components/schema-browser";
 import { TableStructureView } from "@/components/table-structure-view";
 import { cn } from "@/lib/utils";
-import type { FilterOp, TableFilter } from "@/lib/tauri-api";
+import {
+  dbApi,
+  type ColumnMeta,
+  type FilterOp,
+  type TableFilter,
+} from "@/lib/tauri-api";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore, type QueryTab } from "@/stores/session-store";
 
@@ -60,6 +66,9 @@ export function BrowseView({
   const [drafts, setDrafts] = useState<TableFilter[]>(browse?.filters ?? []);
   // 子视图：数据 / 结构（FR-251）；结构视图下暂停数据表格渲染
   const [subView, setSubView] = useState<"data" | "structure">("data");
+  // CSV 导入（FR-252）：对话框开关 + 目标表列元数据
+  const [importOpen, setImportOpen] = useState(false);
+  const [importColumns, setImportColumns] = useState<ColumnMeta[]>([]);
   if (!browse) return null;
 
   const columns = tab.rowSet?.columns ?? [];
@@ -306,6 +315,31 @@ export function BrowseView({
               </button>
             ))}
           </div>
+          {/* CSV 导入（FR-252） */}
+          <button
+            type="button"
+            onClick={() => {
+              void (async () => {
+                if (!selectedDb) return;
+                try {
+                  const columns = await dbApi.listColumns(
+                    connectionId,
+                    selectedDb,
+                    driver === "postgresql" ? selectedSchema : null,
+                    browse.table,
+                  );
+                  setImportColumns(columns);
+                  setImportOpen(true);
+                } catch {
+                  // 列元数据拉取失败不打开对话框（错误由全局错误条兜底）
+                }
+              })();
+            }}
+            disabled={!selectedDb || editMode}
+            className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          >
+            导入 CSV
+          </button>
         </div>
       </div>
 
@@ -441,6 +475,23 @@ export function BrowseView({
           ))}
         </select>
       </div>
+
+      {/* CSV 导入对话框（FR-252） */}
+      {selectedDb && (
+        <ImportCsvDialog
+          open={importOpen}
+          connectionId={connectionId}
+          driver={driver}
+          database={selectedDb}
+          schema={driver === "postgresql" ? selectedSchema : null}
+          table={browse.table}
+          tableColumns={importColumns}
+          onOpenChange={setImportOpen}
+          onImported={() => {
+            // 导入成功后刷新当前页（可能回到已有 dirty 时需先确认——导入按钮在编辑模式下已禁用）
+          }}
+        />
+      )}
     </div>
   );
 }

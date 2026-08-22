@@ -446,6 +446,25 @@ export const dbApi = {
         edits: input.edits,
       },
     }),
+  csvImportPreview: (path: string, hasHeader: boolean, maxRows?: number) =>
+    invoke<CsvPreview>("csv_import_preview", {
+      path,
+      hasHeader,
+      maxRows: maxRows ?? null,
+    }),
+  importCsv: (id: string, input: CsvImportInput) =>
+    invoke<CsvImportResult>("db_import_csv", {
+      id,
+      input: {
+        database: input.database,
+        schema: input.schema ?? null,
+        table: input.table,
+        path: input.path,
+        mapping: input.mapping,
+        hasHeader: input.hasHeader,
+        skipErrors: input.skipErrors,
+      },
+    }),
   queryMany: (id: string, sql: string, options: QueryOptions = {}) =>
     invoke<MultiQueryResult>("db_query_many", {
       id,
@@ -523,6 +542,32 @@ export interface ApplyTableEditsInput {
 /** 编辑批应用结果（FR-250） */
 export interface ApplyEditsResult {
   applied: number;
+}
+
+/** CSV 预览（FR-252） */
+export interface CsvPreview {
+  headers: string[];
+  rows: (string | null)[][];
+  totalRows: number;
+}
+
+/** CSV 导入输入（FR-252） */
+export interface CsvImportInput {
+  database: string;
+  schema?: string | null;
+  table: string;
+  path: string;
+  /** CSV 列 → 表列名映射（下标即 CSV 列序；null = 跳过该列） */
+  mapping: (string | null)[];
+  hasHeader: boolean;
+  skipErrors: boolean;
+}
+
+/** CSV 导入结果（FR-252） */
+export interface CsvImportResult {
+  inserted: number;
+  /** 失败数据行号（1 起，不含表头） */
+  failedRows: number[];
 }
 
 /** 多语句脚本的单条执行结果（FR-243） */

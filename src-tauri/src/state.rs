@@ -173,6 +173,37 @@ impl Driver for ActiveDriver {
         }
     }
 
+    fn bulk_insert_rows<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        columns: &'a [String],
+        rows: &'a [Vec<Option<String>>],
+        transactional: bool,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, db_driver::BulkInsertResult> {
+        match self {
+            Self::MySql(driver) => Driver::bulk_insert_rows(
+                driver,
+                scope,
+                table,
+                columns,
+                rows,
+                transactional,
+                cancel_token,
+            ),
+            Self::PostgreSql(driver) => Driver::bulk_insert_rows(
+                driver,
+                scope,
+                table,
+                columns,
+                rows,
+                transactional,
+                cancel_token,
+            ),
+        }
+    }
+
     fn close(&self) -> DriverCloseFuture<'_> {
         match self {
             Self::MySql(driver) => Driver::close(driver),

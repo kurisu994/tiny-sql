@@ -397,9 +397,16 @@ pub struct EditCell {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TableEdit {
-    Insert { values: Vec<EditCell> },
-    Update { pk: Vec<EditCell>, changes: Vec<EditCell> },
-    Delete { pk: Vec<EditCell> },
+    Insert {
+        values: Vec<EditCell>,
+    },
+    Update {
+        pk: Vec<EditCell>,
+        changes: Vec<EditCell>,
+    },
+    Delete {
+        pk: Vec<EditCell>,
+    },
 }
 
 /// 编辑批应用结果（FR-250）：全部成功时返回应用条数。
@@ -407,6 +414,16 @@ pub enum TableEdit {
 #[serde(rename_all = "camelCase")]
 pub struct ApplyEditsResult {
     pub applied: usize,
+}
+
+/// 批量插入结果（FR-252 CSV 导入）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkInsertResult {
+    /// 成功插入行数
+    pub inserted: usize,
+    /// 跳过模式下失败的行下标（批内 0 起，调用方换算全局行号）；中止模式恒为空
+    pub failed_rows: Vec<usize>,
 }
 
 /// 索引元信息（FR-241）。
@@ -502,6 +519,38 @@ fn build_filter_clause(
     } else {
         (format!(" WHERE {}", clauses.join(" AND ")), binds)
     }
+}
+
+/// 按行值生成参数化 INSERT（FR-252）：列名按方言引用，None 写 NULL 字面量，
+/// 非 None 值参数化绑定（占位符编号按非 NULL 值递增）。
+fn build_insert_row(
+    table_sql: &str,
+    columns: &[String],
+    row: &[Option<String>],
+    quote: impl Fn(&str) -> String,
+    placeholder: impl Fn(usize) -> String,
+) -> (String, Vec<FilterValue>) {
+    let columns_sql = columns
+        .iter()
+        .map(|column| quote(column))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut binds: Vec<FilterValue> = Vec::new();
+    let placeholders = row
+        .iter()
+        .map(|value| match value {
+            None => "NULL".to_string(),
+            Some(raw) => {
+                binds.push(parse_filter_value(raw));
+                placeholder(binds.len())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    (
+        format!("INSERT INTO {table_sql} ({columns_sql}) VALUES ({placeholders})"),
+        binds,
+    )
 }
 
 /// MySQL 反引号标识符引用（内部反引号双写转义）。
@@ -715,6 +764,23 @@ pub trait Driver: Send + Sync {
         edits: &'a [TableEdit],
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, ApplyEditsResult>;
+
+    /// 批量插入行（FR-252 CSV 导入）：参数化 INSERT，不要求表有主键。
+    ///
+    /// - `transactional = true`（中止模式）：批内单事务，任一行失败整体回滚并
+    ///   返回 [`DriverError::EditApplyFailed`]（index 为批内失败行下标）。
+    /// - `transactional = false`（跳过模式）：逐行 autocommit，失败行收集进
+    ///   [`BulkInsertResult::failed_rows`] 继续后续行。
+    /// 取消语义与 `query` 相同：中止模式当前批回滚，跳过模式停止于当前行。
+    fn bulk_insert_rows<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        columns: &'a [String],
+        rows: &'a [Vec<Option<String>>],
+        transactional: bool,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, BulkInsertResult>;
 
     /// 幂等关闭 driver 持有的连接资源。
     fn close(&self) -> DriverCloseFuture<'_>;
@@ -1518,6 +1584,99 @@ impl MySqlDriver {
         Ok(ApplyEditsResult { applied })
     }
 
+    /// 批量插入行（FR-252）：参数化逐行 INSERT；transactional 时批内单事务，
+    /// 失败整体回滚并定位批内行号；非事务模式逐行 autocommit 收集失败行。
+    pub async fn bulk_insert_rows(
+        &self,
+        scope: &MetadataScope,
+        table: &str,
+        columns: &[String],
+        rows: &[Vec<Option<String>>],
+        transactional: bool,
+        cancel_token: CancellationToken,
+    ) -> Result<BulkInsertResult, DriverError> {
+        if cancel_token.is_cancelled() {
+            return Err(DriverError::QueryCancelled);
+        }
+        if rows.is_empty() {
+            return Ok(BulkInsertResult {
+                inserted: 0,
+                failed_rows: vec![],
+            });
+        }
+        if columns.is_empty() {
+            return Err(DriverError::InvalidSql);
+        }
+        let table_sql = format!(
+            "{}.{}",
+            quote_mysql_ident(&scope.database),
+            quote_mysql_ident(table)
+        );
+        let mut conn = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        let mysql_thread_id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()")
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        if transactional {
+            conn.execute(sqlx::raw_sql("START TRANSACTION"))
+                .await
+                .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        }
+
+        let mut inserted = 0usize;
+        let mut failed_rows: Vec<usize> = Vec::new();
+        for (index, row) in rows.iter().enumerate() {
+            let (sql, binds) =
+                build_insert_row(&table_sql, columns, row, quote_mysql_ident, |_| {
+                    "?".to_string()
+                });
+            let mut q = sqlx::query(&sql);
+            for value in &binds {
+                q = match value {
+                    FilterValue::Int(v) => q.bind(*v),
+                    FilterValue::Float(v) => q.bind(*v),
+                    FilterValue::Text(v) => q.bind(v.clone()),
+                };
+            }
+            let outcome = tokio::select! {
+                result = q.execute(&mut *conn) => result,
+                _ = cancel_token.cancelled() => {
+                    self.kill_query(mysql_thread_id).await;
+                    if transactional {
+                        Self::rollback_or_close(&mut conn).await;
+                    }
+                    return Err(DriverError::QueryCancelled);
+                }
+            };
+            match outcome {
+                Ok(_) => inserted += 1,
+                Err(error) if transactional => {
+                    Self::rollback_or_close(&mut conn).await;
+                    return Err(DriverError::EditApplyFailed {
+                        index,
+                        detail: error.to_string(),
+                    });
+                }
+                Err(_) => failed_rows.push(index),
+            }
+        }
+
+        if transactional {
+            if let Err(error) = conn.execute(sqlx::raw_sql("COMMIT")).await {
+                conn.close_on_drop();
+                return Err(DriverError::QueryFailed(error.to_string()));
+            }
+        }
+        Ok(BulkInsertResult {
+            inserted,
+            failed_rows,
+        })
+    }
+
     /// 编辑事务失败路径：尽力 ROLLBACK；ROLLBACK 也失败则销毁连接，
     /// 防止带未提交事务的脏连接归还 pool 污染后续查询。
     async fn rollback_or_close(conn: &mut sqlx::pool::PoolConnection<sqlx::MySql>) {
@@ -1647,6 +1806,26 @@ impl Driver for MySqlDriver {
             table,
             pk_columns,
             edits,
+            cancel_token,
+        ))
+    }
+
+    fn bulk_insert_rows<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+        table: &'a str,
+        columns: &'a [String],
+        rows: &'a [Vec<Option<String>>],
+        transactional: bool,
+        cancel_token: CancellationToken,
+    ) -> DriverFuture<'a, BulkInsertResult> {
+        Box::pin(MySqlDriver::bulk_insert_rows(
+            self,
+            scope,
+            table,
+            columns,
+            rows,
+            transactional,
             cancel_token,
         ))
     }
@@ -3292,11 +3471,16 @@ mod tests {
     #[test]
     fn edit_sql_insert_parameterizes_values_and_writes_null_literal() {
         let edit = TableEdit::Insert {
-            values: vec![cell("id", Some("42")), cell("name", Some("含;注入")), cell("note", None)],
+            values: vec![
+                cell("id", Some("42")),
+                cell("name", Some("含;注入")),
+                cell("note", None),
+            ],
         };
-        let (sql, binds) =
-            build_edit_sql(&edit, "`app`.`users`", quote_mysql_ident, |_| "?".to_string())
-                .expect("Insert 应生成 SQL");
+        let (sql, binds) = build_edit_sql(&edit, "`app`.`users`", quote_mysql_ident, |_| {
+            "?".to_string()
+        })
+        .expect("Insert 应生成 SQL");
         assert_eq!(
             sql,
             "INSERT INTO `app`.`users` (`id`, `name`, `note`) VALUES (?, ?, NULL)"
@@ -3310,11 +3494,16 @@ mod tests {
     fn edit_sql_update_builds_set_and_pk_where() {
         let edit = TableEdit::Update {
             pk: vec![cell("id", Some("7"))],
-            changes: vec![cell("name", Some("new")), cell("score", Some("9.5")), cell("note", None)],
+            changes: vec![
+                cell("name", Some("new")),
+                cell("score", Some("9.5")),
+                cell("note", None),
+            ],
         };
-        let (sql, binds) =
-            build_edit_sql(&edit, "\"public\".\"users\"", quote_pg_ident, |n| format!("${n}"))
-                .expect("Update 应生成 SQL");
+        let (sql, binds) = build_edit_sql(&edit, "\"public\".\"users\"", quote_pg_ident, |n| {
+            format!("${n}")
+        })
+        .expect("Update 应生成 SQL");
         assert_eq!(
             sql,
             "UPDATE \"public\".\"users\" SET \"name\" = $1, \"score\" = $2, \"note\" = NULL WHERE \"id\" = $3"
@@ -3345,14 +3534,12 @@ mod tests {
         let edit = TableEdit::Insert {
             values: vec![cell("we`ird", Some("1"))],
         };
-        let (sql, _) =
-            build_edit_sql(&edit, "`d``b`.`t`", quote_mysql_ident, |_| "?".to_string())
-                .expect("Insert 应生成 SQL");
+        let (sql, _) = build_edit_sql(&edit, "`d``b`.`t`", quote_mysql_ident, |_| "?".to_string())
+            .expect("Insert 应生成 SQL");
         assert_eq!(sql, "INSERT INTO `d``b`.`t` (`we``ird`) VALUES (?)");
 
-        let (sql, _) =
-            build_edit_sql(&edit, "\"s\".\"t\"", quote_pg_ident, |n| format!("${n}"))
-                .expect("PG Insert 应生成 SQL");
+        let (sql, _) = build_edit_sql(&edit, "\"s\".\"t\"", quote_pg_ident, |n| format!("${n}"))
+            .expect("PG Insert 应生成 SQL");
         assert!(sql.contains("\"we`ird\""), "PG 列名应双引号引用: {sql}");
     }
 
@@ -3366,7 +3553,10 @@ mod tests {
         )
         .is_none());
         assert!(build_edit_sql(
-            &TableEdit::Update { pk: vec![cell("id", Some("1"))], changes: vec![] },
+            &TableEdit::Update {
+                pk: vec![cell("id", Some("1"))],
+                changes: vec![]
+            },
             "`d`.`t`",
             quote_mysql_ident,
             |_| "?".to_string()
@@ -3383,8 +3573,14 @@ mod tests {
 
     #[test]
     fn edit_errors_expose_stable_keys_and_index() {
-        assert_eq!(DriverError::NoPrimaryKey.i18n_key(), "error.driver.no_primary_key");
-        let failed = DriverError::EditApplyFailed { index: 2, detail: "dup".into() };
+        assert_eq!(
+            DriverError::NoPrimaryKey.i18n_key(),
+            "error.driver.no_primary_key"
+        );
+        let failed = DriverError::EditApplyFailed {
+            index: 2,
+            detail: "dup".into(),
+        };
         assert_eq!(failed.i18n_key(), "error.driver.edit_apply_failed");
         assert_eq!(failed.edit_index(), Some(2));
         assert_eq!(failed.sql_line(), None);

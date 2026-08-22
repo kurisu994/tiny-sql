@@ -705,17 +705,32 @@ async fn postgres_apply_table_edits_commits_mixed_batch() {
 
     let edits = vec![
         TableEdit::Insert {
-            values: vec![pg_cell("id", Some("1")), pg_cell("name", Some("alpha")), pg_cell("note", None)],
+            values: vec![
+                pg_cell("id", Some("1")),
+                pg_cell("name", Some("alpha")),
+                pg_cell("note", None),
+            ],
         },
         TableEdit::Insert {
-            values: vec![pg_cell("id", Some("2")), pg_cell("name", Some("")), pg_cell("note", Some("n2"))],
+            values: vec![
+                pg_cell("id", Some("2")),
+                pg_cell("name", Some("")),
+                pg_cell("note", Some("n2")),
+            ],
         },
         TableEdit::Update {
             pk: vec![pg_cell("id", Some("1"))],
-            changes: vec![pg_cell("name", Some("beta")), pg_cell("note", Some("含;分号"))],
+            changes: vec![
+                pg_cell("name", Some("beta")),
+                pg_cell("note", Some("含;分号")),
+            ],
         },
         TableEdit::Insert {
-            values: vec![pg_cell("id", Some("3")), pg_cell("name", Some("gamma")), pg_cell("note", None)],
+            values: vec![
+                pg_cell("id", Some("3")),
+                pg_cell("name", Some("gamma")),
+                pg_cell("note", None),
+            ],
         },
         TableEdit::Delete {
             pk: vec![pg_cell("id", Some("3"))],
@@ -736,7 +751,11 @@ async fn postgres_apply_table_edits_commits_mixed_batch() {
         .await
         .expect("读取失败");
     assert_eq!(rows.rows.len(), 2, "Delete 应移除 id=3");
-    assert_eq!(rows.rows[0][1].as_deref(), Some("beta"), "id=1 Update 应生效");
+    assert_eq!(
+        rows.rows[0][1].as_deref(),
+        Some("beta"),
+        "id=1 Update 应生效"
+    );
     assert_eq!(rows.rows[0][2].as_deref(), Some("含;分号"));
     assert_eq!(rows.rows[1][1].as_deref(), Some(""), "空串不能变成 NULL");
     assert_eq!(rows.rows[1][2].as_deref(), Some("n2"), "note 值应保留");
@@ -755,7 +774,12 @@ async fn postgres_apply_table_edits_rolls_back_and_rejects_bad_pk() {
         "CREATE TABLE edit_rollback (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
     )
     .await;
-    pg_setup_edit_table(&driver, "edit_nopk", "CREATE TABLE edit_nopk (id INT, name VARCHAR(50))").await;
+    pg_setup_edit_table(
+        &driver,
+        "edit_nopk",
+        "CREATE TABLE edit_nopk (id INT, name VARCHAR(50))",
+    )
+    .await;
     pg_setup_edit_table(
         &driver,
         "edit_composite",
@@ -771,7 +795,11 @@ async fn postgres_apply_table_edits_rolls_back_and_rejects_bad_pk() {
             "edit_rollback",
             &pk,
             &[TableEdit::Insert {
-                values: vec![pg_cell("id", Some("9")), pg_cell("name", Some("seed")), pg_cell("note", None)],
+                values: vec![
+                    pg_cell("id", Some("9")),
+                    pg_cell("name", Some("seed")),
+                    pg_cell("note", None),
+                ],
             }],
             CancellationToken::new(),
         )
@@ -780,14 +808,28 @@ async fn postgres_apply_table_edits_rolls_back_and_rejects_bad_pk() {
 
     let edits = vec![
         TableEdit::Insert {
-            values: vec![pg_cell("id", Some("10")), pg_cell("name", Some("x")), pg_cell("note", None)],
+            values: vec![
+                pg_cell("id", Some("10")),
+                pg_cell("name", Some("x")),
+                pg_cell("note", None),
+            ],
         },
         TableEdit::Insert {
-            values: vec![pg_cell("id", Some("9")), pg_cell("name", Some("dup")), pg_cell("note", None)],
+            values: vec![
+                pg_cell("id", Some("9")),
+                pg_cell("name", Some("dup")),
+                pg_cell("note", None),
+            ],
         },
     ];
     let error = driver
-        .apply_table_edits(&scope, "edit_rollback", &pk, &edits, CancellationToken::new())
+        .apply_table_edits(
+            &scope,
+            "edit_rollback",
+            &pk,
+            &edits,
+            CancellationToken::new(),
+        )
         .await
         .expect_err("主键重复必须失败");
     match error {
@@ -827,7 +869,9 @@ async fn postgres_apply_table_edits_rolls_back_and_rejects_bad_pk() {
             &scope,
             "edit_nopk",
             &["id".to_string()],
-            &[TableEdit::Delete { pk: vec![pg_cell("id", Some("1"))] }],
+            &[TableEdit::Delete {
+                pk: vec![pg_cell("id", Some("1"))],
+            }],
             CancellationToken::new(),
         )
         .await
@@ -840,7 +884,9 @@ async fn postgres_apply_table_edits_rolls_back_and_rejects_bad_pk() {
             &scope,
             "edit_rollback",
             &["name".to_string()],
-            &[TableEdit::Delete { pk: vec![pg_cell("id", Some("1"))] }],
+            &[TableEdit::Delete {
+                pk: vec![pg_cell("id", Some("1"))],
+            }],
             CancellationToken::new(),
         )
         .await
@@ -850,7 +896,11 @@ async fn postgres_apply_table_edits_rolls_back_and_rejects_bad_pk() {
     // 复合主键 Update
     let edits = vec![
         TableEdit::Insert {
-            values: vec![pg_cell("a", Some("1")), pg_cell("b", Some("2")), pg_cell("val", Some("y"))],
+            values: vec![
+                pg_cell("a", Some("1")),
+                pg_cell("b", Some("2")),
+                pg_cell("val", Some("y")),
+            ],
         },
         TableEdit::Update {
             pk: vec![pg_cell("a", Some("1")), pg_cell("b", Some("2"))],
@@ -868,6 +918,78 @@ async fn postgres_apply_table_edits_rolls_back_and_rejects_bad_pk() {
         .await
         .expect("复合主键编辑批应成功");
     assert_eq!(result.applied, 2);
+
+    driver.close().await;
+}
+
+// === FR-252 批量插入：bulk_insert_rows ===
+
+/// 批量插入（PG）：中止模式回滚、跳过模式收集失败行、空值语义。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_bulk_insert_rows_modes() {
+    let driver = connect().await;
+    pg_setup_edit_table(
+        &driver,
+        "bulk_probe",
+        "CREATE TABLE bulk_probe (id INT PRIMARY KEY, name VARCHAR(50), note VARCHAR(50) NULL)",
+    )
+    .await;
+    let scope = pg_current_scope(&driver).await;
+    let columns = vec!["id".to_string(), "name".to_string(), "note".to_string()];
+
+    // 中止模式：主键重复整批回滚
+    let rows = vec![
+        vec![Some("1".into()), Some("a".into()), None],
+        vec![Some("1".into()), Some("dup".into()), None],
+    ];
+    let error = driver
+        .bulk_insert_rows(
+            &scope,
+            "bulk_probe",
+            &columns,
+            &rows,
+            true,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("中止模式主键重复必须失败");
+    match error {
+        DriverError::EditApplyFailed { index, .. } => assert_eq!(index, 1),
+        other => panic!("应为 EditApplyFailed，实际 {other:?}"),
+    }
+
+    // 跳过模式
+    let rows = vec![
+        vec![Some("1".into()), Some("a".into()), None],
+        vec![Some("2".into()), Some("".into()), Some("n2".into())],
+        vec![Some("1".into()), Some("dup".into()), None],
+    ];
+    let result = driver
+        .bulk_insert_rows(
+            &scope,
+            "bulk_probe",
+            &columns,
+            &rows,
+            false,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("跳过模式应返回报告");
+    assert_eq!(result.inserted, 2);
+    assert_eq!(result.failed_rows, vec![2]);
+
+    let read = driver
+        .query_with_options(
+            "SELECT id, name, note FROM bulk_probe ORDER BY id",
+            read_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("读取失败");
+    assert_eq!(read.rows.len(), 2);
+    assert_eq!(read.rows[0][2], None, "NULL 保持 NULL");
+    assert_eq!(read.rows[1][1].as_deref(), Some(""), "空串保持空串");
 
     driver.close().await;
 }
