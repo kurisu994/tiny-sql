@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+**本轮修复：MySQL 结构页一直加载（2026-08-22）**——用户打开 MySQL 表点「结构」后停在「加载结构…」。根因是 `MySqlDriver::list_constraints` 把 `TABLE_CONSTRAINTS` 与 `KEY_COLUMN_USAGE` JOIN，MySQL 8 information_schema 无法下推 `table_schema/table_name`，会扫全实例数据字典；本机探测 `list_columns`/`list_indexes` ~150ms，旧 JOIN 超过 8s 仍未返回。已拆成两条等值过滤查询。回归：`structure_view_mysql_metadata_completes_quickly` 与 `list_indexes_and_constraints` 均在 3s 内通过。待用户在 GUI 再点一次「结构」确认。
+
 **里程碑：v0.4.0-rc1 已发布（2026-08-22）**——发布前 `just check` 与双 driver integration 32/32 全绿（本机 dmg + updater 签名产物构建成功）；`just release v0.4.0-rc1` 完成版本号更新（四文件 → `0.4.0-rc1`，预发布不切 CHANGELOG）、发布提交 `dbae167`、main 与 tag 推送成功。Release workflow run `32554496338` 四平台全部成功；rc1 为 prerelease（非草稿，无 `latest.json`），不影响 v0.3.0 用户。剩全平台下载安装验收、V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（均需用户参与）。
 
 **v0.4 全部编码与自动化门禁完成（2026-08-22）**——按 PLAN.md v0.4 开发计划完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑、FR-251 结构查看/DDL 预览/新建表、FR-252 CSV 导入 + SQL dump 导出导入）+ V4-T8.3 文档 + V4-T8.4 门禁。门禁事实：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 125、Next build）；双 driver integration 32/32；本机 dmg + updater 签名产物构建成功。PLAN.md 逐节点已标注，V4-CP0~CP4 收口，仅 V4-CP5 待发布。
@@ -87,6 +89,8 @@
 
 ## 活跃文件
 
+- `crates/db-driver/src/lib.rs`：`MySqlDriver::list_constraints` 改为两条 information_schema 等值查询，避免结构页卡死。
+- `crates/db-driver/tests/integration.rs`：结构页 MySQL 元数据 3s 超时回归。
 - `src-tauri/src/security.rs`：主密码状态机、v1↔v2 迁移回滚、secrets map（FR-102）。
 - `src-tauri/src/config/{encryption,store,history,ssh_known_hosts}.rs`：v2 envelope/Argon2id KDF、连接配置与 SQL 历史加密存储、SSH 信任库。
 - `src-tauri/src/commands/{connection,query,security,history,export}.rs`：连接生命周期、查询与取消、主密码命令、历史命令、流式导出。
@@ -101,6 +105,7 @@
 
 ## 近期决策
 
+- MySQL `list_constraints` 禁止 information_schema 两表 JOIN，必须拆成带 `table_schema + table_name` 等值过滤的独立查询；结构页卡死就是这个 JOIN 扫全实例。
 - v0.4 主键列禁止编辑（UPDATE 主键会破坏定位），新增行除外（必须能填主键）；单元格编辑用 Enter 保存 / Shift+Enter 置 NULL / Esc 取消，不做内嵌工具按钮。
 - v0.4 浏览 tab 翻页/筛选/排序/刷新时有 dirty 需确认丢弃（防止新数据与 dirty 悬空对不上）；退出编辑模式保留 dirty（不丢）。
 - v0.4 CSV 解析手写 RFC 4180 状态机（不引 csv crate，dependencies 规则）；空值语义与导出闭环（无引号 NULL → SQL NULL）。
@@ -153,8 +158,9 @@
 
 ## 下一步（按优先级）
 
-1. V4-T8.1：用户 GUI 实测 v0.4 全功能（检查项见 RELEASE_CHECKLIST v0.4 节）；V4-T8.2：rc1 一周试用（作者 + ≥2 位试用者）。
-2. `just release v0.4.0` 正式发布（V4-CP5）。
+1. 用户在 MySQL 浏览 tab 再点一次「结构」，确认列 / 索引 / 约束 / DDL 能出来。
+2. V4-T8.1：用户 GUI 实测 v0.4 全功能（检查项见 RELEASE_CHECKLIST v0.4 节）；V4-T8.2：rc1 一周试用（作者 + ≥2 位试用者）。
+3. `just release v0.4.0` 正式发布（V4-CP5）。
 
 ## 阻塞 / 风险
 

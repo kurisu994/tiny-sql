@@ -1098,15 +1098,29 @@ impl MySqlDriver {
 
     /// 列出表的约束（FR-241）：TABLE_CONSTRAINTS + KEY_COLUMN_USAGE 按约束名归组，
     /// 外键引用拼为 `schema.table(col,…)`；CHECK 无列记录时列为空。
+    ///
+    /// 两条查询分开跑、各自用 `table_schema + table_name` 等值过滤。MySQL 8
+    /// information_schema 对两表 JOIN 经常无法下推谓词，会扫全实例数据字典，
+    /// 结构页就会一直停在「加载结构…」。
     pub async fn list_constraints(
         &self,
         database: &str,
         table: &str,
     ) -> Result<Vec<ConstraintMeta>, DriverError> {
-        let rows = sqlx::query_as::<
+        let headers = sqlx::query_as::<_, (String, String)>(
+            "SELECT constraint_name, constraint_type \
+             FROM information_schema.table_constraints \
+             WHERE table_schema = ? AND table_name = ? \
+             ORDER BY constraint_name",
+        )
+        .bind(database)
+        .bind(table)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+        let usage = sqlx::query_as::<
             _,
             (
-                String,
                 String,
                 Option<String>,
                 Option<String>,
@@ -1114,16 +1128,11 @@ impl MySqlDriver {
                 Option<String>,
             ),
         >(
-            "SELECT tc.constraint_name, tc.constraint_type, kcu.column_name, \
-                    kcu.referenced_table_schema, kcu.referenced_table_name, kcu.referenced_column_name \
-             FROM information_schema.table_constraints AS tc \
-             LEFT JOIN information_schema.key_column_usage AS kcu \
-               ON kcu.constraint_schema = tc.constraint_schema \
-              AND kcu.constraint_name = tc.constraint_name \
-              AND kcu.table_schema = tc.table_schema \
-              AND kcu.table_name = tc.table_name \
-             WHERE tc.table_schema = ? AND tc.table_name = ? \
-             ORDER BY tc.constraint_name, kcu.ordinal_position",
+            "SELECT constraint_name, column_name, \
+                    referenced_table_schema, referenced_table_name, referenced_column_name \
+             FROM information_schema.key_column_usage \
+             WHERE table_schema = ? AND table_name = ? \
+             ORDER BY constraint_name, ordinal_position",
         )
         .bind(database)
         .bind(table)
@@ -1137,24 +1146,24 @@ impl MySqlDriver {
             ref_table: Option<String>,
             ref_columns: Vec<String>,
         }
-        let mut accs: Vec<(String, Acc)> = Vec::new();
-        for (name, constraint_type, column, ref_schema, ref_table, ref_column) in rows {
-            let pos = accs.iter().position(|(n, _)| *n == name);
-            let acc = match pos {
-                Some(i) => &mut accs[i].1,
-                None => {
-                    accs.push((
-                        name,
-                        Acc {
-                            constraint_type,
-                            columns: vec![],
-                            ref_schema: None,
-                            ref_table: None,
-                            ref_columns: vec![],
-                        },
-                    ));
-                    &mut accs.last_mut().expect("刚 push 必存在").1
-                }
+        let mut accs: Vec<(String, Acc)> = headers
+            .into_iter()
+            .map(|(name, constraint_type)| {
+                (
+                    name,
+                    Acc {
+                        constraint_type,
+                        columns: vec![],
+                        ref_schema: None,
+                        ref_table: None,
+                        ref_columns: vec![],
+                    },
+                )
+            })
+            .collect();
+        for (name, column, ref_schema, ref_table, ref_column) in usage {
+            let Some((_, acc)) = accs.iter_mut().find(|(n, _)| *n == name) else {
+                continue;
             };
             if let Some(column) = column {
                 acc.columns.push(column);

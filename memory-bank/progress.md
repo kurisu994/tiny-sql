@@ -84,6 +84,7 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 
 ## 重大决策与架构变更记录
 
+- **2026-08-22 MySQL 结构页约束查询拆 JOIN**：`list_constraints` 不再 JOIN `TABLE_CONSTRAINTS` 与 `KEY_COLUMN_USAGE`。MySQL 8 information_schema 对这两张表的 JOIN 经常无法下推库名/表名过滤，会扫全实例，浏览 tab「结构」一直停在加载。改为两条 `WHERE table_schema=? AND table_name=?` 查询再在内存归组；语义与原先 LEFT JOIN 一致（CHECK 无列时仍为空）。
 - **2026-06-26 选 Approach B（Clean Workspace）**：放弃 fork redis-desktop-client，改独立 workspace + 独立 crate。理由：长期维护 + `ssh-multihop` 未来独立 publish。
 - **2026-06-26 plan-eng-review 9 个 binding 决策**：keepalive 30s→60s+3 次阈值 / SQL 取消用独立 control conn KILL QUERY / `SshTunnelError` 加 TunnelLost+ChannelDropped+AcceptLoopDied / trait Driver 推 v0.2 / 测试无 Docker 连本地 MySQL / LIMIT 用子查询包装 / **Week 1 改 vertical slice** / read-only best-effort / Codex tension 记 v0.2。
 - **2026-06-26 文档全量改 draft-2**：4 篇 docs 落地上述 9 决策，PLAN.md 重写（Week 1 = vertical slice）。

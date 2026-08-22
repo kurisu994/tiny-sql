@@ -1257,3 +1257,88 @@ async fn dump_style_sql_roundtrip() {
 
     driver.close().await;
 }
+
+/// 结构页 MySQL 路径：list_* + SHOW CREATE TABLE 必须在数秒内返回。
+/// 回归 information_schema 约束 JOIN 把结构页卡在「加载结构…」的问题。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn structure_view_mysql_metadata_completes_quickly() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    let db = url
+        .rsplit('/')
+        .next()
+        .expect("URL 应含 database")
+        .split('?')
+        .next()
+        .expect("database 名");
+    driver
+        .query_with_options(
+            "DROP TABLE IF EXISTS probe_structure",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("清理失败");
+    driver
+        .query_with_options(
+            "CREATE TABLE probe_structure (id INT PRIMARY KEY, name VARCHAR(20))",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("建表失败");
+
+    let scope = MetadataScope::mysql(db);
+    timeout(
+        Duration::from_secs(3),
+        Driver::list_columns(&driver, &scope, "probe_structure"),
+    )
+    .await
+    .expect("list_columns 超时")
+    .expect("list_columns 失败");
+    timeout(
+        Duration::from_secs(3),
+        Driver::list_indexes(&driver, &scope, "probe_structure"),
+    )
+    .await
+    .expect("list_indexes 超时")
+    .expect("list_indexes 失败");
+    let constraints = timeout(
+        Duration::from_secs(3),
+        Driver::list_constraints(&driver, &scope, "probe_structure"),
+    )
+    .await
+    .expect("list_constraints 超时")
+    .expect("list_constraints 失败");
+    assert!(
+        constraints
+            .iter()
+            .any(|c| c.constraint_type == "PRIMARY KEY"),
+        "应返回主键约束: {constraints:?}"
+    );
+
+    let sql = format!(
+        "SHOW CREATE TABLE `{db}`.`probe_structure`",
+        db = db.replace('`', "``")
+    );
+    let row_set = timeout(Duration::from_secs(3), driver.query(&sql))
+        .await
+        .expect("SHOW CREATE TABLE via query 超时")
+        .expect("SHOW CREATE TABLE 失败");
+    assert!(!row_set.rows.is_empty(), "SHOW CREATE 应返回一行");
+    assert!(
+        row_set.rows[0].get(1).and_then(|v| v.as_deref()).is_some(),
+        "第二列应是 Create Table 文本: {row_set:?}"
+    );
+
+    driver
+        .query_with_options(
+            "DROP TABLE probe_structure",
+            write_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .ok();
+    driver.close().await;
+}
