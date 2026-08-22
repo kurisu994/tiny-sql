@@ -5,6 +5,7 @@ import { CheckIcon, PencilIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-re
 
 import { EditableTable } from "@/components/editable-table";
 import { ResultTable } from "@/components/schema-browser";
+import { TableStructureView } from "@/components/table-structure-view";
 import { cn } from "@/lib/utils";
 import type { FilterOp, TableFilter } from "@/lib/tauri-api";
 import { useConfirmStore } from "@/stores/confirm-store";
@@ -52,8 +53,13 @@ export function BrowseView({
     browseDiscardEdits,
   } = useSessionStore();
   const confirm = useConfirmStore((s) => s.confirm);
+  const selectedDb = useSessionStore((s) => s.selectedDb);
+  const selectedSchema = useSessionStore((s) => s.selectedSchema);
+  const driver = useSessionStore((s) => s.activeConnection?.driver ?? "mysql");
   // 筛选草稿：本地编辑，点「应用」才提交查询（应用后 store 的 filters 即生效值）
   const [drafts, setDrafts] = useState<TableFilter[]>(browse?.filters ?? []);
+  // 子视图：数据 / 结构（FR-251）；结构视图下暂停数据表格渲染
+  const [subView, setSubView] = useState<"data" | "structure">("data");
   if (!browse) return null;
 
   const columns = tab.rowSet?.columns ?? [];
@@ -282,6 +288,24 @@ export function BrowseView({
               无主键，不可编辑
             </span>
           )}
+          {/* 数据 / 结构子视图切换（FR-251） */}
+          <div className="ml-1 flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
+            {(["data", "structure"] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                onClick={() => setSubView(view)}
+                className={cn(
+                  "px-2 py-1 text-xs",
+                  subView === view
+                    ? "bg-neutral-700 text-white dark:bg-neutral-600"
+                    : "text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800",
+                )}
+              >
+                {view === "data" ? "数据" : "结构"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -313,9 +337,17 @@ export function BrowseView({
         </div>
       )}
 
-      {/* 结果表格（列头点击排序；编辑模式下用可编辑表格） */}
+      {/* 结果表格（列头点击排序；编辑模式下用可编辑表格；结构子视图展示结构） */}
       <div className="min-h-0 flex-1">
-        {tab.rowSet ? (
+        {subView === "structure" && selectedDb ? (
+          <TableStructureView
+            connectionId={connectionId}
+            driver={driver}
+            database={selectedDb}
+            schema={driver === "postgresql" ? selectedSchema : null}
+            table={browse.table}
+          />
+        ) : tab.rowSet ? (
           editMode ? (
             <EditableTable
               rowSet={tab.rowSet}
@@ -341,8 +373,7 @@ export function BrowseView({
             {running ? "加载中…" : "暂无数据"}
           </p>
         )}
-      </div>
-      {tab.queryErrorMsg && (
+      </div>      {tab.queryErrorMsg && (
         <p className="border-t border-neutral-200 px-3 py-1.5 text-xs text-red-600 dark:border-neutral-800 dark:text-red-300">
           {tab.queryErrorMsg}
         </p>

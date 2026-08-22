@@ -90,14 +90,14 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：增/删/改提交与回滚双 driver 可从前端证明（store 单测 + Week 1 integration）；关闭 / 断链路径终态确定；**V4-CP2 编辑闭环已通过（2026-08-22）**。
 
-### v0.4 Week 4 — 结构查看与 DDL 预览（12h）
+### v0.4 Week 4 — 结构查看与 DDL 预览（12h）✅ 已完成（2026-08-22）
 
-- **V4-T4.1 [4h]** 表结构详情视图：列定义（类型、可空、默认值、注释、自增/生成列）+ 索引 + 约束整合展示（复用 FR-241 metadata，不新增契约面）。
-- **V4-T4.2 [4h]** MySQL DDL 预览：`SHOW CREATE TABLE` 获取并只读展示；View 的 DDL 同样支持。
-- **V4-T4.3 [3h]** PostgreSQL DDL 预览：由 pg_catalog / information_schema 元数据拼装建表语句（列、默认值、主键、约束、索引），明确标注为重建预览而非服务端原文。
-- **V4-T4.4 [1h]** cache 失效链接入：DDL 预览读取走现有 LRU cache 失效规则。
+- **V4-T4.1 [4h]** ✅ 表结构详情视图：浏览 tab 新增「数据 / 结构」子视图切换；结构页整合展示列定义（类型 / 可空 / 默认值 / 注释 / PK 标记）、索引（名称 / 列 / 类型 / 唯一性）、约束（类型 / 列 / 引用定义），复用 FR-241 metadata 命令不新增契约面。
+- **V4-T4.2 [4h]** ✅ MySQL DDL 预览：复用 `db_query` 执行 `SHOW CREATE TABLE`（元数据语句免写确认，全限定 `db`.`table` 不依赖当前库），展示服务端原文。
+- **V4-T4.3 [3h]** ✅ PostgreSQL DDL 预览：`src/lib/ddl.ts` 由已加载列 / 约束 / 索引拼装 CREATE TABLE + CREATE INDEX（主键 / 唯一 / CHECK / 外键按 pg_constraint 定义文本重建），明确标注「重建预览，非服务端原文」；单测 4 个（拼装 / 约束 / 索引 / 转义 / 无主键）。
+- **V4-T4.4 [1h]** ✅ cache 失效链：结构数据直读 `dbApi`（不经前端 LRU），DDL 执行 / 手动刷新 / 重连后自然反映最新元数据。
 
-验收：双方言结构与 DDL 预览正确；**V4-CP3** 前半通过。
+验收：双方言结构查看与 DDL 预览可用；**V4-CP3 前半通过**。
 
 ### v0.4 Week 5 — 新建表表单（12h）
 
