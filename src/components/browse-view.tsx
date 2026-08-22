@@ -10,6 +10,7 @@ import { TableStructureView } from "@/components/table-structure-view";
 import { cn } from "@/lib/utils";
 import {
   dbApi,
+  translateError,
   type ColumnMeta,
   type FilterOp,
   type TableFilter,
@@ -69,6 +70,9 @@ export function BrowseView({
   // CSV 导入（FR-252）：对话框开关 + 目标表列元数据
   const [importOpen, setImportOpen] = useState(false);
   const [importColumns, setImportColumns] = useState<ColumnMeta[]>([]);
+  // SQL dump 导出（FR-252）
+  const [dumping, setDumping] = useState(false);
+  const [dumpMsg, setDumpMsg] = useState<string | null>(null);
   if (!browse) return null;
 
   const columns = tab.rowSet?.columns ?? [];
@@ -340,6 +344,45 @@ export function BrowseView({
           >
             导入 CSV
           </button>
+          {/* 导出 SQL dump（FR-252）：当前表 DDL + 数据 */}
+          <button
+            type="button"
+            onClick={() => {
+              void (async () => {
+                if (!selectedDb) return;
+                const { save } = await import("@tauri-apps/plugin-dialog");
+                const path = await save({
+                  title: "导出 SQL dump",
+                  defaultPath: `${browse.table}.sql`,
+                  filters: [{ name: "SQL", extensions: ["sql"] }],
+                });
+                if (typeof path !== "string") return;
+                setDumpMsg(null);
+                setDumping(true);
+                try {
+                  const result = await dbApi.exportDump(connectionId, {
+                    database: selectedDb,
+                    schema: driver === "postgresql" ? selectedSchema : null,
+                    table: browse.table,
+                    path,
+                  });
+                  setDumpMsg(`已导出 ${result.rows} 行`);
+                } catch (e) {
+                  setDumpMsg(translateError(e));
+                } finally {
+                  setDumping(false);
+                }
+              })();
+            }}
+            disabled={!selectedDb || editMode || dumping}
+            title="导出当前表的建表 DDL 与数据为 SQL 文件"
+            className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          >
+            {dumping ? "导出中…" : "导出 SQL"}
+          </button>
+          {dumpMsg && (
+            <span className="text-xs text-neutral-400">{dumpMsg}</span>
+          )}
         </div>
       </div>
 

@@ -12,6 +12,7 @@ import { TopologyGraph } from "@/components/topology-graph";
 import { useColumnWidths } from "@/hooks/use-column-widths";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
 import {
+  dbApi,
   exportApi,
   sqlFileApi,
   translateError,
@@ -96,6 +97,49 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [formatting, setFormatting] = useState(false);
   const [createTableOpen, setCreateTableOpen] = useState(false);
+  const [importingDump, setImportingDump] = useState(false);
+  const [dumpMsg, setDumpMsg] = useState<string | null>(null);
+
+  /** 导入 SQL dump（FR-252）：选文件 → 确认（写操作一次性确认）→ 流式执行 */
+  async function importDump() {
+    if (!selectedDb) return;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      title: "导入 SQL dump",
+      filters: [{ name: "SQL", extensions: ["sql", "txt"] }],
+      multiple: false,
+    });
+    if (typeof selected !== "string") return;
+    const ok = await confirm({
+      title: "导入 SQL dump",
+      message: `将在 ${connection.driver === "postgresql" ? (selectedSchema ?? "public") : selectedDb} 范围逐条执行文件中的全部语句（含 DROP / CREATE / INSERT 等写操作）：\n\n${selected}\n\n失败即中止并报告语句序号。确定执行吗？`,
+      confirmText: "执行",
+      danger: true,
+    });
+    if (!ok) return;
+    setDumpMsg(null);
+    setImportingDump(true);
+    try {
+      const result = await dbApi.importDump(
+        connection.id,
+        selectedDb,
+        connection.driver === "postgresql" ? selectedSchema : null,
+        selected,
+      );
+      if (result.failedAt !== null) {
+        setDumpMsg(
+          `导入中止：第 ${result.failedAt} 条语句失败（已执行 ${result.executed} 条）`,
+        );
+      } else {
+        setDumpMsg(`导入完成：执行 ${result.executed} 条语句`);
+      }
+      await refreshMetadata();
+    } catch (e) {
+      setDumpMsg(translateError(e));
+    } finally {
+      setImportingDump(false);
+    }
+  }
   /** 打开 SQL 文件对话框（FR-240） */
   async function openFileDialog() {
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -496,6 +540,22 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               >
                 新建表
               </button>
+              {/* 导入 SQL dump（FR-252）：流式执行整个文件 */}
+              <button
+                type="button"
+                onClick={() => void importDump()}
+                disabled={
+                  !connected ||
+                  !selectedDb ||
+                  importingDump ||
+                  (connection.driver === "postgresql" && !selectedSchema)
+                }
+                aria-label="导入 SQL"
+                title="导入 SQL dump 文件（流式逐条执行）"
+                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+              >
+                {importingDump ? "导入中…" : "导入 SQL"}
+              </button>
               <button
                 type="button"
                 onClick={refreshMetadata}
@@ -507,6 +567,11 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               </button>
             </div>
           </div>
+          {dumpMsg && (
+            <div className="border-b border-neutral-100 px-3 py-1 text-xs text-neutral-500 dark:border-neutral-800">
+              {dumpMsg}
+            </div>
+          )}
           {connected && (
             <div className="border-b border-neutral-100 px-2 py-1.5 dark:border-neutral-800">
               <input

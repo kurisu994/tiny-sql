@@ -138,6 +138,7 @@ export const ERROR_ZH: Record<string, string> = {
   "error.security.migration_failed": "加密迁移失败，原数据未被修改",
   "error.security.master_required": "需先启用并解锁主密码才能保存 passphrase",
   "error.export.io": "导出文件写入失败，请检查路径与磁盘权限",
+  "error.dump.no_tables": "当前范围没有可导出的表",
   "error.sqlfile.read_failed": "SQL 文件读取失败，请检查路径与权限",
   "error.sqlfile.write_failed": "SQL 文件写入失败，请检查路径与磁盘权限",
   "error.sqlfile.too_large": "SQL 文件过大（超过 8MB），请拆分后打开",
@@ -465,6 +466,21 @@ export const dbApi = {
         skipErrors: input.skipErrors,
       },
     }),
+  exportDump: (id: string, input: ExportDumpInput) =>
+    invoke<ExportDumpResult>("db_export_dump", {
+      id,
+      input: {
+        database: input.database,
+        schema: input.schema ?? null,
+        table: input.table ?? null,
+        path: input.path,
+      },
+    }),
+  importDump: (id: string, database: string, schema: string | null, path: string) =>
+    invoke<ImportDumpResult>("db_import_dump", {
+      id,
+      input: { database, schema, path },
+    }),
   queryMany: (id: string, sql: string, options: QueryOptions = {}) =>
     invoke<MultiQueryResult>("db_query_many", {
       id,
@@ -568,6 +584,29 @@ export interface CsvImportResult {
   inserted: number;
   /** 失败数据行号（1 起，不含表头） */
   failedRows: number[];
+}
+
+/** dump 导出输入（FR-252） */
+export interface ExportDumpInput {
+  database: string;
+  schema?: string | null;
+  /** 指定表名；缺省导出当前 scope 全部 BASE TABLE */
+  table?: string | null;
+  path: string;
+}
+
+/** dump 导出结果（FR-252） */
+export interface ExportDumpResult {
+  tables: number;
+  rows: number;
+}
+
+/** dump 导入结果（FR-252） */
+export interface ImportDumpResult {
+  executed: number;
+  /** 失败语句序号（1 起；null = 全部成功） */
+  failedAt: number | null;
+  failedPreview: string | null;
 }
 
 /** 多语句脚本的单条执行结果（FR-243） */

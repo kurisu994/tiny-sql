@@ -771,6 +771,7 @@ pub trait Driver: Send + Sync {
     ///   返回 [`DriverError::EditApplyFailed`]（index 为批内失败行下标）。
     /// - `transactional = false`（跳过模式）：逐行 autocommit，失败行收集进
     ///   [`BulkInsertResult::failed_rows`] 继续后续行。
+    ///
     /// 取消语义与 `query` 相同：中止模式当前批回滚，跳过模式停止于当前行。
     fn bulk_insert_rows<'a>(
         &'a self,
@@ -2194,6 +2195,251 @@ pub struct MultiQueryResult {
 /// 结果展示用的语句原文最大长度。
 const STATEMENT_SQL_MAX_CHARS: usize = 500;
 
+/// 分句状态机内部状态（FR-243/FR-252）。
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum SplitState {
+    Normal,
+    SingleQuote,
+    DoubleQuote,
+    Backtick,
+    LineComment,
+    BlockComment,
+    DollarQuote,
+}
+
+/// 流式 SQL 分句器（FR-252 dump 导入）：增量喂入文本块，产出完整语句。
+///
+/// 状态机与 [`split_statements`] 一致：分号只在普通状态切分，字符串 / 标识符
+/// 引号 / 行块注释 / PG dollar-quoted body 内的分号不切。跨块边界的 lookahead
+/// （`--` / `/*` / `''` / `$tag$`）通过字符队列挂起等待下一块；EOF 时处于
+/// 未闭合状态返回 `InvalidSql`（边界不确定即拒绝，绝不尽力执行）。
+pub struct StatementSplitter {
+    dialect: SqlDialect,
+    state: SplitState,
+    dollar_tag: Vec<char>,
+    /// 当前语句累积缓冲（分号产出后清空）
+    current: String,
+    /// 跨块字符队列：新块追加到尾部，lookahead 不足且非 EOF 时暂停消费
+    carry: std::collections::VecDeque<char>,
+}
+
+impl StatementSplitter {
+    pub fn new(dialect: SqlDialect) -> Self {
+        Self {
+            dialect,
+            state: SplitState::Normal,
+            dollar_tag: Vec::new(),
+            current: String::new(),
+            carry: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// 喂入一块文本；`eof = true` 时冲刷尾部语句并校验闭合状态。
+    /// 返回本块产出的完整语句（去除空白首尾，空语句丢弃）。
+    pub fn feed(&mut self, chunk: &str, eof: bool) -> Result<Vec<String>, DriverError> {
+        self.carry.extend(chunk.chars());
+        let mut out: Vec<String> = Vec::new();
+        while let Some(&ch) = self.carry.front() {
+            match self.state {
+                SplitState::Normal => match ch {
+                    '\'' | '"' | '`' if ch != '`' || self.dialect == SqlDialect::MySql => {
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                        self.state = match ch {
+                            '\'' => SplitState::SingleQuote,
+                            '"' => SplitState::DoubleQuote,
+                            _ => SplitState::Backtick,
+                        };
+                    }
+                    '#' if self.dialect == SqlDialect::MySql => {
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                        self.state = SplitState::LineComment;
+                    }
+                    '-' | '/' => {
+                        // `--` 行注释 / `/*` 块注释需要看第二个字符
+                        if self.carry.len() < 2 && !eof {
+                            break;
+                        }
+                        let second = self.carry.get(1).copied();
+                        match (ch, second) {
+                            ('-', Some('-')) | ('/', Some('*')) => {
+                                self.current.push(ch);
+                                self.current.push(second.unwrap());
+                                self.carry.pop_front();
+                                self.carry.pop_front();
+                                self.state = if ch == '-' {
+                                    SplitState::LineComment
+                                } else {
+                                    SplitState::BlockComment
+                                };
+                            }
+                            _ => {
+                                self.current.push(ch);
+                                self.carry.pop_front();
+                            }
+                        }
+                    }
+                    '$' if self.dialect == SqlDialect::PostgreSql => {
+                        // 尝试匹配 $tag$ 开界：连续 [alnum_]* 后接 $；数据不足且非 EOF 时等下一块
+                        let mut j = 1usize;
+                        while j < self.carry.len() {
+                            let c = self.carry[j];
+                            if c.is_ascii_alphanumeric() || c == '_' {
+                                j += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        if j < self.carry.len() && self.carry[j] == '$' {
+                            let tag: Vec<char> = self.carry.range(..=j).copied().collect();
+                            for c in &tag {
+                                self.current.push(*c);
+                            }
+                            self.carry.drain(..=j);
+                            self.dollar_tag = tag;
+                            self.state = SplitState::DollarQuote;
+                        } else if j == self.carry.len() && !eof {
+                            // 可能是跨块的 $tag$，等更多数据
+                            break;
+                        } else {
+                            self.current.push('$');
+                            self.carry.pop_front();
+                        }
+                    }
+                    ';' => {
+                        self.carry.pop_front();
+                        let stmt = self.current.trim().to_string();
+                        if !stmt.is_empty() {
+                            out.push(stmt);
+                        }
+                        self.current.clear();
+                    }
+                    _ => {
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                    }
+                },
+                SplitState::SingleQuote => {
+                    if ch == '\\' {
+                        // 保守跳过转义字符（跨块时等数据）
+                        if self.carry.len() < 2 && !eof {
+                            break;
+                        }
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                        if let Some(next) = self.carry.pop_front() {
+                            self.current.push(next);
+                        }
+                    } else if ch == '\'' {
+                        if self.carry.len() < 2 && !eof {
+                            break;
+                        }
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                        if self.carry.front().copied() == Some('\'') {
+                            self.current.push('\'');
+                            self.carry.pop_front();
+                        } else {
+                            self.state = SplitState::Normal;
+                        }
+                    } else {
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                    }
+                }
+                SplitState::DoubleQuote | SplitState::Backtick => {
+                    let quote = if self.state == SplitState::DoubleQuote {
+                        '"'
+                    } else {
+                        '`'
+                    };
+                    if ch == quote {
+                        if self.carry.len() < 2 && !eof {
+                            break;
+                        }
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                        if self.carry.front().copied() == Some(quote) {
+                            self.current.push(quote);
+                            self.carry.pop_front();
+                        } else {
+                            self.state = SplitState::Normal;
+                        }
+                    } else {
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                    }
+                }
+                SplitState::LineComment => {
+                    self.current.push(ch);
+                    self.carry.pop_front();
+                    if ch == '\n' {
+                        self.state = SplitState::Normal;
+                    }
+                }
+                SplitState::BlockComment => {
+                    if ch == '*' {
+                        if self.carry.len() < 2 && !eof {
+                            break;
+                        }
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                        if self.carry.front().copied() == Some('/') {
+                            self.current.push('/');
+                            self.carry.pop_front();
+                            self.state = SplitState::Normal;
+                        }
+                    } else {
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                    }
+                }
+                SplitState::DollarQuote => {
+                    if ch == '$' {
+                        let tag_len = self.dollar_tag.len();
+                        if self.carry.len() < tag_len && !eof {
+                            break;
+                        }
+                        if self.carry.len() >= tag_len
+                            && self
+                                .carry
+                                .range(..tag_len)
+                                .copied()
+                                .eq(self.dollar_tag.iter().copied())
+                        {
+                            for _ in 0..tag_len {
+                                if let Some(c) = self.carry.pop_front() {
+                                    self.current.push(c);
+                                }
+                            }
+                            self.state = SplitState::Normal;
+                        } else {
+                            self.current.push('$');
+                            self.carry.pop_front();
+                        }
+                    } else {
+                        self.current.push(ch);
+                        self.carry.pop_front();
+                    }
+                }
+            }
+        }
+        if eof {
+            if self.state != SplitState::Normal {
+                return Err(DriverError::InvalidSql);
+            }
+            let tail = self.current.trim().to_string();
+            if !tail.is_empty() {
+                out.push(tail);
+            }
+            self.current.clear();
+            self.carry.clear();
+        }
+        Ok(out)
+    }
+}
+
 fn truncate_statement_sql(sql: &str) -> String {
     if sql.chars().count() > STATEMENT_SQL_MAX_CHARS {
         sql.chars().take(STATEMENT_SQL_MAX_CHARS).collect()
@@ -2208,127 +2454,9 @@ fn truncate_statement_sql(sql: &str) -> String {
 /// dollar-quoted body 内的分号不算。拆分后空白语句丢弃；存在未闭合的引号 /
 /// 注释 / dollar-quote 时返回 `InvalidSql`（边界不确定即拒绝，绝不尽力执行）。
 fn split_statements(sql: &str, dialect: SqlDialect) -> Result<Vec<String>, DriverError> {
-    #[derive(PartialEq)]
-    enum State {
-        Normal,
-        SingleQuote,
-        DoubleQuote,
-        Backtick,
-        LineComment,
-        BlockComment,
-        DollarQuote,
-    }
-    let chars: Vec<(usize, char)> = sql.char_indices().collect();
-    let n = chars.len();
-    let mut state = State::Normal;
-    let mut dollar_tag: Vec<char> = Vec::new();
-    let mut statements: Vec<String> = Vec::new();
-    let mut stmt_start = 0usize;
-    let mut i = 0usize;
-
-    while i < n {
-        let (byte, ch) = chars[i];
-        match state {
-            State::Normal => match ch {
-                '\'' => state = State::SingleQuote,
-                '"' => state = State::DoubleQuote,
-                '`' if dialect == SqlDialect::MySql => state = State::Backtick,
-                '#' if dialect == SqlDialect::MySql => state = State::LineComment,
-                '-' if i + 1 < n && chars[i + 1].1 == '-' => {
-                    state = State::LineComment;
-                    i += 1;
-                }
-                '/' if i + 1 < n && chars[i + 1].1 == '*' => {
-                    state = State::BlockComment;
-                    i += 1;
-                }
-                '$' if dialect == SqlDialect::PostgreSql => {
-                    // 尝试解析 $tag$ 开界（空 tag 即 $$）
-                    let mut j = i + 1;
-                    if j < n && (chars[j].1.is_ascii_alphabetic() || chars[j].1 == '_') {
-                        while j < n && (chars[j].1.is_ascii_alphanumeric() || chars[j].1 == '_') {
-                            j += 1;
-                        }
-                    }
-                    if j < n && chars[j].1 == '$' {
-                        dollar_tag = chars[i..=j].iter().map(|(_, c)| *c).collect();
-                        state = State::DollarQuote;
-                        i = j;
-                    }
-                }
-                ';' => {
-                    let stmt = sql[stmt_start..byte].trim();
-                    if !stmt.is_empty() {
-                        statements.push(stmt.to_string());
-                    }
-                    stmt_start = byte + 1;
-                }
-                _ => {}
-            },
-            State::SingleQuote => {
-                if ch == '\\' {
-                    i += 1; // 双方言保守跳过转义字符
-                } else if ch == '\'' {
-                    if i + 1 < n && chars[i + 1].1 == '\'' {
-                        i += 1; // '' 转义
-                    } else {
-                        state = State::Normal;
-                    }
-                }
-            }
-            State::DoubleQuote => {
-                if ch == '"' {
-                    if i + 1 < n && chars[i + 1].1 == '"' {
-                        i += 1; // "" 转义
-                    } else {
-                        state = State::Normal;
-                    }
-                }
-            }
-            State::Backtick => {
-                if ch == '`' {
-                    if i + 1 < n && chars[i + 1].1 == '`' {
-                        i += 1; // `` 转义
-                    } else {
-                        state = State::Normal;
-                    }
-                }
-            }
-            State::LineComment => {
-                if ch == '\n' {
-                    state = State::Normal;
-                }
-            }
-            State::BlockComment => {
-                if ch == '*' && i + 1 < n && chars[i + 1].1 == '/' {
-                    state = State::Normal;
-                    i += 1;
-                }
-            }
-            State::DollarQuote => {
-                if ch == '$' {
-                    let tag_len = dollar_tag.len();
-                    if i + tag_len <= n
-                        && chars[i..i + tag_len]
-                            .iter()
-                            .map(|(_, c)| *c)
-                            .eq(dollar_tag.iter().copied())
-                    {
-                        state = State::Normal;
-                        i += tag_len - 1;
-                    }
-                }
-            }
-        }
-        i += 1;
-    }
-    if state != State::Normal {
-        return Err(DriverError::InvalidSql);
-    }
-    let tail = sql[stmt_start..].trim();
-    if !tail.is_empty() {
-        statements.push(tail.to_string());
-    }
+    // 基于流式分句器（FR-252）：一次性喂入等价于单块 + EOF
+    let mut splitter = StatementSplitter::new(dialect);
+    let statements = splitter.feed(sql, true)?;
     if statements.is_empty() {
         return Err(DriverError::InvalidSql);
     }
@@ -2403,8 +2531,9 @@ fn prepare_statements(
     Ok((statements, prepared_list))
 }
 
+/// SQL 方言（语句拆分与 guard 分类用；FR-252 dump 导入复用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SqlDialect {
+pub enum SqlDialect {
     MySql,
     PostgreSql,
 }
@@ -3010,6 +3139,55 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    /// 流式分句器（FR-252）：逐字符喂入与整串喂入结果一致（跨块边界全覆盖）。
+    #[test]
+    fn statement_splitter_streaming_matches_batch() {
+        let cases: &[(SqlDialect, &str)] = &[
+            (SqlDialect::MySql, "SELECT 1; SELECT 2;"),
+            (SqlDialect::MySql, "SELECT ';' AS s; -- 注释;\nSELECT 2"),
+            (SqlDialect::MySql, "SELECT `a;b` FROM t; SELECT 'it\\'s;x'"),
+            (SqlDialect::MySql, "/* ; */;; SELECT 1;;"),
+            (
+                SqlDialect::MySql,
+                "INSERT INTO t VALUES ('a\nb;c'), ('d', 'e''f'); SELECT 1",
+            ),
+            (
+                SqlDialect::PostgreSql,
+                "CREATE FUNCTION f() RETURNS void AS $body$ BEGIN RAISE NOTICE 'x;y'; END; $body$ LANGUAGE plpgsql; SELECT 1",
+            ),
+            (SqlDialect::PostgreSql, "SELECT $$a;b$$; SELECT $tag$c;$d$e$tag$"),
+        ];
+        for (dialect, sql) in cases {
+            let expected = split_statements(sql, *dialect).unwrap();
+            // 逐字符喂入：强制所有 lookahead 跨块
+            let mut splitter = StatementSplitter::new(*dialect);
+            let mut streamed: Vec<String> = Vec::new();
+            let chars: Vec<char> = sql.chars().collect();
+            for (i, c) in chars.iter().enumerate() {
+                let eof = i + 1 == chars.len();
+                streamed.extend(
+                    splitter
+                        .feed(&c.to_string(), eof)
+                        .unwrap_or_else(|e| panic!("{sql} 逐字喂入失败: {e:?}")),
+                );
+            }
+            assert_eq!(&streamed, &expected, "{sql} 逐字喂入应与整串一致");
+        }
+    }
+
+    /// 流式分句器：EOF 未闭合拒绝；空白脚本产出空。
+    #[test]
+    fn statement_splitter_eof_validation() {
+        let mut splitter = StatementSplitter::new(SqlDialect::MySql);
+        assert!(splitter.feed("SELECT 'abc", true).is_err());
+
+        let mut splitter = StatementSplitter::new(SqlDialect::PostgreSql);
+        assert!(splitter.feed("SELECT $$abc", true).is_err());
+
+        let mut splitter = StatementSplitter::new(SqlDialect::MySql);
+        assert!(splitter.feed("  ; ; ", true).unwrap().is_empty());
     }
 
     #[test]

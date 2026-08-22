@@ -112,6 +112,8 @@ pub fn run() {
             commands::query::db_apply_table_edits,
             commands::import::csv_import_preview,
             commands::import::db_import_csv,
+            commands::dump::db_export_dump,
+            commands::dump::db_import_dump,
             commands::ssh_tofu::ssh_tofu_decision,
             commands::security::security_status,
             commands::security::security_setup,

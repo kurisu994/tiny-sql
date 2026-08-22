@@ -1205,3 +1205,55 @@ async fn bulk_insert_rows_abort_and_skip_modes() {
 
     driver.close().await;
 }
+
+// === FR-252 dump 格式回归：导出风格 SQL 可拆分执行且数据往返一致 ===
+
+/// dump 导出风格的多行 VALUES INSERT：经分句器拆分执行后数据一致（含转义往返）。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn dump_style_sql_roundtrip() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    setup_edit_table(
+        &driver,
+        "dump_roundtrip",
+        "CREATE TABLE dump_roundtrip (id INT PRIMARY KEY, val VARCHAR(100) NULL)",
+    )
+    .await;
+
+    // 模拟 dump 导出格式：DROP + CREATE + 多行 VALUES INSERT（含引号/反斜杠/换行/NULL）
+    let dump = "DROP TABLE IF EXISTS `dump_roundtrip`;\n\
+                CREATE TABLE `dump_roundtrip` (`id` int NOT NULL, `val` varchar(100) NULL, PRIMARY KEY (`id`));\n\
+                INSERT INTO `dump_roundtrip` (`id`, `val`) VALUES\n  \
+                  (1, 'it''s'),\n  \
+                  (2, '含\\\\反斜杠'),\n  \
+                  (3, '两行\n数据'),\n  \
+                  (4, NULL),\n  \
+                  (5, '');";
+    let result = driver
+        .query_many(dump, write_opts(), CancellationToken::new())
+        .await
+        .expect("dump 风格脚本应执行成功");
+    assert_eq!(result.statements.len(), 3);
+
+    let rows = driver
+        .query_with_options(
+            "SELECT id, val FROM dump_roundtrip ORDER BY id",
+            read_opts(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("读取失败");
+    assert_eq!(rows.rows.len(), 5);
+    assert_eq!(rows.rows[0][1].as_deref(), Some("it's"), "单引号双写往返");
+    assert_eq!(
+        rows.rows[1][1].as_deref(),
+        Some("含\\反斜杠"),
+        "反斜杠转义往返"
+    );
+    assert_eq!(rows.rows[2][1].as_deref(), Some("两行\n数据"), "换行往返");
+    assert_eq!(rows.rows[3][1], None, "NULL 往返");
+    assert_eq!(rows.rows[4][1].as_deref(), Some(""), "空串往返");
+
+    driver.close().await;
+}

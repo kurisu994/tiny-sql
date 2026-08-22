@@ -116,13 +116,13 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：双 driver CSV 导入正确；**V4-CP4 前半通过**。
 
-### v0.4 Week 7 — SQL dump 导出/导入（12h）
+### v0.4 Week 7 — SQL dump 导出/导入（12h）✅ 已完成（2026-08-22）
 
-- **V4-T7.1 [4h]** 表/库级 dump 导出：后端流式写文件（结构 DDL + 数据 INSERT 批），不经过前端序列化；进度与取消。
-- **V4-T7.2 [5h]** dump 导入：大 SQL 文件流式读取 + 分号状态机逐条执行（复用 FR-243 拆分），进度、失败语句定位（语句序号 + 字节偏移），失败后可选中止/继续。
-- **V4-T7.3 [3h]** 边界回归：含注释/字符串/dollar-quoted body 的 dump 不误判；超大文件不整读内存；写确认一次性覆盖整个文件而非逐条确认。
+- **V4-T7.1 [4h]** ✅ dump 导出：`db_export_dump` 表级或当前 scope 全表（仅 BASE TABLE），后端流式写文件（DDL + 多行 VALUES 批量 INSERT，每语句 ≤ 500 行，数据按 browse 分页 10000 拉取）；MySQL DDL 用 `SHOW CREATE TABLE` 原文，PG 元数据简化重建（列 / NOT NULL / 默认值 / 主键，明确面向数据迁移，完整结构以结构视图 DDL 预览为准）；字符串转义按方言（PG standard_conforming_strings 不转义反斜杠——integration 实测修正）。
+- **V4-T7.2 [5h]** ✅ dump 导入：`StatementSplitter` 流式增量分句器（split_statements 状态机改造为逐字符可挂起，跨块 lookahead 用字符队列等待；split_statements 重构为基于它实现，43 个单测含逐字喂入一致性全覆盖）+ `db_import_dump` 64KiB 块流式读取逐条执行，禁止整文件载入；写确认一次性覆盖整个文件，失败中止并返回语句序号 + 截断预览（原始错误不外泄）。
+- **V4-T7.3 [3h]** ✅ 边界回归：dump 风格 SQL 双方言往返 integration（DROP + CREATE + 多行 VALUES，单引号 / 反斜杠 / 真换行 / NULL / 空串逐一断言）；dump.rs 单测 3 个（转义 / PG DDL 拼装 / 标识符）。
 
-验收：双 driver dump 导出→导入闭环；**V4-CP4** 导入导出通过。
+验收：双 driver dump 导出→导入闭环（格式回归 integration 验证）；**V4-CP4 导入导出已通过（2026-08-22）**。
 
 ### v0.4 Week 8 — 双 driver dogfooding 与发布（12h）
 
