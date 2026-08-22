@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：v0.1.0 已于 2026-08-18 正式发布。** GitHub Actions 已产出 macOS Apple Silicon / Intel、Windows x64、Linux x64 安装包、签名更新包和四平台 `latest.json`。当前已知限制与后续计划见 [docs/PLAN.md](./docs/PLAN.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：v0.3.0 已于 2026-08-22 正式发布，v0.4.0-rc1 试用中。** GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包、签名更新包与四平台 `latest.json`。历史版本与后续计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -19,16 +19,36 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 
 自用 + 同事可用 + 开源。不收费、无遥测、业务数据仅本地；自动更新只访问 GitHub Release 的正式版清单。
 
-## v0.1 当前能力
+## 当前能力
 
-- N 跳 SSH 配置与连接：密码 / 私钥认证、passphrase 会话缓存、TOFU host key 校验、指纹变更硬拒绝。
-- MySQL SSL/TLS 配置：默认禁用，可显式选择 Preferred / Required / Verify CA / Verify Identity，并传入 CA、客户端证书与私钥路径；真实 TLS 服务器验收尚未完成。
-- MySQL 数据浏览：列出 database / table，点表浏览前 1000 行。
-- SQL 执行：CodeMirror SQL 编辑器支持语法高亮、行号、基础 schema/table 补全和快捷执行；后端拒绝空 SQL / 多语句，`SELECT` / `WITH` 顶层安全时自动追加 `LIMIT`，结果上限 10 万行。
-- SQL 取消：执行时记录 MySQL `CONNECTION_ID()`，取消时通过独立 control pool 发 `KILL QUERY`。
-- 拓扑状态：本机 → N 跳 → MySQL 的只读拓扑图，支持 `pending` / `connected` / `failed` / `lost`。
-- 跨平台打包：GitHub Release workflow 监听 `v*` tag，产出 macOS Apple Silicon + Intel `.dmg`、Windows x64 `.exe`、Linux x64 `.AppImage`，正式版同时发布 Tauri 自动更新清单。
-- 自动更新：桌面端启动后每日检查一次正式版更新，macOS 应用菜单可手动检查；RC / beta / alpha 不作为自动更新源。
+**连接与 SSH**
+
+- N 跳 SSH：密码 / 私钥认证、passphrase 会话缓存（可选加密持久化）、TOFU host key 校验、指纹变更硬拒绝。
+- 可视化拓扑：本机 → N 跳 → 数据库，展示每跳 `pending / connected / failed / lost` 状态与累计协议 RTT；keepalive 默认 180s 内感知断开，支持手动幂等重连。
+
+**数据库**
+
+- 双 driver：MySQL（5.7 / 8.0 / 8.4）与 PostgreSQL，编辑器按连接切换方言。
+- 元数据树：database / schema / table / column / index / constraint 按需展开 + 对象搜索。
+- 数据浏览：服务端筛选 / 排序 / 分页（不整拉全表），结果上限 10 万行。
+
+**SQL 编辑器**
+
+- CodeMirror 双方言高亮、schema-aware 补全、多语句执行与格式化；写操作二次确认；独立 control pool 取消。
+- 可靠事务：独占 session 上 `BEGIN` / `COMMIT` / `ROLLBACK`。
+- SQL 文件打开 / 保存 / 最近文件；SQL 历史（最近 100 条加密落盘）。
+
+**数据工作流**
+
+- 查询结果导出 CSV / Excel（后端流式写文件，区分 SQL NULL 与空字符串）。
+- 表格安全编辑：仅带主键单表，dirty 暂存 + 单事务批量提交（v0.4 rc）。
+- 结构查看 + DDL 预览 + 新建表（v0.4 rc）。
+- CSV 导入 + SQL dump 导入 / 导出（v0.4 rc）。
+
+**安全与分发**
+
+- 连接配置 AES-GCM 加密落盘；可选主密码（Argon2id）加护并支持锁定 / 重置。
+- 跨平台打包 + 正式版自动更新（RC / beta / alpha 不作为更新源）。
 
 ## 技术栈
 
@@ -38,21 +58,9 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 | 前端 | Next.js 16 (Turbopack) + React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |
 | 后端 | Rust (Edition 2021, MSRV 1.77.2) + Tokio |
 | SSH 隧道 | russh 0.54（N 跳，纯 Rust 异步） |
-| 数据库 | sqlx 0.8（MySQL；v0.2 加 PostgreSQL） |
+| 数据库 | sqlx 0.8（MySQL + PostgreSQL 双 driver） |
 
-> PostgreSQL、SQL 历史、多查询 tab 等已在 v0.2 落地，详见下方「v0.2 新增」与 [ROADMAP](./docs/ROADMAP.md)。
-
-## v0.2 新增（开发中，未发布）
-
-- PostgreSQL 支持：浏览当前数据库的 schema / table / column 四层结构，执行、限流与取消 SQL，编辑器按连接切换 MySQL / PostgreSQL 方言补全。
-- 主密码加密：Argon2id 派生密钥 + AES-256-GCM v2 envelope 保护连接配置；解锁后可持久化 SSH 私钥 passphrase；支持锁定与忘记密码重置。
-- SQL 历史：最近 100 条执行记录（含成功状态）加密落盘，可一键回填与清空。
-- 多查询 tab：每个 tab 独立保存 SQL、结果集与取消状态，可同时执行互不干扰。
-- 结果导出：CSV / Excel 后端流式写出，区分 SQL NULL 与空字符串，大结果集不经过前端序列化。
-- 结果表格列宽拖拽并可恢复默认。
-- SSH 可观测性：拓扑图展示每跳累计协议 RTT；断链后支持手动幂等重连；keepalive 间隔与失败阈值可配置。
-
-完整清单见 [CHANGELOG.md](./CHANGELOG.md) 的 `[Unreleased]` 段。
+完整变更历史见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 开发环境准备
 
@@ -95,9 +103,9 @@ just build-web    # 仅构建前端（静态导出到 out/）
 | `just fmt` | 格式化 Rust 代码 |
 | `just fmt-check` | 仅检查格式不修改（CI 用） |
 | `just test` | Rust workspace + 前端 Vitest 单元测试 |
-| `just test-integration` | integration 测试（连本地 MySQL，需 `.env` 设 `TINY_SQL_TEST_MYSQL_URL`，见 `.env.example`） |
-| `just version <ver>` | 同步更新各配置版本号（如 `just version 0.2.0`） |
-| `just release <tag>` | 🚀 一键发布：更新版本号 + Commit + 打 Tag + 推送触发云端构建（如 `just release v0.1.0`） |
+| `just test-integration` | integration 测试（连本地 MySQL / PostgreSQL，需 `.env` 设 `TINY_SQL_TEST_MYSQL_URL` 与 `TINY_SQL_TEST_POSTGRES_URL`，见 `.env.example`） |
+| `just version <ver>` | 同步更新各配置版本号（如 `just version 0.4.0`） |
+| `just release <tag>` | 🚀 一键发布：更新版本号 + Commit + 打 Tag + 推送触发云端构建（如 `just release v0.4.0`） |
 | `just clean` | 清理构建产物 |
 
 ## 项目结构
@@ -105,7 +113,7 @@ just build-web    # 仅构建前端（静态导出到 out/）
 ```
 crates/                     # Rust workspace 成员（与 Tauri 解耦，未来可独立 publish）
 ├── ssh-multihop/           # N 跳 SSH 隧道（russh，Tauri-free）
-└── db-driver/              # MySQL driver（v0.1 具体 struct，v0.2 extract trait）
+└── db-driver/              # 数据库 driver（对象安全 Driver 契约 + MySQL/PostgreSQL 双实现）
 
 src-tauri/                  # Tauri 壳
 ├── src/
@@ -133,15 +141,15 @@ justfile                    # 项目命令入口
 
 ## 安装
 
-> 从 [v0.1.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.1.0) 下载当前稳定版。
+> 从 [v0.3.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.3.0) 下载当前稳定版。
 
-v0.1.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
+v0.3.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
 
 正式版会在 GitHub Release 中附带 `latest.json` 与签名更新包，应用内自动更新只跟随 GitHub 的 latest 正式版。`v*-rc*`、beta、alpha 预发布版本仍需手动下载验证。
 
 ### macOS 首次打开
 
-v0.1 暂未配置 Apple Developer 代码签名 / notarization。安装 `.dmg` 后首次打开时，优先在 Finder 中对 `tiny-sql.app` 右键选择「打开」，再在系统弹窗中确认打开。
+当前版本暂未配置 Apple Developer 代码签名 / notarization。安装 `.dmg` 后首次打开时，优先在 Finder 中对 `tiny-sql.app` 右键选择「打开」，再在系统弹窗中确认打开。
 
 如果仍提示**"已损坏，无法打开"**，在终端执行：
 
@@ -151,9 +159,9 @@ xattr -cr /Applications/tiny-sql.app
 
 然后重新打开即可。
 
-## v0.1 验收范围
+## v0.1 验收范围（历史）
 
-以下场景用于持续回归 v0.1 的日常多跳 MySQL 查询能力。
+以下场景记录了 v0.1 的日常多跳 MySQL 查询回归场景（已随 v0.1 发布完成验收）。
 
 ### 必验场景
 

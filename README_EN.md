@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**Status: v0.1.0 was officially released on 2026-08-18.** GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, along with signed update packages and `latest.json` manifests for all four platforms. For known limitations and future plans, see [docs/PLAN.md](./docs/PLAN.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Status: v0.3.0 was officially released on 2026-08-22, and v0.4.0-rc1 is in trial.** GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, along with signed update packages and `latest.json` manifests for all four platforms. For version history and future plans, see [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Why another SQL client
 
@@ -21,27 +21,36 @@ tiny-sql makes every hop a first-class citizen in the UI:
 
 Built for personal use, usable by colleagues, and open source. Free of charge, no telemetry, business data stays local; auto-update only fetches the stable release manifest from GitHub Releases.
 
-## Current capabilities (v0.1)
+## Current capabilities
 
-- N-hop SSH configuration and connection: password / private-key authentication, per-session passphrase caching, TOFU host key verification, and hard rejection on fingerprint changes.
-- MySQL SSL/TLS configuration: disabled by default; you can explicitly choose Preferred / Required / Verify CA / Verify Identity and provide CA, client certificate, and private key paths. Acceptance against a real TLS server is not complete yet.
-- MySQL data browsing: list databases / tables, click a table to browse its first 1000 rows.
-- SQL execution: a CodeMirror SQL editor with syntax highlighting, line numbers, basic schema/table completion, and quick execution. The backend rejects empty SQL / multiple statements, automatically appends `LIMIT` when a top-level `SELECT` / `WITH` is safe, and caps results at 100,000 rows.
-- SQL cancellation: records the MySQL `CONNECTION_ID()` at execution time and issues `KILL QUERY` through an independent control pool on cancel.
-- Topology status: a read-only topology graph from local machine → N hops → MySQL, supporting `pending` / `connected` / `failed` / `lost`.
-- Cross-platform packaging: a GitHub Release workflow triggered by `v*` tags produces macOS Apple Silicon + Intel `.dmg`, Windows x64 `.exe`, and Linux x64 `.AppImage`; stable releases also publish the Tauri auto-update manifest.
-- Auto-update: the desktop app checks for stable updates once a day after launch and can also check manually from the macOS app menu; RC / beta / alpha builds are never used as update sources.
+**Connection & SSH**
 
-## Coming in v0.2 (unreleased)
+- N-hop SSH: password / private-key authentication, per-session passphrase caching (optional encrypted persistence), TOFU host key verification, and hard rejection on fingerprint changes.
+- Visualized topology: local machine → N hops → database, showing per-hop `pending / connected / failed / lost` status and cumulative protocol RTT; keepalive detects disconnects within ~180s by default, with manual idempotent reconnect.
 
-- PostgreSQL support: browse schemas, tables, and columns of the connected database; execute, rate-limit, and cancel SQL, with per-connection MySQL/PostgreSQL dialect completion in the editor.
-- Master-password encryption for stored connection credentials.
-- SQL history and multiple query tabs.
-- CSV / Excel export for query results.
-- Resizable result columns (drag to adjust width).
-- Per-hop SSH topology with low-frequency protocol RTT sampling and timeout status.
+**Database**
 
-See [CHANGELOG.md](./CHANGELOG.md) (`[Unreleased]`) for the full list.
+- Dual drivers: MySQL (5.7 / 8.0 / 8.4) and PostgreSQL, with per-connection dialect switching in the editor.
+- Metadata tree: databases / schemas / tables / columns / indexes / constraints loaded on demand, plus object search.
+- Data browsing: server-side filtering / sorting / pagination (no full-table pulls), capped at 100,000 rows.
+
+**SQL editor**
+
+- CodeMirror with dual-dialect highlighting, schema-aware completion, multi-statement execution and formatting; write-operation confirmation; cancellation via an independent control pool.
+- Reliable transactions: `BEGIN` / `COMMIT` / `ROLLBACK` on an exclusive session.
+- SQL file open / save / recent files; SQL history (last 100 entries, encrypted at rest).
+
+**Data workflows**
+
+- Query result export to CSV / Excel (streamed server-side, distinguishing SQL NULL from empty strings).
+- Safe table editing: primary-key single tables only, dirty staging + single-transaction batch commit (v0.4 rc).
+- Structure view + DDL preview + create-table form (v0.4 rc).
+- CSV import + SQL dump import / export (v0.4 rc).
+
+**Security & distribution**
+
+- Connection profiles encrypted at rest (AES-GCM); optional master password (Argon2id) with lock / reset.
+- Cross-platform packaging + stable auto-update (RC / beta / alpha are never update sources).
 
 ## Tech stack
 
@@ -51,9 +60,9 @@ See [CHANGELOG.md](./CHANGELOG.md) (`[Unreleased]`) for the full list.
 | Frontend | Next.js 16 (Turbopack) + React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |
 | Backend | Rust (Edition 2021, MSRV 1.77.2) + Tokio |
 | SSH tunneling | russh 0.54 (N hops, pure Rust async) |
-| Database | sqlx 0.8 (MySQL; PostgreSQL added in v0.2) |
+| Database | sqlx 0.8 (MySQL + PostgreSQL dual drivers) |
 
-> PostgreSQL, master-password encryption, SQL history, multiple query tabs, etc. are delivered in v0.2. See "Coming in v0.2" below and [ROADMAP](./docs/ROADMAP.md) for details.
+See [CHANGELOG.md](./CHANGELOG.md) for the full change history.
 
 ## Development setup
 
@@ -96,9 +105,9 @@ just build-web    # build only the frontend (static export to out/)
 | `just fmt` | Format Rust code |
 | `just fmt-check` | Check formatting without modifying files (used by CI) |
 | `just test` | Rust workspace + frontend Vitest unit tests |
-| `just test-integration` | Integration tests (against a local MySQL; requires `TINY_SQL_TEST_MYSQL_URL` in `.env`, see `.env.example`) |
-| `just version <ver>` | Sync the version number across config files (e.g. `just version 0.2.0`) |
-| `just release <tag>` | 🚀 One-command release: bump version + commit + tag + push to trigger the cloud build (e.g. `just release v0.1.0`) |
+| `just test-integration` | Integration tests (against a local MySQL / PostgreSQL; requires `TINY_SQL_TEST_MYSQL_URL` and `TINY_SQL_TEST_POSTGRES_URL` in `.env`, see `.env.example`) |
+| `just version <ver>` | Sync the version number across config files (e.g. `just version 0.4.0`) |
+| `just release <tag>` | 🚀 One-command release: bump version + commit + tag + push to trigger the cloud build (e.g. `just release v0.4.0`) |
 | `just clean` | Clean build artifacts |
 
 ## Project structure
@@ -106,7 +115,7 @@ just build-web    # build only the frontend (static export to out/)
 ```
 crates/                     # Rust workspace members (decoupled from Tauri, publishable independently in the future)
 ├── ssh-multihop/           # N-hop SSH tunneling (russh, Tauri-free)
-└── db-driver/              # MySQL driver (concrete struct in v0.1, extract trait in v0.2)
+└── db-driver/              # database driver (object-safe Driver contract + MySQL/PostgreSQL impls)
 
 src-tauri/                  # Tauri shell
 ├── src/
@@ -134,15 +143,15 @@ justfile                    # project command entry point
 
 ## Installation
 
-> Download the current stable release from [v0.1.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.1.0).
+> Download the current stable release from [v0.3.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.3.0).
 
-v0.1.0 provides `.dmg` for **macOS (Apple Silicon + Intel)**, `.exe` for **Windows x64**, and `.AppImage` for **Linux x64**.
+v0.3.0 provides `.dmg` for **macOS (Apple Silicon + Intel)**, `.exe` for **Windows x64**, and `.AppImage` for **Linux x64**.
 
 Stable releases ship with `latest.json` and signed update packages on GitHub Releases; in-app auto-update only follows the latest stable release on GitHub. `v*-rc*`, beta, and alpha pre-releases still require manual download and verification.
 
 ### First launch on macOS
 
-v0.1 is not yet signed or notarized with an Apple Developer certificate. After installing the `.dmg`, right-click `tiny-sql.app` in Finder and choose "Open", then confirm in the system dialog.
+The app is not yet signed or notarized with an Apple Developer certificate. After installing the `.dmg`, right-click `tiny-sql.app` in Finder and choose "Open", then confirm in the system dialog.
 
 If you still see **"damaged and can't be opened"**, run in a terminal:
 
@@ -152,9 +161,9 @@ xattr -cr /Applications/tiny-sql.app
 
 Then open the app again.
 
-## v0.1 acceptance scope
+## v0.1 acceptance scope (historical)
 
-The following scenarios continuously regress v0.1's everyday multi-hop MySQL query capabilities.
+The following scenarios document v0.1's everyday multi-hop MySQL query regression checks (accepted with the v0.1 release).
 
 ### Must-verify scenarios
 
@@ -188,7 +197,7 @@ No. There is no telemetry at all; business data stays local. The app only contac
 No. SSH is implemented in pure Rust with russh, so no system `ssh` / `sshpass` is required on any platform.
 
 **Where are my connection credentials stored?**
-Connection profiles are stored locally, with sensitive fields encrypted at rest. A master password for credential encryption is being added in v0.2.
+Connection profiles are stored locally, with sensitive fields encrypted at rest (AES-256-GCM). An optional master password (Argon2id-derived key) can additionally protect credentials.
 
 ## License
 
