@@ -129,7 +129,7 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 - [ ] **V4-T8.1 [4h]** 双 driver × 直连/1 跳/3 跳全功能真实回归：编辑提交/回滚、无主键拒绝、结构查看/DDL 预览、新建表、CSV 导入、dump 闭环。（RC 前自动化门禁已完成，GUI 真实回归随 RC 试用执行）
 - [ ] **V4-T8.2 [3h]** 作者 + 至少 2 位试用者使用 v0.4 RC ≥ 1 周：0 数据丢失、0 凭据泄露、0 不可恢复 crash。（`v0.4.0-rc1` 已发布，试用启动）
 - [x] **V4-T8.3 [3h]** 文档（2026-08-22）：`REQUIREMENTS.md` §3.4 收口标注、`ARCHITECTURE.md` 补 v0.4 扩展点（编辑内核 / 批量插入 / dump 流式分句）与契约签名 / 错误变体 / command 列表、`RELEASE_CHECKLIST.md` v0.4 节、CHANGELOG `[Unreleased]` 已覆盖 v0.4 全部用户可见变更。
-- [x] **V4-T8.4 [2h]** 门禁（2026-08-22）：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 125、Next build）；双 driver integration 32/32（MySQL 19 含编辑批 5 / bulk 2 / dump 往返 1，PG 13 含编辑批 2 / bulk 1 / dump 往返 1）；本机 dmg + updater 签名产物构建成功。
+- [x] **V4-T8.4 [2h]** 门禁（2026-08-22）：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 125、Next build）；双 driver integration 33/33（MySQL 20 含编辑批 5 / bulk 2 / dump 往返 1 / 结构元数据快速回归 1，PG 13 含编辑批 2 / bulk 1 / dump 往返 1）；本机 dmg + updater 签名产物构建成功。
 
 > **v0.4.0-rc1 已发布（2026-08-22，提交 `dbae167`，tag `v0.4.0-rc1`）**：Release run `32554496338` 四平台构建全部成功，prerelease（无 `latest.json`，不影响 v0.3.0 用户）。剩全平台下载安装验收与 V4-T8.2 一周试用 → 正式发布（V4-CP5）。
 

@@ -125,9 +125,9 @@ src-tauri/                  # Tauri 壳
 src/                        # 前端源码（Next.js App Router）
 ├── app/                    # layout / page / globals.css
 ├── components/             # 业务组件（连接表单 / schema 树 / SQL 编辑器 / 拓扑图等）
-├── lib/                    # 工具（tauri-api / sql-guard / sql-editor）
-├── stores/                 # zustand store（connection / session / confirm）
-└── hooks/                  # React hooks（use-update-checker）
+├── lib/                    # 工具（tauri-api / sql-guard / sql-editor / ddl / metadata-cache / sql-completion / column-widths）
+├── stores/                 # zustand store（connection / security / session / confirm）
+└── hooks/                  # React hooks（use-update-checker / use-column-widths）
 
 docs/                       # 项目文档
 ├── REQUIREMENTS.md         # 需求文档

@@ -1272,7 +1272,7 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
   just test-postgres-integration
   ```
   - `just test-integration` 顺序执行两个 driver；任一 URL 缺失都明确失败，避免假绿。
-- 当前真实 MySQL 19 项用例覆盖 ping、四层 metadata、NULL/日期/数值/JSON、写确认、`SELECT SLEEP(10)` 经独立 control pool 取消，以及 v0.4 编辑批量 DML（5）、bulk 导入（2）、dump 风格 SQL 往返（1）。
+- 当前真实 MySQL 20 项用例覆盖 ping、四层 metadata（含结构页元数据快速回归）、NULL/日期/数值/JSON、写确认、`SELECT SLEEP(10)` 经独立 control pool 取消，以及 v0.4 编辑批量 DML（5）、bulk 导入（2）、dump 风格 SQL 往返（1）。
 - 当前真实 PostgreSQL 13 项用例覆盖 ping、四层 metadata、NULL/日期/数值/JSON、行数截断、写确认、`pg_sleep(10)` 原生取消及取消后 pool 恢复，以及 v0.4 编辑批量 DML（2）、bulk 导入（1）、dump 往返（1）。
 - **CI 不跑 integration**（无外部数据库服务器）；正式版前保留人工双 driver 回归。3 跳真实故障 / 断链 / 重连回归已在 v0.2/v0.3 dogfooding 中覆盖。
 

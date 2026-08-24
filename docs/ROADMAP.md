@@ -114,7 +114,7 @@ v0.5+ ── 备份同步 + 用户权限 + ER/BI/AI + 平台与 crate 长期演�
 
 详细任务、依赖、检查点与测试矩阵见 [v0.4 开发计划](./PLAN.md#v04-开发计划)。
 
-**当前进度**：Week 1-7 全部三项 FR + V4-T8.3 文档 + V4-T8.4 门禁已于 2026-08-22 完成，V4-CP0~CP4 全部收口；`just check` 全绿（双 driver integration 32/32），本机 dmg + updater 签名产物构建成功。`v0.4.0-rc1` 同日发布（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）。剩余仅为 V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（V4-CP5，均需用户参与）。
+**当前进度**：Week 1-7 全部三项 FR + V4-T8.3 文档 + V4-T8.4 门禁已于 2026-08-22 完成，V4-CP0~CP4 全部收口；`just check` 全绿（双 driver integration 33/33），本机 dmg + updater 签名产物构建成功。`v0.4.0-rc1` 同日发布（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）。剩余仅为 V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（V4-CP5，均需用户参与）。
 
 | ID | 功能 | 优先级 | 范围边界 |
 |---|---|---|---|

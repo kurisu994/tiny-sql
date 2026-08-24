@@ -6,11 +6,13 @@
 
 ## 当前状态
 
+**本轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
+
 **本轮修复：MySQL 结构页一直加载（2026-08-22）**——用户打开 MySQL 表点「结构」后停在「加载结构…」。根因是 `MySqlDriver::list_constraints` 把 `TABLE_CONSTRAINTS` 与 `KEY_COLUMN_USAGE` JOIN，MySQL 8 information_schema 无法下推 `table_schema/table_name`，会扫全实例数据字典；本机探测 `list_columns`/`list_indexes` ~150ms，旧 JOIN 超过 8s 仍未返回。已拆成两条等值过滤查询。回归：`structure_view_mysql_metadata_completes_quickly` 与 `list_indexes_and_constraints` 均在 3s 内通过。待用户在 GUI 再点一次「结构」确认。
 
-**里程碑：v0.4.0-rc1 已发布（2026-08-22）**——发布前 `just check` 与双 driver integration 32/32 全绿（本机 dmg + updater 签名产物构建成功）；`just release v0.4.0-rc1` 完成版本号更新（四文件 → `0.4.0-rc1`，预发布不切 CHANGELOG）、发布提交 `dbae167`、main 与 tag 推送成功。Release workflow run `32554496338` 四平台全部成功；rc1 为 prerelease（非草稿，无 `latest.json`），不影响 v0.3.0 用户。剩全平台下载安装验收、V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（均需用户参与）。
+**里程碑：v0.4.0-rc1 已发布（2026-08-22）**——发布前 `just check` 与双 driver integration 33/33 全绿（本机 dmg + updater 签名产物构建成功）；`just release v0.4.0-rc1` 完成版本号更新（四文件 → `0.4.0-rc1`，预发布不切 CHANGELOG）、发布提交 `dbae167`、main 与 tag 推送成功。Release workflow run `32554496338` 四平台全部成功；rc1 为 prerelease（非草稿，无 `latest.json`），不影响 v0.3.0 用户。剩全平台下载安装验收、V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（均需用户参与）。
 
-**v0.4 全部编码与自动化门禁完成（2026-08-22）**——按 PLAN.md v0.4 开发计划完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑、FR-251 结构查看/DDL 预览/新建表、FR-252 CSV 导入 + SQL dump 导出导入）+ V4-T8.3 文档 + V4-T8.4 门禁。门禁事实：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 125、Next build）；双 driver integration 32/32；本机 dmg + updater 签名产物构建成功。PLAN.md 逐节点已标注，V4-CP0~CP4 收口，仅 V4-CP5 待发布。
+**v0.4 全部编码与自动化门禁完成（2026-08-22）**——按 PLAN.md v0.4 开发计划完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑、FR-251 结构查看/DDL 预览/新建表、FR-252 CSV 导入 + SQL dump 导出导入）+ V4-T8.3 文档 + V4-T8.4 门禁。门禁事实：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 125、Next build）；双 driver integration 33/33；本机 dmg + updater 签名产物构建成功。PLAN.md 逐节点已标注，V4-CP0~CP4 收口，仅 V4-CP5 待发布。
 
 **v0.4 关键技术决策**（详见「近期决策」）：编辑期不持事务（dirty 暂存前端，提交才短事务批量执行）；UPDATE/DELETE 影响行数 ≠ 1 即冲突回滚；CSV 无引号 NULL 与导出闭环；dump 字符串转义按方言（PG 不转义反斜杠）；StatementSplitter 流式增量分句（split_statements 重构为基于它）。
 

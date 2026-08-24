@@ -127,9 +127,9 @@ src-tauri/                  # Tauri shell
 src/                        # frontend source (Next.js App Router)
 ├── app/                    # layout / page / globals.css
 ├── components/             # business components (connection form / schema tree / SQL editor / topology graph, etc.)
-├── lib/                    # utilities (tauri-api / sql-guard / sql-editor)
-├── stores/                 # zustand stores (connection / session / confirm)
-└── hooks/                  # React hooks (use-update-checker)
+├── lib/                    # utilities (tauri-api / sql-guard / sql-editor / ddl / metadata-cache / sql-completion / column-widths)
+├── stores/                 # zustand stores (connection / security / session / confirm)
+└── hooks/                  # React hooks (use-update-checker / use-column-widths)
 
 docs/                       # project documentation
 ├── REQUIREMENTS.md         # requirements
