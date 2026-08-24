@@ -135,13 +135,13 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ## V5.3 分周任务与验收
 
-### v0.5 Week 1 — ALTER SQL 生成（13h）
+### v0.5 Week 1 — ALTER SQL 生成（13h）✅ 已完成（2026-08-24）
 
-- **V5-T1.1 [4h]** 列差量模型：以当前 `list_columns` 为旧状态，表单为新状态，生成最小 `ALTER TABLE` 语句序列（ADD / DROP / MODIFY 或 PG 的 `ALTER COLUMN` / `TYPE` / `SET DEFAULT` / `DROP DEFAULT` / `SET NOT NULL`）。标识符按方言引用；类型走现有白名单；拒绝注入字符。
-- **V5-T1.2 [5h]** 危险语义显式化：改类型、丢默认值、DROP COLUMN、改空性必须在预览里单独成条，不和 ADD COLUMN 混成一句让用户看漏。双方言生成器单测覆盖复合主键表、重命名不做（v0.5 不承诺 `RENAME COLUMN`，避免隐式数据迁移）。
-- **V5-T1.3 [4h]** 不在后端「聪明执行」：command 只负责跑用户确认过的 SQL 文本（走现有 `db_query` + 写确认），生成纯函数放前端 `ddl.ts`（或并列模块），便于单测、也避免再开一条 DDL 契约面。
+- **V5-T1.1 [4h]** ✅ 列差量模型：`buildAlterTableStatements` 以 `list_columns` 为旧状态、表单为新状态，生成 ADD / DROP / MODIFY（PG 为 TYPE / SET|DROP DEFAULT / SET|DROP NOT NULL）。标识符按方言引用；类型走现有白名单。
+- **V5-T1.2 [5h]** ✅ 危险语义显式化：改类型、丢默认值、DROP COLUMN、改空性各自独立成句，不与 ADD 合并；顺序为 ADD → 改列 → DROP。单测覆盖复合主键、拒绝 RENAME / 删主键 / 非法类型。
+- **V5-T1.3 [4h]** ✅ 生成纯函数放 `src/lib/ddl.ts`，不新开 DDL 契约面；执行仍走现有 `db_query` + 写确认。
 
-验收：双方言列级 ALTER 预览稳定可测；**V5-CP1** 通过后进入 Week 2。
+验收：双方言列级 ALTER 预览稳定可测（ddl.test.ts 15/15）；**V5-CP1 已通过（2026-08-24）**，进入 Week 2。
 
 ### v0.5 Week 2 — 修改表 UI 闭环（13h）
 
@@ -205,7 +205,7 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 | 检查点 | 时机 | 通过标准 | 状态 |
 |---|---|---|---|
 | **V5-CP0** 启动准入 | 开工前 | §V5.1 全部完成 | ⏳ 待 v0.4.0 |
-| **V5-CP1** ALTER 生成 | Week 1 末 | 双方言列级差量 SQL 可单测 | ⏳ |
+| **V5-CP1** ALTER 生成 | Week 1 末 | 双方言列级差量 SQL 可单测 | ✅ 2026-08-24 |
 | **V5-CP2** 结构变更闭环 | Week 3 末 | 修改表 + 索引增删可用 | ⏳ |
 | **V5-CP3** 官方备份 | Week 5 末 | MySQL 备份→恢复闭环 | ⏳ |
 | **V5-CP4** 连接分享 | Week 7 末 | 导出→另一机导入 secret 可用 | ⏳ |

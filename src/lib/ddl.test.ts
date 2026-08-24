@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAlterTableSql,
+  buildAlterTableStatements,
   buildCreateTableSql,
   buildPostgresCreateTablePreview,
   isValidDataType,
+  validateAlterTable,
   validateCreateTable,
+  type AlterColumnInput,
+  type AlterTableInput,
   type CreateTableInput,
 } from "@/lib/ddl";
 import type { ColumnMeta, ConstraintMeta, IndexMeta } from "@/lib/tauri-api";
@@ -201,5 +206,219 @@ describe("buildCreateTableSql（FR-251 新建表）", () => {
     expect(isValidDataType("int); DROP")).toBe(false);
     expect(isValidDataType("int --")).toBe(false);
     expect(isValidDataType("")).toBe(false);
+  });
+});
+
+describe("buildAlterTableStatements（FR-253 修改表）", () => {
+  function alterCol(
+    originName: string | null,
+    overrides: Partial<AlterColumnInput> = {},
+  ): AlterColumnInput {
+    return {
+      originName,
+      name: originName ?? "new_col",
+      dataType: "int",
+      nullable: true,
+      defaultValue: "",
+      ...overrides,
+    };
+  }
+
+  function mysqlInput(overrides: Partial<AlterTableInput> = {}): AlterTableInput {
+    return {
+      driver: "mysql",
+      database: "app",
+      table: "users",
+      original: [
+        col({ name: "id", dataType: "int", nullable: false, columnKey: "PRI" }),
+        col({ name: "name", dataType: "varchar(50)", nullable: true }),
+      ],
+      columns: [
+        alterCol("id", { dataType: "int", nullable: false }),
+        alterCol("name", { dataType: "varchar(50)", nullable: true }),
+      ],
+      ...overrides,
+    };
+  }
+
+  it("无变更时输出空序列", () => {
+    expect(buildAlterTableStatements(mysqlInput())).toEqual([]);
+    expect(buildAlterTableSql(mysqlInput())).toBe("");
+  });
+
+  it("MySQL：ADD / DROP / 改类型各自独立成句，不与 ADD 合并", () => {
+    const statements = buildAlterTableStatements(
+      mysqlInput({
+        columns: [
+          alterCol("id", { dataType: "int", nullable: false }),
+          alterCol("name", { dataType: "varchar(100)", nullable: true }),
+          alterCol(null, { name: "note", dataType: "text", nullable: true }),
+        ],
+      }),
+    );
+    expect(statements.map((s) => s.sql)).toEqual([
+      "ALTER TABLE `app`.`users` ADD COLUMN `note` text;",
+      "ALTER TABLE `app`.`users` MODIFY COLUMN `name` varchar(100);",
+    ]);
+    expect(statements.find((s) => s.kind === "add")?.dangerous).toBe(false);
+    expect(statements.find((s) => s.kind === "modify_type")?.dangerous).toBe(true);
+  });
+
+  it("MySQL：改类型、改空性、丢默认值拆成三条危险语句", () => {
+    const statements = buildAlterTableStatements(
+      mysqlInput({
+        original: [
+          col({ name: "id", dataType: "int", nullable: false, columnKey: "PRI" }),
+          col({
+            name: "age",
+            dataType: "int",
+            nullable: true,
+            defaultValue: "0",
+          }),
+        ],
+        columns: [
+          alterCol("id", { dataType: "int", nullable: false }),
+          alterCol("age", {
+            dataType: "bigint",
+            nullable: false,
+            defaultValue: "",
+          }),
+        ],
+      }),
+    );
+    expect(statements).toHaveLength(3);
+    expect(statements[0]).toMatchObject({ kind: "modify_type", dangerous: true });
+    expect(statements[0].sql).toBe(
+      "ALTER TABLE `app`.`users` MODIFY COLUMN `age` bigint DEFAULT 0;",
+    );
+    expect(statements[1]).toMatchObject({
+      kind: "set_not_null",
+      dangerous: true,
+    });
+    expect(statements[1].sql).toBe(
+      "ALTER TABLE `app`.`users` MODIFY COLUMN `age` bigint NOT NULL DEFAULT 0;",
+    );
+    expect(statements[2]).toMatchObject({
+      kind: "drop_default",
+      dangerous: true,
+    });
+    expect(statements[2].sql).toBe(
+      "ALTER TABLE `app`.`users` ALTER COLUMN `age` DROP DEFAULT;",
+    );
+  });
+
+  it("PostgreSQL：TYPE / SET NOT NULL / DROP DEFAULT / ADD / DROP 分句", () => {
+    const statements = buildAlterTableStatements({
+      driver: "postgresql",
+      database: "app",
+      schema: "public",
+      table: "users",
+      original: [
+        col({ name: "id", dataType: "integer", nullable: false, columnKey: "PRI" }),
+        col({
+          name: "name",
+          dataType: "character varying(50)",
+          nullable: true,
+          defaultValue: "''",
+        }),
+        col({ name: "legacy", dataType: "text", nullable: true }),
+      ],
+      columns: [
+        alterCol("id", { dataType: "integer", nullable: false }),
+        alterCol("name", {
+          dataType: "text",
+          nullable: false,
+          defaultValue: "",
+        }),
+        alterCol(null, { name: "email", dataType: "text", nullable: true }),
+      ],
+    });
+    expect(statements.map((s) => s.sql)).toEqual([
+      'ALTER TABLE "public"."users" ADD COLUMN "email" text;',
+      'ALTER TABLE "public"."users" ALTER COLUMN "name" TYPE text;',
+      'ALTER TABLE "public"."users" ALTER COLUMN "name" SET NOT NULL;',
+      'ALTER TABLE "public"."users" ALTER COLUMN "name" DROP DEFAULT;',
+      'ALTER TABLE "public"."users" DROP COLUMN "legacy";',
+    ]);
+    expect(statements.filter((s) => s.dangerous).map((s) => s.kind)).toEqual([
+      "modify_type",
+      "set_not_null",
+      "drop_default",
+      "drop",
+    ]);
+  });
+
+  it("复合主键表：不删除主键列，只改非主键列", () => {
+    const input: AlterTableInput = {
+      driver: "mysql",
+      database: "app",
+      table: "kv",
+      original: [
+        col({ name: "a", dataType: "int", nullable: false, columnKey: "PRI" }),
+        col({ name: "b", dataType: "int", nullable: false, columnKey: "PRI" }),
+        col({ name: "val", dataType: "text", nullable: true }),
+      ],
+      columns: [
+        alterCol("a", { dataType: "int", nullable: false }),
+        alterCol("b", { dataType: "int", nullable: false }),
+        alterCol("val", { dataType: "varchar(20)", nullable: true }),
+      ],
+    };
+    expect(validateAlterTable(input)).toBeNull();
+    expect(buildAlterTableSql(input)).toBe(
+      "ALTER TABLE `app`.`kv` MODIFY COLUMN `val` varchar(20);",
+    );
+  });
+
+  it("标识符转义 + 拒绝重命名 / 删主键 / 非法类型", () => {
+    expect(
+      buildAlterTableSql(
+        mysqlInput({
+          table: 'we`ird',
+          columns: [
+            alterCol("id", { dataType: "int", nullable: false }),
+            alterCol("name", {
+              name: "name",
+              dataType: "varchar(50)",
+              nullable: true,
+            }),
+            alterCol(null, { name: 'c`1', dataType: "int", nullable: true }),
+          ],
+        }),
+      ),
+    ).toContain("ADD COLUMN `c``1` int");
+
+    expect(
+      validateAlterTable(
+        mysqlInput({
+          columns: [
+            alterCol("id", { name: "uid", dataType: "int", nullable: false }),
+            alterCol("name", { dataType: "varchar(50)", nullable: true }),
+          ],
+        }),
+      ),
+    ).toContain("不支持重命名");
+
+    expect(
+      validateAlterTable(
+        mysqlInput({
+          columns: [alterCol("name", { dataType: "varchar(50)", nullable: true })],
+        }),
+      ),
+    ).toBe("不能删除主键列「id」");
+
+    expect(
+      validateAlterTable(
+        mysqlInput({
+          columns: [
+            alterCol("id", { dataType: "int", nullable: false }),
+            alterCol("name", {
+              dataType: "int); DROP TABLE t",
+              nullable: true,
+            }),
+          ],
+        }),
+      ),
+    ).toContain("类型不合法");
   });
 });

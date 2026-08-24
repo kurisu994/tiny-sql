@@ -176,3 +176,256 @@ export function buildPostgresCreateTablePreview(
 
   return statements.join("\n\n");
 }
+
+// === 修改表 SQL 生成（FR-253）===
+
+/** 修改表单中的一列。v0.5 不改主键、不做 RENAME。 */
+export interface AlterColumnInput {
+  /** 原列名；新增列为 null */
+  originName: string | null;
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  /** 默认值表达式（空 = 无默认值） */
+  defaultValue: string;
+}
+
+/** 修改表输入：original 为当前服务端列，columns 为表单目标态 */
+export interface AlterTableInput {
+  driver: "mysql" | "postgresql";
+  database: string;
+  schema?: string | null;
+  table: string;
+  original: ColumnMeta[];
+  columns: AlterColumnInput[];
+}
+
+/** 单条 ALTER 的语义分类，便于预览里把危险语句单独成条 */
+export type AlterKind =
+  | "add"
+  | "drop"
+  | "modify_type"
+  | "set_not_null"
+  | "drop_not_null"
+  | "set_default"
+  | "drop_default";
+
+/** 一条独立 ALTER TABLE 语句 */
+export interface AlterStatement {
+  kind: AlterKind;
+  sql: string;
+  /** 改类型 / 丢默认值 / DROP COLUMN / 改空性 */
+  dangerous: boolean;
+}
+
+function qualifiedTable(input: {
+  driver: "mysql" | "postgresql";
+  database: string;
+  schema?: string | null;
+  table: string;
+}): string {
+  if (input.driver === "mysql") {
+    return `${quoteMysqlIdent(input.database)}.${quoteMysqlIdent(input.table.trim())}`;
+  }
+  return `${quoteIdent(input.schema?.trim() || "public")}.${quoteIdent(input.table.trim())}`;
+}
+
+function normalizeType(dataType: string): string {
+  return dataType.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeDefault(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed === "" ? null : trimmed;
+}
+
+function isPrimaryColumn(column: ColumnMeta): boolean {
+  return column.columnKey === "PRI";
+}
+
+/** 修改表单校验：返回首个错误文案，合法返回 null */
+export function validateAlterTable(input: AlterTableInput): string | null {
+  if (!input.table.trim()) return "表名不能为空";
+  if (input.columns.length === 0) return "至少需要一列";
+  for (const column of input.columns) {
+    if (!column.name.trim()) return "列名不能为空";
+    if (!isValidDataType(column.dataType)) {
+      return `列「${column.name}」类型不合法：${column.dataType}`;
+    }
+    if (
+      column.originName &&
+      column.originName.trim().toLowerCase() !== column.name.trim().toLowerCase()
+    ) {
+      return `不支持重命名列「${column.originName}」（请用 SQL）`;
+    }
+  }
+  const names = input.columns.map((c) => c.name.trim().toLowerCase());
+  if (new Set(names).size !== names.length) return "列名不能重复";
+
+  const kept = new Set(
+    input.columns
+      .filter((c) => c.originName)
+      .map((c) => c.originName!.trim().toLowerCase()),
+  );
+  for (const original of input.original) {
+    if (isPrimaryColumn(original) && !kept.has(original.name.toLowerCase())) {
+      return `不能删除主键列「${original.name}」`;
+    }
+  }
+  return null;
+}
+
+function mysqlColumnDef(
+  column: { dataType: string; nullable: boolean; defaultValue: string },
+): string {
+  let def = column.dataType.trim();
+  if (!column.nullable) def += " NOT NULL";
+  const defaultValue = normalizeDefault(column.defaultValue);
+  if (defaultValue !== null) def += ` DEFAULT ${defaultValue}`;
+  return def;
+}
+
+/**
+ * 生成双方言列级 ALTER 语句序列（FR-253）。
+ * 每条危险语义独立成句，不与 ADD COLUMN 合并。调用前须先过 [`validateAlterTable`]。
+ */
+export function buildAlterTableStatements(input: AlterTableInput): AlterStatement[] {
+  const quote = input.driver === "mysql" ? quoteMysqlIdent : quoteIdent;
+  const table = qualifiedTable(input);
+  const originals = new Map(
+    input.original.map((column) => [column.name.toLowerCase(), column]),
+  );
+  const kept = new Set<string>();
+  const adds: AlterStatement[] = [];
+  const changes: AlterStatement[] = [];
+  const drops: AlterStatement[] = [];
+
+  const push = (
+    bucket: AlterStatement[],
+    kind: AlterKind,
+    clause: string,
+    dangerous: boolean,
+  ) => {
+    bucket.push({
+      kind,
+      sql: `ALTER TABLE ${table} ${clause};`,
+      dangerous,
+    });
+  };
+
+  for (const column of input.columns) {
+    const key = (column.originName ?? column.name).trim().toLowerCase();
+    if (!column.originName) {
+      if (input.driver === "mysql") {
+        push(
+          adds,
+          "add",
+          `ADD COLUMN ${quote(column.name.trim())} ${mysqlColumnDef(column)}`,
+          false,
+        );
+      } else {
+        let clause = `ADD COLUMN ${quote(column.name.trim())} ${column.dataType.trim()}`;
+        if (!column.nullable) clause += " NOT NULL";
+        const defaultValue = normalizeDefault(column.defaultValue);
+        if (defaultValue !== null) clause += ` DEFAULT ${defaultValue}`;
+        push(adds, "add", clause, false);
+      }
+      continue;
+    }
+
+    const original = originals.get(key);
+    if (!original) continue;
+    kept.add(key);
+
+    const typeChanged =
+      normalizeType(original.dataType) !== normalizeType(column.dataType);
+    const nullChanged = original.nullable !== column.nullable;
+    const oldDefault = normalizeDefault(original.defaultValue);
+    const newDefault = normalizeDefault(column.defaultValue);
+    const defaultChanged = oldDefault !== newDefault;
+
+    if (input.driver === "mysql") {
+      if (typeChanged) {
+        // 改类型时沿用旧空性与旧默认，避免和改空性/默认混在一句
+        push(
+          changes,
+          "modify_type",
+          `MODIFY COLUMN ${quote(column.name.trim())} ${mysqlColumnDef({
+            dataType: column.dataType,
+            nullable: original.nullable,
+            defaultValue: oldDefault ?? "",
+          })}`,
+          true,
+        );
+      }
+      if (nullChanged) {
+        push(
+          changes,
+          original.nullable ? "set_not_null" : "drop_not_null",
+          `MODIFY COLUMN ${quote(column.name.trim())} ${mysqlColumnDef({
+            dataType: column.dataType,
+            nullable: column.nullable,
+            defaultValue: oldDefault ?? "",
+          })}`,
+          true,
+        );
+      }
+    } else {
+      if (typeChanged) {
+        push(
+          changes,
+          "modify_type",
+          `ALTER COLUMN ${quote(column.name.trim())} TYPE ${column.dataType.trim()}`,
+          true,
+        );
+      }
+      if (nullChanged) {
+        push(
+          changes,
+          original.nullable ? "set_not_null" : "drop_not_null",
+          `ALTER COLUMN ${quote(column.name.trim())} ${column.nullable ? "DROP NOT NULL" : "SET NOT NULL"}`,
+          true,
+        );
+      }
+    }
+
+    if (defaultChanged) {
+      if (newDefault === null) {
+        push(
+          changes,
+          "drop_default",
+          `ALTER COLUMN ${quote(column.name.trim())} DROP DEFAULT`,
+          true,
+        );
+      } else {
+        push(
+          changes,
+          "set_default",
+          `ALTER COLUMN ${quote(column.name.trim())} SET DEFAULT ${newDefault}`,
+          false,
+        );
+      }
+    }
+  }
+
+  for (const original of input.original) {
+    if (kept.has(original.name.toLowerCase())) continue;
+    if (
+      input.columns.some(
+        (c) => !c.originName && c.name.trim().toLowerCase() === original.name.toLowerCase(),
+      )
+    ) {
+      continue;
+    }
+    push(drops, "drop", `DROP COLUMN ${quote(original.name)}`, true);
+  }
+
+  return [...adds, ...changes, ...drops];
+}
+
+/** 将 ALTER 序列拼成预览文本（每条独立成行） */
+export function buildAlterTableSql(input: AlterTableInput): string {
+  return buildAlterTableStatements(input)
+    .map((item) => item.sql)
+    .join("\n");
+}
