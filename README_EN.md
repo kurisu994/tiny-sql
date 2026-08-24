@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**Status: v0.3.0 was officially released on 2026-08-22, and v0.4.0-rc1 is in trial.** GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, along with signed update packages and `latest.json` manifests for all four platforms. For version history and future plans, see [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Status: the latest stable GitHub Release is v0.3.0; the repo version string is `0.4.0-rc1`.** `main` already contains the v0.4–v0.6 feature code (GUI/RC and official cuts still pending). GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Why another SQL client
 
@@ -43,9 +43,10 @@ Built for personal use, usable by colleagues, and open source. Free of charge, n
 **Data workflows**
 
 - Query result export to CSV / Excel (streamed server-side, distinguishing SQL NULL from empty strings).
-- Safe table editing: primary-key single tables only, dirty staging + single-transaction batch commit (v0.4 rc).
-- Structure view + DDL preview + create-table form (v0.4 rc).
-- CSV import + SQL dump import / export (v0.4 rc).
+- Safe table editing: primary-key single tables only, dirty staging + single-transaction batch commit.
+- Structure view / DDL preview / create and alter table / index designer.
+- CSV import + SQL dump import/export; official mysqldump/pg_dump backup (local tools required).
+- Encrypted connection sharing; two-connection schema diff and reviewable sync SQL; read-only ER diagram.
 
 **Security & distribution**
 
@@ -127,15 +128,15 @@ src-tauri/                  # Tauri shell
 src/                        # frontend source (Next.js App Router)
 ├── app/                    # layout / page / globals.css
 ├── components/             # business components (connection form / schema tree / SQL editor / topology graph, etc.)
-├── lib/                    # utilities (tauri-api / sql-guard / sql-editor / ddl / metadata-cache / sql-completion / column-widths)
-├── stores/                 # zustand stores (connection / security / session / confirm)
-└── hooks/                  # React hooks (use-update-checker / use-column-widths)
+├── lib/                    # tauri-api / ddl / schema-diff / schema-sync / schema-er / metadata-cache
+├── stores/                 # zustand (connection / security / session / confirm)
+└── hooks/                  # use-update-checker / use-column-widths
 
 docs/                       # project documentation
 ├── REQUIREMENTS.md         # requirements
-├── PLAN.md                 # development plan (weekly)
-├── ARCHITECTURE.md         # architecture (data flow / state machines / error model)
-└── ROADMAP.md              # roadmap (v0.1 / v0.2 / v0.3-v0.5+)
+├── PLAN.md                 # remaining work only
+├── ARCHITECTURE.md         # architecture
+└── ROADMAP.md              # roadmap
 
 CHANGELOG.md                # changelog
 justfile                    # project command entry point

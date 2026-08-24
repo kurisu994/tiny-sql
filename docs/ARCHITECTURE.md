@@ -1,8 +1,8 @@
 ---
 title: tiny-sql 架构设计
-version: 0.4.0-draft-1
+version: 0.6.0-draft-1
 status: draft
-last_updated: 2026-08-22
+last_updated: 2026-08-24
 ---
 
 # tiny-sql 架构设计
@@ -53,6 +53,8 @@ tiny-sql/
 │       │   ├── transaction.rs    # transaction_begin / query / commit / rollback / close（FR-244）
 │       │   ├── import.rs         # csv_import_preview / db_import_csv（FR-252）
 │       │   ├── dump.rs           # db_export_dump / db_import_dump（FR-252）
+│       │   ├── backup.rs         # backup_probe_tools / db_backup_export / db_backup_restore（FR-260）
+│       │   ├── share.rs          # connection_share_export / preview / import（FR-221）
 │       │   ├── sql_file.rs       # sql_file_read / write / recent_list / touch / remove（FR-240）
 │       │   ├── security.rs       # security_status / setup / unlock / lock / disable / reset（FR-102）
 │       │   ├── history.rs        # history_list / history_clear（FR-106）
@@ -69,9 +71,10 @@ tiny-sql/
 │       └── state.rs              # AppState（连接注册表 / 事务 session / passphrase 缓存 / security / history / recent_files）
 ├── src/                           # Next.js 16 前端
 │   ├── app/                       # App Router pages
-│   ├── components/
-│   ├── lib/
-│   └── stores/                    # zustand
+│   ├── components/                # 含 compare-view / er-view / alter-table / backup / share
+│   ├── lib/                       # tauri-api / ddl / schema-diff / schema-sync / schema-er
+│   ├── stores/                    # session.openSessions：切换焦点不关旧连接
+│   └── hooks/
 ├── public/
 ├── package.json
 └── docs/                          # 本目录
@@ -663,7 +666,7 @@ impl OpenConnection {
 | `connection_delete` | `id` | `()` | 加密落盘后删 |
 | `connection_test` | `(config, passphrase?)` | `()` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；passphrase 只用于本次测试，不持久化或缓存 |
 | `connection_open` | `(id, passphrase?, remember_passphrase?)` | `session_id` | 建立持久连接并注册到 AppState；remember_passphrase 在主密码解锁时加密持久化 passphrase |
-| `connection_reconnect` | `(id, expected_session_id?, passphrase?)` | `session_id` | 仅在期望 session 仍为当前值时取消旧查询、关闭旧 pool/tunnel 并建立新 session |
+| `connection_reconnect` | `(id, expected_session_id?, passphrase?, database_override?)` | `session_id` | 仅在期望 session 仍为当前值时取消旧查询、关闭旧 pool/tunnel 并建立新 session；`database_override` 仅本次 session 生效 |
 | `connection_close` | `(id, expected_session_id?)` | `()` | 仅关闭匹配 session；迟到关闭幂等忽略 |
 | `db_create_database` | `(id, name, charset?, collation?)` | `()` | MySQL 专属创建 database；其他 driver 返回不支持 |
 | `db_list_databases` | `id` | `Vec<DatabaseMeta>` | 列出 database |

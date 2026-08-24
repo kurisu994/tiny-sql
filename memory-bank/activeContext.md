@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**本轮：v0.6 功能开发完成（2026-08-24）**——跳过 V6-CP0，落地 FR-220 / FR-261 / FR-263。切换连接不再拆旧隧道；工作台可对比、生成同步 SQL、看只读 ER。`just check` 全绿（vitest 153）。剩用户 V6-T8.1 / T8.2。
+**本轮：PLAN 归档 + 文档按代码对齐（2026-08-24）**——PLAN 只留 v0.4/v0.5/v0.6 用户验收。事实：版本号 `0.4.0-rc1`、command 50/50 前后端一致、`connection_reconnect` 含 `database_override`、结构化错误不限于 `db_query`。README / ARCHITECTURE / techContext / REQUIREMENTS 已按代码改。
 
 **前一轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
 
@@ -166,9 +166,8 @@
 
 ## 下一步（按优先级）
 
-1. V6-T8.1：GUI 实测对比 / 同步脚本 / 关系图（先开两条连接）。
-2. V6-T8.2：RC 试用。
-3. v0.4 / v0.5 正式发布仍可并行。
+1. 用户 GUI 验收 v0.4 / v0.5 / v0.6（对比台先开两条连接）。
+2. 按需 `just release` 切正式版（版本号仍停在 0.4.0-rc1）。
 
 ## 阻塞 / 风险
 

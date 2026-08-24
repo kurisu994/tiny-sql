@@ -59,7 +59,7 @@
 | MSRV | 1.77.2 | `rust-version` |
 | Node | 见 `.nvmrc` | CI 用 Node 24 |
 | pnpm | 11+ | pnpm-workspace.yaml |
-| 应用版本 | 0.1.0 | package.json / Cargo.lock / src-tauri/Cargo.toml / tauri.conf.json |
+| 应用版本 | 0.4.0-rc1 | package.json / src-tauri/Cargo.toml / tauri.conf.json（稳定 Release 仍为 v0.3.0） |
 
 ## 构建命令（justfile，`set dotenv-load`）
 

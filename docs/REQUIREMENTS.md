@@ -9,7 +9,7 @@ last_updated: 2026-08-24
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-24）**：v0.3.0 已正式发布；v0.4 / v0.5 功能编码完成，待用户 GUI/RC 验收。v0.6 范围见 §3.6（草案）。后续版本以 [ROADMAP.md](./ROADMAP.md) 为准，实施计划以 [PLAN.md](./PLAN.md) 为准。
+> **实现快照（2026-08-24）**：应用版本号为 `0.4.0-rc1`；稳定 Release 仍是 v0.3.0。main 已包含 v0.4–v0.6 功能编码（50 个 command），待各版 GUI/RC 与正式切版。后续以 [ROADMAP.md](./ROADMAP.md) / [PLAN.md](./PLAN.md) 为准。
 
 ## 1. 项目愿景
 
@@ -306,13 +306,13 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-111** 结果表格列宽拖拽调整（v0.2 已实现：拖拽 + localStorage 持久化 + 恢复默认）
 - **FR-112** schema 树列清单展示
 
-实施顺序、验收门槛与降级规则见 [v0.2 开发计划](./PLAN.md#v02-开发计划)。
+实施顺序与历史见 [progress.md](../memory-bank/progress.md)。
 
 ---
 
 ### 3.3 v0.3 范围（查询与浏览效率 + 可靠事务）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.3 开发计划](./PLAN.md#v03-开发计划)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md](../memory-bank/progress.md)。
 
 - **FR-242** 表数据服务端筛选、排序和分页（P0）：WHERE 列白名单 + 操作符枚举 + 值全参数化，LIMIT/OFFSET 分页与总行数 COUNT，双方言各自标识符引用；禁止先拉全表再在前端处理。
 - **FR-244** 连接绑定的独占 session 与可靠事务（P0）：`BEGIN` / `COMMIT` / `ROLLBACK` 固定同一 connection；session 独立于 pool 限额并有空闲超时强制回收；断链即事务消亡，不提供「重连续事务」；是 v0.4 安全编辑（FR-250）的前置能力。
@@ -320,13 +320,13 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-241** index / constraint 元数据树与数据库对象搜索（P1）：MySQL `information_schema` 与 PostgreSQL `pg_index` / `pg_constraint` 双方言实现，接入 v0.2 LRU cache 失效链；搜索按名称过滤并定位展开树节点；column 树仍由 FR-112 负责。
 - **FR-243** 多结果 tab 与 SQL 格式化（P1）：保持「单语句直接执行」护栏不变；「执行全部」由后端按方言分号状态机拆分逐条执行，每条独立 guard 分类与写确认，边界不确定即拒绝执行；一次执行保留多个结果集；多查询 tab 仍由 FR-109 负责。
 
-实施顺序、验收门槛与降级规则见 [v0.3 开发计划](./PLAN.md#v03-开发计划)。
+实施顺序与历史见 [progress.md](../memory-bank/progress.md)。
 
 ---
 
 ### 3.4 v0.4 范围（安全数据维护与对象管理）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.4 开发计划](./PLAN.md#v04-开发计划)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.4 归档](../memory-bank/progress.md#v04-已交付周计划归档)。
 
 > **实现状态（2026-08-22）**：三项 FR 代码与自动化门禁已全部完成，integration 双 driver 全绿（编辑批 7 项 + bulk_insert 3 项 + dump 往返 2 项）；`v0.4.0-rc1` 已发布（prerelease，四平台构建成功）；待 V4-T8.1 真实环境回归、V4-T8.2 一周试用与正式发布。
 
@@ -334,13 +334,13 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-251** 结构查看、DDL 预览与新建表（P1）：v0.4 范围为完整结构查看（列定义 + 已有索引 / 约束）、建表 DDL 预览（MySQL `SHOW CREATE TABLE`，PostgreSQL 由元数据拼装）与「新建表」结构化表单（生成 SQL 预览 → 二次确认后执行）；修改表与索引 / 约束设计器按反馈顺延，不在 v0.4 承诺。执行任何 DDL 必须先展示 SQL 预览并二次确认。
 - **FR-252** CSV 导入与 SQL dump 导入 / 导出（P1）：CSV 导入带列映射预览、类型转换、批量参数化 INSERT 与错误行策略（中止 / 跳过并报告）；表 / 库级 SQL dump 导出为 INSERT 语句文件，导入按大文件流式拆分执行（复用 FR-243 分号状态机）并带进度与失败定位；禁止整文件读入内存。CSV / Excel 查询结果导出仍由 FR-107 负责，本项不含备份 / 恢复语义（FR-260）。
 
-实施顺序、验收门槛与降级规则见 [v0.4 收口计划](./PLAN.md#v04-收口计划)。
+实施顺序与验收见 [PLAN](./PLAN.md) 与 [RELEASE_CHECKLIST v0.4](./RELEASE_CHECKLIST.md#v04-发布检查清单)。
 
 ---
 
 ### 3.5 v0.5 范围（结构变更、官方备份与连接协作）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.5 开发计划](./PLAN.md#v05-开发计划)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.5 归档](../memory-bank/progress.md#v05-已交付周计划归档)。
 
 > **实现状态（2026-08-24）**：三项 FR 编码与自动化单测已完成；GUI 真实回归与 RC 试用由用户验收（V5-T8.1 / T8.2）。
 
@@ -348,13 +348,13 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-260** 官方工具备份与恢复（P1）：编排本机 `mysqldump` / `mysql`（PG 的 `pg_dump` / `pg_restore` 争取同版本交付），经已建立隧道的本地端口读写文件，提供进度、取消、日志与失败中止。不自行发明备份格式，也不把 FR-252 SQL dump 冒充备份。恢复必须手输目标库名。范围是当前库 / schema 或单表，不做全实例。
 - **FR-221** 加密分享连接配置（P1）：用独立口令导出选中连接到自描述信封文件，同事用同一口令导入；不导出 `master.key`，默认不打包私钥文件内容，导入一律新 id 且不带入对方 `known_hosts`。
 
-实施顺序、验收门槛与降级规则见 [v0.5 收口](./PLAN.md#待用户验收v04--v05-收口)。
+实施顺序与验收见 [PLAN](./PLAN.md) 与 [RELEASE_CHECKLIST v0.5](./RELEASE_CHECKLIST.md#v05-发布检查清单)。
 
 ---
 
 ### 3.6 v0.6 范围（结构对比、可审阅同步与关系图）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.6 开发计划](./PLAN.md#v06-开发计划)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.6 归档](../memory-bank/progress.md#v06-已交付周计划归档)。
 
 > **实现状态（2026-08-24）**：三项 FR 编码与单测已完成；GUI/RC 由用户验收（V6-T8.1 / T8.2）。
 
@@ -362,7 +362,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-261** 结构同步脚本（P1）：由 diff 按用户选定方向生成可审阅 SQL（CREATE/DROP/ALTER/索引/约束），确认后才在目标连接执行。v0.6 **不做数据拷贝 / 行级同步**。跨 driver 禁止生成执行脚本。
 - **FR-263** 只读 ER（P1）：用已有外键元数据画当前 schema 的表关系；点击定位结构页。不做正向工程、不持久化拖拽布局。
 
-实施顺序、验收门槛与降级规则见 [v0.6 开发计划](./PLAN.md#v06-开发计划)。
+实施顺序与验收见 [PLAN](./PLAN.md) 与 [RELEASE_CHECKLIST v0.6](./RELEASE_CHECKLIST.md#v06-发布检查清单)。
 
 ---
 

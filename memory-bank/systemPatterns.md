@@ -50,8 +50,8 @@ tiny-sql/
 ├── src-tauri/
 │   ├── src/lib.rs · main.rs    # setup 装配 store/known_hosts + 注册 command
 │   ├── src/state.rs · tofu.rs  # AppState(注册表/passphrase 缓存) + SshTofuManager
-│   ├── src/commands/           # connection(open/close/CRUD/test) · query(db_*) · ssh_tofu
-│   ├── src/config/             # encryption · store · ssh_known_hosts
+│   ├── src/commands/           # connection / query / backup / share / dump / transaction / ...
+│   ├── src/config/             # encryption · store · history · recent_files · ssh_known_hosts
 │   ├── capabilities/default.json · tauri.conf.json · icons/
 ├── src/                        # app/ · components/(connection-form/dialogs/schema-browser)
 │                               #   stores/(connection-store/session-store) · lib/tauri-api.ts
@@ -72,7 +72,7 @@ tiny-sql/
 - `Driver` 使用装箱 Future 保持对象安全，不引入 `async-trait`；取消令牌作为 query 契约的一部分，由具体 driver 映射为原生取消机制。
 - metadata 通过 `MetadataScope { database, schema }` 显式表达层级；MySQL schema 与 database 同义，PostgreSQL schema 是独立层级且不能在同一连接上跨 database 查询。
 - `DriverError` 的 `Display` 只输出稳定 i18n key；sqlx 原始错误只保留在后端结构化字段，Tauri command 不得返回 `to_string()` 原文。
-- `db_query` 是唯一返回结构化错误的 command：`{ key, line? }` 只允许稳定 i18n key 与正整数行号，禁止把 sqlx/MySQL 原文或 SQL 片段放入 IPC。
+- 查询 / dump / 备份 / 分享等 command 对外错误用 `{ key, line?, editIndex? }`，只允许稳定 i18n key 与安全序号，禁止把 sqlx/数据库原文或 SQL 片段放入 IPC。
 - 连接配置的 `driver` 使用稳定值 `mysql` / `postgresql`；旧密文缺字段时只做内存默认迁移，不在启动读取时重写文件，显式保存才升级格式。迁移失败必须保持原密文不变。
 - `connection_test` 的 passphrase 是独立瞬时参数，只用于本次 SSH 私钥握手；不得写入 `ConnectionInput`、持久化配置或正式连接的会话缓存。
 - 与具体跳相关的 `SshTunnelError` 变体带 `hop_index: usize`；`NoHops` / `LocalListenFailed` 返回 `None`。Tauri command 用 `hop_index()` emit 拓扑状态，错误返回值只暴露稳定 i18n key。

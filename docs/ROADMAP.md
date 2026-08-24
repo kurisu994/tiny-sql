@@ -56,7 +56,7 @@ v0.7+ ── 数据同步 + 用户权限 + BI/AI + 平台与 crate 长期演进
 
 ## v0.2 — 已发布（2026-08-20）
 
-详细任务、依赖、检查点与测试矩阵见 [v0.2 开发计划](./PLAN.md#v02-开发计划)。
+详细任务历史见 [progress.md](../memory-bank/progress.md)。
 
 **发布事实**：`v0.2.0` 已于 2026-08-20 正式发布。Week 1-6 全部功能（下表）+ V2-T7.4 决策 + 文档收口完成；`just check` 全绿，双 driver integration 全过，全平台构建与应用内升级闭环验收通过。
 
@@ -104,7 +104,7 @@ v0.7+ ── 数据同步 + 用户权限 + BI/AI + 平台与 crate 长期演进
 
 ### v0.3 — 查询与浏览效率（已发布，2026-08-22）
 
-详细任务、依赖、检查点与测试矩阵见 [v0.3 开发计划](./PLAN.md#v03-开发计划)（已随发布移出，历史见 [progress.md](../memory-bank/progress.md)）。
+详细任务历史见 [progress.md](../memory-bank/progress.md)。
 
 **发布事实**：v0.3 全部五项 FR 已于 2026-08-20 完成编码与自动化门禁（Week 1-6 + V3-T7.3 文档 + V3-T7.4 门禁）；`just check` 全绿，双 driver integration 20/20，本机 dmg + updater 签名产物构建成功。V3-T7.1 双 driver × 直连/1 跳/3 跳全功能真实回归已于 2026-08-21 用户实测通过；`v0.3.0-rc1` 同日发布（四平台 prerelease，无 `latest.json`）。V3-T7.2 RC 一周试用于 2026-08-22 关闭（0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，无阻塞 P0/P1）。`v0.3.0` 已于 2026-08-22 正式发布（发布提交 `0825da5`，Release run `32546492367` 四平台成功，非草稿非预发布，含四平台资产与 `latest.json`）。
 
@@ -118,7 +118,7 @@ v0.7+ ── 数据同步 + 用户权限 + BI/AI + 平台与 crate 长期演进
 
 ### v0.4 — 安全数据维护与对象管理（编码与自动化门禁完成，rc1 试用中）
 
-详细任务、依赖、检查点与测试矩阵见 [v0.4 开发计划](./PLAN.md#v04-开发计划)。
+详细任务历史见 [progress.md v0.4 归档](../memory-bank/progress.md#v04-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：Week 1-7 全部三项 FR + V4-T8.3 文档 + V4-T8.4 门禁已于 2026-08-22 完成，V4-CP0~CP4 全部收口；`just check` 全绿（双 driver integration 33/33），本机 dmg + updater 签名产物构建成功。`v0.4.0-rc1` 同日发布（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）。剩余仅为 V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（V4-CP5，均需用户参与）。
 
@@ -130,7 +130,7 @@ v0.7+ ── 数据同步 + 用户权限 + BI/AI + 平台与 crate 长期演进
 
 ### v0.5 — 结构变更、官方备份与连接协作（编码完成，待验收）
 
-详细任务历史见 [progress.md v0.5 归档](../memory-bank/progress.md#v05-已交付周计划归档)；收口见 [PLAN 待用户验收](./PLAN.md#待用户验收v04--v05-收口)。
+详细任务历史见 [progress.md v0.5 归档](../memory-bank/progress.md#v05-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：2026-08-24 三项 FR 编码与 `just check` 完成；待 V5-T8.1 / T8.2。
 
@@ -140,9 +140,9 @@ v0.7+ ── 数据同步 + 用户权限 + BI/AI + 平台与 crate 长期演进
 | FR-260 | 官方工具备份与恢复 | P1 | 编排 `mysqldump` / `mysql`（PG 争取同版本）；经现有隧道本地端口；不发明备份格式；与 FR-252 dump 入口分离 |
 | FR-221 | 加密分享连接配置 | P1 | 独立口令信封；不导出 master.key；默认不打包私钥文件；导入新 id 且不带 known_hosts |
 
-### v0.6 — 结构对比、可审阅同步与关系图（草案）
+### v0.6 — 结构对比、可审阅同步与关系图（编码完成，待验收）
 
-详细任务、依赖、检查点与测试矩阵见 [v0.6 开发计划](./PLAN.md#v06-开发计划)。
+详细任务历史见 [progress.md v0.6 归档](../memory-bank/progress.md#v06-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：2026-08-24 三项 FR 编码与单测完成；待 V6-T8.1 / T8.2。
 

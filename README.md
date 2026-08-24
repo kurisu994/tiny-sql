@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：v0.3.0 已于 2026-08-22 正式发布，v0.4.0-rc1 试用中。** GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包、签名更新包与四平台 `latest.json`。历史版本与后续计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：稳定 Release 为 v0.3.0；当前仓库版本号 `0.4.0-rc1`。** main 已包含 v0.4–v0.6 功能编码（待 GUI/RC 与正式切版）。GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -41,9 +41,10 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 **数据工作流**
 
 - 查询结果导出 CSV / Excel（后端流式写文件，区分 SQL NULL 与空字符串）。
-- 表格安全编辑：仅带主键单表，dirty 暂存 + 单事务批量提交（v0.4 rc）。
-- 结构查看 + DDL 预览 + 新建表（v0.4 rc）。
-- CSV 导入 + SQL dump 导入 / 导出（v0.4 rc）。
+- 表格安全编辑：仅带主键单表，dirty 暂存 + 单事务批量提交。
+- 结构查看 / DDL 预览 / 新建表 / 修改表与索引。
+- CSV 导入 + SQL dump 导入导出；官方 mysqldump/pg_dump 备份恢复（需本机工具）。
+- 加密分享连接（独立口令）；双连接结构对比与可审阅同步 SQL；只读 ER 关系图。
 
 **安全与分发**
 
@@ -125,15 +126,15 @@ src-tauri/                  # Tauri 壳
 src/                        # 前端源码（Next.js App Router）
 ├── app/                    # layout / page / globals.css
 ├── components/             # 业务组件（连接表单 / schema 树 / SQL 编辑器 / 拓扑图等）
-├── lib/                    # 工具（tauri-api / sql-guard / sql-editor / ddl / metadata-cache / sql-completion / column-widths）
-├── stores/                 # zustand store（connection / security / session / confirm）
-└── hooks/                  # React hooks（use-update-checker / use-column-widths）
+├── lib/                    # tauri-api / ddl / schema-diff / schema-sync / schema-er / metadata-cache 等
+├── stores/                 # zustand（connection / security / session / confirm）
+└── hooks/                  # use-update-checker / use-column-widths
 
 docs/                       # 项目文档
 ├── REQUIREMENTS.md         # 需求文档
-├── PLAN.md                 # 开发计划（按周）
-├── ARCHITECTURE.md         # 架构设计（数据流 / 状态机 / 错误模型）
-└── ROADMAP.md              # 路线图（v0.1 / v0.2 / v0.3-v0.5+）
+├── PLAN.md                 # 待办（只留未完成项）
+├── ARCHITECTURE.md         # 架构设计
+└── ROADMAP.md              # 路线图
 
 CHANGELOG.md                # 变更日志
 justfile                    # 项目命令入口
