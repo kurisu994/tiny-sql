@@ -13,7 +13,7 @@
 | v0.4 | 🚧 rc1 试用中 | 2026-08-22 完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑 / FR-251 结构查看、DDL 预览与新建表 / FR-252 CSV 导入与 SQL dump）+ 文档与自动化门禁；`just check` 全绿、integration 33/33、本机 dmg + updater 签名产物成功；同日发布 `v0.4.0-rc1`（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）；剩 GUI 真实回归、一周试用与正式发布（V4-CP5） |
 | v0.5 | 🚧 编码完成 | 2026-08-24 完成 FR-253 / FR-260 / FR-221 与 `just check`；待 GUI/RC 验收 |
 | v0.6 | 🚧 编码完成 | 2026-08-24 完成 FR-220 / FR-261 / FR-263 与 `just check`（vitest 153）；待 GUI/RC 验收。应用版本号仍为 0.4.0-rc1 |
-| v0.7 | 📝 草案 | 2026-08-24 立项：FR-266 表级拷贝（P0）、FR-262 MySQL 权限（P1）、FR-222 EXPLAIN（P1）；双向同步 / BI / AI 挂 v0.8+ |
+| v0.7 | 🚧 编码完成 | 2026-08-24 完成 FR-266 / FR-262 / FR-222；待 GUI/RC。双向同步 / BI / AI 仍挂 v0.8+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 

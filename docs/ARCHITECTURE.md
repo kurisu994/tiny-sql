@@ -54,6 +54,8 @@ tiny-sql/
 │       │   ├── import.rs         # csv_import_preview / db_import_csv（FR-252）
 │       │   ├── dump.rs           # db_export_dump / db_import_dump（FR-252）
 │       │   ├── backup.rs         # backup_probe_tools / db_backup_export / db_backup_restore（FR-260）
+│       │   ├── copy.rs           # db_copy_preview / db_copy_table_rows（FR-266）
+│       │   ├── privilege.rs      # db_list_accounts / db_show_grants（FR-262）
 │       │   ├── share.rs          # connection_share_export / preview / import（FR-221）
 │       │   ├── sql_file.rs       # sql_file_read / write / recent_list / touch / remove（FR-240）
 │       │   ├── security.rs       # security_status / setup / unlock / lock / disable / reset（FR-102）
@@ -688,6 +690,10 @@ impl OpenConnection {
 | `connection_share_export` | `(ids, password, path, include_private_keys)` | `()` | 独立口令导出连接分享文件（FR-221） |
 | `connection_share_preview` | `(path, password)` | `SharePreviewResult` | 预览分享文件（无 secret） |
 | `connection_share_import` | `(path, password)` | `usize` | 导入分享连接，生成新 id |
+| `db_copy_preview` | `(source, dest)` | `CopyPreviewResult` | 表拷贝预览：列映射与行数（FR-266） |
+| `db_copy_table_rows` | `(source, dest, mode, confirm_target, query_id?)` | `CopyTableResult` | 分页拷贝；replace 先 TRUNCATE |
+| `db_list_accounts` | `id` | `PrivilegeListResult` | MySQL 账号 / PG 角色（不含哈希，FR-262） |
+| `db_show_grants` | `(id, name, host?)` | `Vec<String>` | MySQL SHOW GRANTS |
 | `db_list_indexes` | `(id, database, schema?, table)` | `Vec<IndexMeta>` | 列出表的索引（FR-241） |
 | `db_list_constraints` | `(id, database, schema?, table)` | `Vec<ConstraintMeta>` | 列出表的约束（FR-241） |
 | `transaction_begin` | `(id)` | `session_id` | 建立独占 session 并 BEGIN（FR-244） |

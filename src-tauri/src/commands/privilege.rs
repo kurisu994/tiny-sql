@@ -129,8 +129,12 @@ pub async fn db_show_grants(
     }
     let user = input.name.trim();
     let host = input.host.as_deref().unwrap_or("%").trim();
-    if !user.chars().all(|c| c.is_ascii_alphanumeric() || "_$.-".contains(c))
-        || !host.chars().all(|c| c.is_ascii_alphanumeric() || "_$.%-".contains(c))
+    if !user
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "_$.-".contains(c))
+        || !host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_$.%-".contains(c))
     {
         return Err(err("error.driver.invalid_identifier"));
     }

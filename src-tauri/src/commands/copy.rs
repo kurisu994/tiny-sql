@@ -205,7 +205,10 @@ pub async fn db_copy_preview(
         .await
         .map_err(QueryCommandError::from)?;
     let mappings = map_columns(
-        &source_cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+        &source_cols
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>(),
         &dest_cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
         kind,
     );
@@ -278,7 +281,10 @@ pub async fn db_copy_table_rows(
         .await
         .map_err(QueryCommandError::from)?;
     let mapping = map_columns(
-        &source_cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+        &source_cols
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>(),
         &dest_cols.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
         kind,
     );
@@ -286,7 +292,10 @@ pub async fn db_copy_table_rows(
         return Err(err("error.copy.no_mapped_columns"));
     }
     let dest_order: Vec<String> = mapping.iter().map(|(_, dest)| dest.clone()).collect();
-    let query_id = input.query_id.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
+    let query_id = input
+        .query_id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     let token = CancellationToken::new();
     state.queries.lock().await.insert(
         query_id.clone(),
@@ -386,10 +395,7 @@ mod tests {
         );
         assert_eq!(
             mapped,
-            vec![
-                ("id".into(), "id".into()),
-                ("Name".into(), "name".into())
-            ]
+            vec![("id".into(), "id".into()), ("Name".into(), "name".into())]
         );
     }
 

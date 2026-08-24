@@ -2,6 +2,23 @@
 
 > 本文件用于各版本 dogfooding、RC 和正式发布。不要在这里记录真实 host、用户名、库名、表名、IP 或公司环境细节；真实记录写到被忽略的 `docs/dogfooding-log.md`。
 
+## v0.7 发布检查清单
+
+### v0.7 RC 前本地检查
+
+- `just check` 全绿。
+- 拷贝映射 / 权限 SQL / EXPLAIN 树单测通过。
+
+### v0.7 功能验收
+
+- 同方言两张表追加拷贝；手输目标名；replace 展示 TRUNCATE。
+- MySQL GRANT 预览执行；列表无密码哈希；PG 权限只读。
+- EXPLAIN 树；ANALYZE 先确认。
+
+### v0.7 正式发布追加条件
+
+- V7-T8.1 / T8.2 由作者验收。
+
 ## v0.6 发布检查清单
 
 ### v0.6 RC 前本地检查

@@ -128,10 +128,10 @@ Week 8  12h  dogfood + 文档 + RC
 
 ### Week 8 — 发布（12h）
 
-- **V7-T8.1** 双连接拷贝 + MySQL GRANT + EXPLAIN 真实回归。
-- **V7-T8.2** RC 试用（0 误清空生产表、0 凭据进日志）。
-- **V7-T8.3** 文档 / CHANGELOG / 清单。
-- **V7-T8.4** `just check`。
+- [ ] **V7-T8.1** 双连接拷贝 + MySQL GRANT + EXPLAIN 真实回归。（用户验收）
+- [ ] **V7-T8.2** RC 试用（0 误清空生产表、0 凭据进日志）。（用户验收）
+- [x] **V7-T8.3** 文档 / CHANGELOG / 清单（2026-08-24）。
+- [x] **V7-T8.4** `just check` 全绿（2026-08-24）：vitest 163、app_lib 66。
 
 ## V7.4 检查点与降级
 
