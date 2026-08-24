@@ -1,7 +1,7 @@
 ---
 title: tiny-sql 需求文档
-version: 0.7.0
-status: awaiting-acceptance
+version: 0.8.0-draft-1
+status: draft
 last_updated: 2026-08-24
 ---
 
@@ -9,7 +9,7 @@ last_updated: 2026-08-24
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-24）**：应用版本号为 `0.4.0-rc1`；稳定 Release 仍是 v0.3.0。main 已包含 v0.4–v0.7 功能编码（前后端各 54 个 command）。v0.7 范围见 §3.7。
+> **实现快照（2026-08-24）**：应用版本号为 `0.4.0-rc1`；稳定 Release 仍是 v0.3.0。main 已包含 v0.4–v0.7 功能编码（前后端各 54 个 command）。v0.8 范围见 §3.8（草案）。
 
 ## 1. 项目愿景
 
@@ -377,6 +377,23 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-222** EXPLAIN 可读化（P1）：查询 tab 对当前 SQL 执行 EXPLAIN 并以树/表展示。`EXPLAIN ANALYZE` 单独入口并确认（会真正执行）。不做慢查询采集或监控平台。
 
 验收见 [PLAN](./PLAN.md) 与 [RELEASE_CHECKLIST v0.7](./RELEASE_CHECKLIST.md#v07-发布检查清单)。
+
+---
+
+### 3.8 v0.8 范围（防连错与查询补齐）
+
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.8 开发计划](./PLAN.md#v08-开发计划)。
+
+> **实现状态（2026-08-24）**：草案已立项，功能代码未开工。
+
+- **FR-270** 连接只读开关（P0）：连接配置增加应用层 `readOnly`。打开后前端禁用写入口，后端所有写 command（含导入、恢复、拷贝目标、权限变更、ANALYZE、结构同步目标）返回 `error.connection.read_only`。不替代数据库账号权限。浏览、导出、备份导出、以只读连接为对比源仍可用。
+- **FR-271** 连接环境色 / 标签（P1）：`none | prod | staging | dev` 展示在列表、标题、tab 与破坏性确认框。不做自定义调色板，不按环境自动只读。
+- **FR-272** 同库复制为新表（P1）：当前连接上预览建表 SQL（MySQL `CREATE TABLE … LIKE`，PG 用结构重建并改名），手输新表名后执行；可选再灌数据（复用表拷贝内核）。不做整库克隆。
+- **FR-273** 单元格检查器与外键跳转（P1）：结果格查看完整值（NULL/空串可区分，JSON 尝试格式化）。单列 FK 可打开引用表并等值筛选。检查器不直接写回。跨连接 FK 不做。
+- **FR-274** RENAME COLUMN 预览（P1）：修改表对话框可重命名列，生成双方言 `RENAME COLUMN` 并确认。仍不换主键。可整项降级。
+- **FR-275** EXPLAIN 读后提示（P1）：在已有计划树上标注全表扫描 / filesort / Seq Scan 等，不改写 SQL，不做采集。可整项降级。
+
+实施顺序与验收见 [v0.8 开发计划](./PLAN.md#v08-开发计划)。
 
 ---
 

@@ -13,7 +13,8 @@
 | v0.4 | 🚧 rc1 试用中 | 2026-08-22 完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑 / FR-251 结构查看、DDL 预览与新建表 / FR-252 CSV 导入与 SQL dump）+ 文档与自动化门禁；`just check` 全绿、integration 33/33、本机 dmg + updater 签名产物成功；同日发布 `v0.4.0-rc1`（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）；剩 GUI 真实回归、一周试用与正式发布（V4-CP5） |
 | v0.5 | 🚧 编码完成 | 2026-08-24 完成 FR-253 / FR-260 / FR-221 与 `just check`；待 GUI/RC 验收 |
 | v0.6 | 🚧 编码完成 | 2026-08-24 完成 FR-220 / FR-261 / FR-263 与 `just check`（vitest 153）；待 GUI/RC 验收。应用版本号仍为 0.4.0-rc1 |
-| v0.7 | 🚧 编码完成 | 2026-08-24 完成 FR-266 / FR-262 / FR-222 与 `just check`（vitest 163 / app_lib 66）；待 GUI/RC。应用版本号仍为 0.4.0-rc1。双向同步 / BI / AI 仍挂 v0.8+ |
+| v0.7 | 🚧 编码完成 | 2026-08-24 完成 FR-266 / FR-262 / FR-222 与 `just check`（vitest 163 / app_lib 66）；待 GUI/RC。应用版本号仍为 0.4.0-rc1 |
+| v0.8 | 📝 草案 | 2026-08-24 立项：FR-270 只读开关（P0）、FR-271 环境色、FR-272 复制新表、FR-273 单元格/FK、FR-274 RENAME、FR-275 EXPLAIN 提示；双向同步 / BI / AI 挂 v0.9+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 
@@ -149,6 +150,7 @@ V7-CP0 启动准入按用户要求跳过。
 
 ## 重大决策与架构变更记录
 
+- **2026-08-24 立项 v0.8 草案**：主题收成「防连错与查询补齐」。唯一不降级 P0 为连接只读开关；环境色 / 复制新表 / 单元格与 FK / RENAME / EXPLAIN 提示按降级链可砍。双向同步 / BI / AI 从 v0.8+ 挪到 v0.9+。
 - **2026-08-24 PLAN 归档 v0.7 并再对齐文档**：已完成周计划移入本文件；PLAN 只留 v0.4–v0.7 用户验收。代码事实为应用版本号 `0.4.0-rc1`、Tauri command 前后端各 54 个（新增 `db_copy_preview` / `db_copy_table_rows` / `db_list_accounts` / `db_show_grants`）、事件补 `copy:progress` / `backup:progress`。
 - **2026-08-24 立项 v0.7 草案**：不把行级双向同步 / BI / AI 塞进 8 周。P0 为同方言已打开连接的表级拷贝（默认追加，清空须手输）；权限不做应用 RBAC；EXPLAIN ANALYZE 单独确认。
 - **2026-08-24 文档以代码为准再对齐**：应用版本号事实为 `0.4.0-rc1`（非 0.1.0 / 未切 0.5/0.6）；Tauri command 前后端均为 50 个；`connection_reconnect` 含 `database_override`；结构化错误不限于 `db_query`。PLAN 只留三版用户验收。
