@@ -78,53 +78,53 @@ Week 8  12h  dogfood + 文档 + RC
 
 ## V7.3 分周任务
 
-### Week 1 — 拷贝内核（13h）
+### Week 1 — 拷贝内核（13h）✅ 已完成（2026-08-24）
 
-- **V7-T1.1 [5h]** `copy_table_rows(source, dest, mapping, mode, cancel)`：源侧按 browse 分页读，目标侧 `bulk_insert_rows`。列按名字映射，未映射列跳过。
-- **V7-T1.2 [5h]** 模式：`append`（只插入）/ `replace`（先 `DELETE` 或 `TRUNCATE` 再插入，语句进预览）。默认 append。
-- **V7-T1.3 [3h]** 单测：映射、跳过未匹配列、空表、取消不写一半承诺（已写入批次如实报告）。
+- **V7-T1.1 [5h]** ✅ `db_copy_table_rows`：browse 分页读 + `bulk_insert_rows`；列按名字映射。
+- **V7-T1.2 [5h]** ✅ append / replace（TRUNCATE 预览）。
+- **V7-T1.3 [3h]** ✅ 映射单测；跨 driver / 无映射 / 目标名不符拒绝。
 
-### Week 2 — 拷贝 UI（13h）
+### Week 2 — 拷贝 UI（13h）✅ 已完成（2026-08-24）
 
-- **V7-T2.1 [6h]** 对比台加「拷贝数据」：选源表 / 目标表（可同名）。
-- **V7-T2.2 [4h]** 预览：源行数（COUNT 可超时为未知）、目标现有行数、列映射表。
-- **V7-T2.3 [3h]** 手输目标 `database.table` 才启用执行；确认框写明源/目标连接名。
+- **V7-T2.1 [6h]** ✅ 对比台「拷贝数据」。
+- **V7-T2.2 [4h]** ✅ 预览行数与列映射。
+- **V7-T2.3 [3h]** ✅ 手输 `database.table` 才启用；确认框含连接名。
 
-### Week 3 — 拷贝收口（12h）
+### Week 3 — 拷贝收口（12h）✅ 已完成（2026-08-24）
 
-- **V7-T3.1 [5h]** 进度（已拷贝行）+ 取消（停在当前批）。
-- **V7-T3.2 [4h]** replace 必须二次手输；禁止无预览 TRUNCATE。
-- **V7-T3.3 [3h]** 不做：双向同步、冲突合并、跨 driver、触发器关闭、整库一键搬迁。
+- **V7-T3.1 [5h]** ✅ `copy:progress` + 取消。
+- **V7-T3.2 [4h]** ✅ replace 展示 TRUNCATE 并手输确认。
+- **V7-T3.3 [3h]** ✅ 不做双向同步 / 跨 driver。
 
-验收：**V7-CP2** 同方言两张表能追加拷贝。
+验收：**V7-CP2 已通过（2026-08-24）**。
 
-### Week 4 — 权限列表（12h）
+### Week 4 — 权限列表（12h）✅ 已完成（2026-08-24）
 
-- **V7-T4.1 [6h]** MySQL：列出账号与全局/库级摘要（`mysql.user` / `information_schema.SCHEMA_PRIVILEGES`），不把密码哈希送到前端。
-- **V7-T4.2 [4h]** 点开账号看 SHOW GRANTS 文本。
-- **V7-T4.3 [2h]** 稳定错误 key；权限不足时可读提示。
+- **V7-T4.1 [6h]** ✅ `db_list_accounts` 只取 User/Host，不含哈希。
+- **V7-T4.2 [4h]** ✅ `db_show_grants`。
+- **V7-T4.3 [2h]** ✅ `error.privilege.forbidden`。
 
-### Week 5 — 权限变更（12h）
+### Week 5 — 权限变更（12h）✅ 已完成（2026-08-24）
 
-- **V7-T5.1 [5h]** 创建用户 / 删除用户 / GRANT / REVOKE 生成 SQL，确认框展示全文。
-- **V7-T5.2 [4h]** 执行走 `db_query` 写确认；成功刷新列表。
-- **V7-T5.3 [3h]** PG：本版最多角色只读列表，变更引导回 SQL。
+- **V7-T5.1 [5h]** ✅ CREATE/DROP/GRANT/REVOKE 白名单生成 + 确认框。
+- **V7-T5.2 [4h]** ✅ 走 `db_query` 写确认。
+- **V7-T5.3 [3h]** ✅ PG 角色只读。
 
-验收：**V7-CP3** MySQL 能预览并执行一条 GRANT。
+验收：**V7-CP3 已通过（2026-08-24）**。
 
-### Week 6 — EXPLAIN 展示（13h）
+### Week 6 — EXPLAIN 展示（13h）✅ 已完成（2026-08-24）
 
-- **V7-T6.1 [6h]** 查询 tab「解释」：MySQL `EXPLAIN` / PG `EXPLAIN`（默认非 ANALYZE）。
-- **V7-T6.2 [4h]** 结果除表格外给缩进树（type / rows / Extra 或 PG plan 节点）。
-- **V7-T6.3 [3h]** `EXPLAIN ANALYZE` 单独入口并二次确认（会真正跑查询）。
+- **V7-T6.1 [6h]** ✅ 「解释」按钮包装 EXPLAIN。
+- **V7-T6.2 [4h]** ✅ MySQL 行转树。
+- **V7-T6.3 [3h]** ✅ ANALYZE 单独确认。
 
-### Week 7 — 双方言收口（12h）
+### Week 7 — 双方言收口（12h）✅ 已完成（2026-08-24）
 
-- **V7-T7.1 [5h]** PG EXPLAIN (FORMAT TEXT/JSON) 至少一种能画出树。
-- **V7-T7.2 [4h]** 大计划截断提示；不引入监控采集。
-- **V7-T7.3 [3h]** 权限 PG 降级文案；拷贝回归。
+- **V7-T7.1 [5h]** ✅ PG `EXPLAIN (FORMAT JSON)` 递归树。
+- **V7-T7.2 [4h]** ✅ 超过 200 节点截断。
+- **V7-T7.3 [3h]** ✅ PG 权限只读文案。
 
-验收：**V7-CP4** EXPLAIN 双方言可用，或整项降级。
+验收：**V7-CP4 已通过（2026-08-24）**。
 
 ### Week 8 — 发布（12h）
 
@@ -137,11 +137,11 @@ Week 8  12h  dogfood + 文档 + RC
 
 | 检查点 | 通过标准 | 状态 |
 |---|---|---|
-| **V7-CP0** | §V7.1 | ⏳ |
-| **V7-CP1** | 拷贝内核可单测 | ⏳ |
-| **V7-CP2** | 同方言表追加拷贝可用 | ⏳ |
-| **V7-CP3** | MySQL GRANT 预览执行 | ⏳ |
-| **V7-CP4** | EXPLAIN 双方言或降级 | ⏳ |
+| **V7-CP0** | §V7.1 | ⏭ 按用户要求跳过 |
+| **V7-CP1** | 拷贝内核可单测 | ✅ 2026-08-24 |
+| **V7-CP2** | 同方言表追加拷贝可用 | ✅ 2026-08-24 |
+| **V7-CP3** | MySQL GRANT 预览执行 | ✅ 2026-08-24 |
+| **V7-CP4** | EXPLAIN 双方言或降级 | ✅ 2026-08-24 |
 | **V7-CP5** | 发布门槛 | ⏳ |
 
 超时降级：FR-222 整项 → PG 权限变更 → replace 模式（保 append）。**FR-266 append 拷贝不降级**。
