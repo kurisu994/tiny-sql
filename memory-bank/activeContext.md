@@ -2,11 +2,13 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-22
+**最后更新**：2026-08-24
 
 ## 当前状态
 
-**本轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
+**本轮：归档 v0.4 + 立项 v0.5 草案（2026-08-24）**——`docs/PLAN.md` 已交付周计划移入 `progress.md`，只留 V4-CP5 收口；同时起草 v0.5（8 周约 99h）：FR-253 修改表/索引（P0）、FR-260 官方备份恢复（P1）、FR-221 加密分享连接（P1）。REQUIREMENTS §3.5、ROADMAP 已把同步/权限/ER 改挂 v0.6+。功能代码待 v0.4.0 正式发布（V5-CP0）。
+
+**前一轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
 
 **本轮修复：MySQL 结构页一直加载（2026-08-22）**——用户打开 MySQL 表点「结构」后停在「加载结构…」。根因是 `MySqlDriver::list_constraints` 把 `TABLE_CONSTRAINTS` 与 `KEY_COLUMN_USAGE` JOIN，MySQL 8 information_schema 无法下推 `table_schema/table_name`，会扫全实例数据字典；本机探测 `list_columns`/`list_indexes` ~150ms，旧 JOIN 超过 8s 仍未返回。已拆成两条等值过滤查询。回归：`structure_view_mysql_metadata_completes_quickly` 与 `list_indexes_and_constraints` 均在 3s 内通过。待用户在 GUI 再点一次「结构」确认。
 
@@ -107,6 +109,9 @@
 
 ## 近期决策
 
+- v0.5 不搬 ROADMAP 原 v0.5+ 整包。P0 是 FR-253 列级改表（补 FR-251 顺延）；FR-260 只编排官方 `mysqldump`/`mysql`，禁止回退成 FR-252 dump；FR-221 用独立口令信封，默认不打包私钥。同步 / 权限 / ER / BI / AI 挂 v0.6+。
+- v0.5 ALTER 生成放前端纯函数（沿用 `ddl.ts`），执行走现有 `db_query` 写确认，不新开 DDL 契约面；不承诺 RENAME COLUMN / 换主键向导。
+- 备份子进程凭据必须走 0600 临时文件，禁止出现在 argv；恢复必须手输目标库名。
 - MySQL `list_constraints` 禁止 information_schema 两表 JOIN，必须拆成带 `table_schema + table_name` 等值过滤的独立查询；结构页卡死就是这个 JOIN 扫全实例。
 - v0.4 主键列禁止编辑（UPDATE 主键会破坏定位），新增行除外（必须能填主键）；单元格编辑用 Enter 保存 / Shift+Enter 置 NULL / Esc 取消，不做内嵌工具按钮。
 - v0.4 浏览 tab 翻页/筛选/排序/刷新时有 dirty 需确认丢弃（防止新数据与 dirty 悬空对不上）；退出编辑模式保留 dirty（不丢）。
@@ -160,9 +165,9 @@
 
 ## 下一步（按优先级）
 
-1. 用户在 MySQL 浏览 tab 再点一次「结构」，确认列 / 索引 / 约束 / DDL 能出来。
-2. V4-T8.1：用户 GUI 实测 v0.4 全功能（检查项见 RELEASE_CHECKLIST v0.4 节）；V4-T8.2：rc1 一周试用（作者 + ≥2 位试用者）。
-3. `just release v0.4.0` 正式发布（V4-CP5）。
+1. 用户确认 v0.5 草案范围（尤其 P0=改表、备份走官方工具、分享进本版）；要改主题再说，未确认前不开工。
+2. V4-T8.1：用户 GUI 实测 v0.4 全功能（检查项见 RELEASE_CHECKLIST v0.4 节）；优先复测 MySQL「结构」页。V4-T8.2：rc1 一周试用。
+3. `just release v0.4.0` 正式发布（V4-CP5）后，才进入 v0.5 Week 1。
 
 ## 阻塞 / 风险
 

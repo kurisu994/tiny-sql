@@ -11,11 +11,30 @@
 | v0.2 | ✅ 正式版已发布 | 2026-08-20 发布 `v0.2.0`（发布提交 `4f6b07f`）；V2-CP1~CP5 全部关闭。范围：多 driver + PostgreSQL、主密码加密/TLS 诊断、schema intelligence、查询工作台、SSH RTT/重连；详见 CHANGELOG `0.2.0` 段 |
 | v0.3 | ✅ 正式版已发布 | 2026-08-22 发布 `v0.3.0`（发布提交 `0825da5`，Release run `32546492367` 四平台成功，含四平台资产与 `latest.json`）。范围：可靠事务、服务端筛选分页、index/constraint 元数据树与对象搜索、多语句与格式化、SQL 文件工作流；详见 CHANGELOG `0.3.0` 段 |
 | v0.4 | 🚧 rc1 试用中 | 2026-08-22 完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑 / FR-251 结构查看、DDL 预览与新建表 / FR-252 CSV 导入与 SQL dump）+ 文档与自动化门禁；`just check` 全绿、integration 33/33、本机 dmg + updater 签名产物成功；同日发布 `v0.4.0-rc1`（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）；剩 GUI 真实回归、一周试用与正式发布（V4-CP5） |
-| v0.5+ | 规划 | 备份同步、MySQL 用户权限、ER/BI/AI，并穿插平台与 crate 长期演进 |
+| v0.5 | 📝 草案 | 2026-08-24 立项：FR-253 修改表/索引设计器（P0）、FR-260 官方备份恢复（P1）、FR-221 加密分享连接（P1）；待 v0.4.0 正式发布后开工。同步/权限/ER/BI/AI 改挂 v0.6+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 
-## 开发阶段完成度（5-6 周计划）
+## v0.4 已交付周计划（归档）
+
+> 2026-08-24 从 `docs/PLAN.md` 移出 Week 1-7 明细与已关闭检查点，PLAN 只留 V4-CP5 发布收口。
+
+| 周 | 内容 | 工时 | 检查点 | 状态 |
+|---|---|---|---|---|
+| Phase 0 | v0.3.0 正式发布 + REQUIREMENTS §3.4 收口 | 不计入 | V4-CP0 | ✅ 2026-08-22 |
+| Week 1 | FR-250 编辑内核：`apply_table_edits` 短事务、双 driver 参数化 DML、无主键/冲突错误 key | 13h | V4-CP1 | ✅ 2026-08-22 |
+| Week 2 | FR-250 编辑模式 UI + dirty state（Virtuoso、翻页/筛选护栏） | 13h | CP2 前半 | ✅ 2026-08-22 |
+| Week 3 | FR-250 提交/放弃/断链/关闭闭环，store 单测 7 项 | 12h | V4-CP2 | ✅ 2026-08-22 |
+| Week 4 | FR-251 结构查看 + MySQL `SHOW CREATE TABLE` + PG 元数据重建 DDL | 12h | CP3 前半 | ✅ 2026-08-22 |
+| Week 5 | FR-251 新建表表单 + 双方言 SQL 预览确认执行 | 12h | V4-CP3 | ✅ 2026-08-22 |
+| Week 6 | FR-252 CSV RFC 4180 解析、列映射、`bulk_insert_rows` 中止/跳过 | 13h | CP4 前半 | ✅ 2026-08-22 |
+| Week 7 | FR-252 dump 导出导入 + `StatementSplitter` 流式分句 | 12h | V4-CP4 | ✅ 2026-08-22 |
+| Week 8 | 文档 + `just check` / integration 33/33 + rc1 | 5h 已完 | — | ✅ 2026-08-22 |
+| Week 8 剩余 | GUI 真实回归（T8.1）+ RC 试用（T8.2）+ 正式发布 | ~7h | V4-CP5 | ⏳ |
+
+门禁快照（发 rc1 前）：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 125、Next build）；双 driver integration 33/33（MySQL 20、PG 13）。
+
+## 开发阶段完成度（v0.1，5-6 周计划）
 
 | 周 | 内容 | 状态 |
 |---|---|---|
@@ -84,6 +103,8 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 
 ## 重大决策与架构变更记录
 
+- **2026-08-24 立项 v0.5 草案**：主题收成「结构变更、官方备份与连接协作」，不把原 ROADMAP v0.5+ 整包（同步/权限/ER/BI/AI）塞进 8 周。P0 为 FR-253 列级改表；FR-260 走官方客户端而非自研 dump；FR-221 用独立口令信封补同事分享。功能代码待 V5-CP0。
+- **2026-08-24 PLAN 归档 v0.4 Week 1-7**：`docs/PLAN.md` 只保留尚未完成的 V4-CP5 发布收口（T8.1 GUI 回归 / T8.2 RC 试用 / 正式发布）；已交付周计划与门禁快照移入本文件。
 - **2026-08-22 MySQL 结构页约束查询拆 JOIN**：`list_constraints` 不再 JOIN `TABLE_CONSTRAINTS` 与 `KEY_COLUMN_USAGE`。MySQL 8 information_schema 对这两张表的 JOIN 经常无法下推库名/表名过滤，会扫全实例，浏览 tab「结构」一直停在加载。改为两条 `WHERE table_schema=? AND table_name=?` 查询再在内存归组；语义与原先 LEFT JOIN 一致（CHECK 无列时仍为空）。
 - **2026-06-26 选 Approach B（Clean Workspace）**：放弃 fork redis-desktop-client，改独立 workspace + 独立 crate。理由：长期维护 + `ssh-multihop` 未来独立 publish。
 - **2026-06-26 plan-eng-review 9 个 binding 决策**：keepalive 30s→60s+3 次阈值 / SQL 取消用独立 control conn KILL QUERY / `SshTunnelError` 加 TunnelLost+ChannelDropped+AcceptLoopDied / trait Driver 推 v0.2 / 测试无 Docker 连本地 MySQL / LIMIT 用子查询包装 / **Week 1 改 vertical slice** / read-only best-effort / Codex tension 记 v0.2。
