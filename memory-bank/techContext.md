@@ -99,13 +99,14 @@
 | 连接 driver 持久化值 | `mysql` / `postgresql`；旧记录缺字段默认 `mysql`，兼容读取不主动重写密文 |
 | known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
 
-## 当前 command（src-tauri 实际）
+## 当前 command（src-tauri 实际，54 个）
 
-- 连接：`connection_create/list/update/delete`（CRUD）、`connection_test(input, passphrase?)`（一次性完整链路测试，passphrase 瞬时不缓存）、`connection_open(id, passphrase?, remember_passphrase?)`（建立持久连接；主密码解锁时支持持久化 passphrase）、`connection_reconnect(id, expected_session_id?, passphrase?)` / `connection_close(id, expected_session_id?)`。
-- 数据浏览与导出：`db_list_databases/db_list_schemas/db_list_tables/db_list_columns/db_create_database`、`db_query(id, sql, queryId?, rowLimit?, allowWrite?, schema?)`（执行并自动记历史）、`db_query_cancel(queryId)`、`db_export_query(id, sql, format, path)`（后端流式写 CSV/XLSX）。
-- 主密码安全（FR-102）：`security_status/security_setup(password)/security_unlock(password)/security_lock/security_disable(password)/security_reset`。
-- SQL 历史（FR-106）：`history_list/history_clear`。
-- TOFU：`ssh_tofu_decision(connectionId, hopIndex, accept)`。
-- 事件（后端 emit → 前端 listen）：`ssh:tofu-request`（指纹确认）、`ssh:hop-status`（连接四态）、`ssh:hop-rtt`（measured/timeout/unavailable 协议 RTT 指标）；均含 sessionId 过滤旧事件。
+- 连接：`connection_create/list/update/delete`、`connection_test(input, passphrase?)`、`connection_open(id, passphrase?, remember_passphrase?)`、`connection_reconnect(id, expected_session_id?, passphrase?, database_override?)`、`connection_close(id, expected_session_id?)`。
+- 分享：`connection_share_export/preview/import`。
+- 元数据与查询：`db_list_databases/schemas/tables/columns/indexes/constraints`、`db_create_database`、`db_query`、`db_query_cancel`、`db_query_many`、`db_browse_table`、`db_apply_table_edits`。
+- 导入导出与备份：`csv_import_preview`、`db_import_csv`、`db_export_dump`、`db_import_dump`、`backup_probe_tools`、`db_backup_export`、`db_backup_restore`、`db_export_query`。
+- 拷贝与权限：`db_copy_preview`、`db_copy_table_rows`、`db_list_accounts`、`db_show_grants`。
+- 事务 / SQL 文件 / 安全 / 历史 / TOFU：`transaction_*`（5）、`sql_file_*`（5）、`security_*`（6）、`history_list/clear`、`ssh_tofu_decision`。
+- 事件：`ssh:tofu-request`、`ssh:hop-status`、`ssh:hop-rtt`、`backup:progress`、`copy:progress`、`app:check-update`。
 
 相关：[[systemPatterns]] · [[progress]]

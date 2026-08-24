@@ -1,7 +1,7 @@
 ---
 title: tiny-sql 需求文档
-version: 0.7.0-draft-1
-status: draft
+version: 0.7.0
+status: awaiting-acceptance
 last_updated: 2026-08-24
 ---
 
@@ -9,7 +9,7 @@ last_updated: 2026-08-24
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-24）**：应用版本号为 `0.4.0-rc1`；稳定 Release 仍是 v0.3.0。main 已包含 v0.4–v0.6 功能编码（50 个 command）。v0.7 范围见 §3.7（草案）。
+> **实现快照（2026-08-24）**：应用版本号为 `0.4.0-rc1`；稳定 Release 仍是 v0.3.0。main 已包含 v0.4–v0.7 功能编码（前后端各 54 个 command）。v0.7 范围见 §3.7。
 
 ## 1. 项目愿景
 
@@ -368,7 +368,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 ### 3.7 v0.7 范围（表数据搬迁、库内权限与执行计划）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.7 开发计划](./PLAN.md#v07-开发计划)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.7 归档](../memory-bank/progress.md#v07-已交付周计划归档)。
 
 > **实现状态（2026-08-24）**：三项 FR 编码与单测已完成；GUI/RC 由用户验收。
 
@@ -376,7 +376,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-262** MySQL 用户与权限（P1）：列出账号与授权摘要（不含密码哈希），变更生成 GRANT/REVOKE/CREATE USER SQL 并二次确认。不引入 tiny-sql 应用账号。PG 角色变更可降级为只读。
 - **FR-222** EXPLAIN 可读化（P1）：查询 tab 对当前 SQL 执行 EXPLAIN 并以树/表展示。`EXPLAIN ANALYZE` 单独入口并确认（会真正执行）。不做慢查询采集或监控平台。
 
-实施顺序与验收见 [v0.7 开发计划](./PLAN.md#v07-开发计划)。
+验收见 [PLAN](./PLAN.md) 与 [RELEASE_CHECKLIST v0.7](./RELEASE_CHECKLIST.md#v07-发布检查清单)。
 
 ---
 

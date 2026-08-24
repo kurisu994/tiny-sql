@@ -1,7 +1,7 @@
 ---
 title: tiny-sql 架构设计
-version: 0.6.0-draft-1
-status: draft
+version: 0.7.0
+status: awaiting-acceptance
 last_updated: 2026-08-24
 ---
 
@@ -73,8 +73,8 @@ tiny-sql/
 │       └── state.rs              # AppState（连接注册表 / 事务 session / passphrase 缓存 / security / history / recent_files）
 ├── src/                           # Next.js 16 前端
 │   ├── app/                       # App Router pages
-│   ├── components/                # 含 compare-view / er-view / alter-table / backup / share
-│   ├── lib/                       # tauri-api / ddl / schema-diff / schema-sync / schema-er
+│   ├── components/                # 含 compare-view / er-view / privilege-view / alter-table / backup / share
+│   ├── lib/                       # tauri-api / ddl / schema-diff / schema-sync / schema-er / table-copy / privilege / explain
 │   ├── stores/                    # session.openSessions：切换焦点不关旧连接
 │   └── hooks/
 ├── public/
@@ -610,7 +610,16 @@ pub enum DriverError {
 - **只读 ER（FR-263）**：解析 MySQL `schema.table(cols)` 与 PG `REFERENCES`
   文本构图，SVG 分层布局，无新依赖。
 
-```
+**v0.7 扩展点说明**：
+
+- **表拷贝（FR-266）**：`copy.rs` 只接受两条已打开、同方言连接。源侧
+  `browse_table` 分页，目标侧 `bulk_insert_rows`。replace 预览 TRUNCATE，
+  必须手输 `database.table`。进度事件 `copy:progress`。跨 driver 拒绝。
+- **权限（FR-262）**：`privilege.rs` 只查 `mysql.user` 的 User/Host 或
+  `pg_roles`；MySQL `SHOW GRANTS` 文本。变更 SQL 由前端白名单生成，走
+  `db_query` 写确认。密码哈希不进 IPC。
+- **EXPLAIN（FR-222）**：无新 command。前端包装 `EXPLAIN` / `EXPLAIN ANALYZE`
+  走现有 `db_query`；ANALYZE 单独确认。MySQL 行转树，PG 解析 FORMAT JSON。
 
 `DatabaseMeta.is_current` 与 `SchemaMeta.is_default` 是不同语义；`MetadataScope` 不把 MySQL 的 database/schema 同义关系强加给 PostgreSQL。MySQL scope 只携带 database，PostgreSQL scope 必须同时携带当前 database 与 schema。PostgreSQL 无法在一条连接上切换 database，请求非当前 database 时返回 `error.driver.database_switch_required`，由应用层重建目标连接。
 
@@ -658,7 +667,7 @@ impl OpenConnection {
 
 ### 3.3 src-tauri/commands
 
-每个 tauri command 都是 `async fn`，签名 `(state: tauri::State<AppState>, ...) -> Result<Output, String>`。错误统一返回 `i18n_key` 字符串，前端 v0.1 用静态 `ERROR_ZH` map 翻译。
+当前前后端各注册 **54** 个 command（以 `src-tauri/src/lib.rs` 的 `generate_handler!` 与 `src/lib/tauri-api.ts` 为准）。多数查询/编辑/备份/拷贝/权限命令返回 `Result<T, QueryCommandError>`，载荷为 `{ key, line?, editIndex? }`；部分连接/元数据路径仍返回稳定 i18n key 字符串。前端用 `ERROR_ZH` map 翻译，禁止展示 sqlx/数据库原文。
 
 | Command | 输入 | 输出 | 描述 |
 |---|---|---|---|
@@ -1120,6 +1129,8 @@ ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握�
 | `ssh:hop-status` | `{connectionId, sessionId, hopIndex, status, reason?}`（status ∈ pending/connected/failed/lost） | 隧道每跳状态变化 | zustand 只接收当前 session 事件 → 拓扑节点重渲染 |
 | `ssh:hop-rtt` | `{connectionId, sessionId, hopIndex, state, rttMs}`（state ∈ measured/timeout/unavailable） | 每跳低频 SSH 协议探测完成 | zustand 只接收当前 session 事件 → 更新进入该跳的边指标，不改变节点状态 |
 | `query:result-chunk` | `{query_id, rows_partial, done: false}` | （规划未用）流式结果 | 各版本 query 均全量返回 RowSet；文件导出采用后端流式写出（db_export_query / db_export_dump），不经 IPC |
+| `backup:progress` | `{queryId, bytes}` | 官方备份/恢复子进程写出数据 | 备份对话框进度 |
+| `copy:progress` | `{queryId, copied}` | 表拷贝每批插入后 | 对比台拷贝进度 |
 | `app:check-update` | `{}` | macOS 应用菜单「Check for Updates...」 | 触发手动检查更新 |
 
 ### 7.3 ssh:hop-status 详细 schema

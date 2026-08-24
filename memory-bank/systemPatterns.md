@@ -50,7 +50,7 @@ tiny-sql/
 ├── src-tauri/
 │   ├── src/lib.rs · main.rs    # setup 装配 store/known_hosts + 注册 command
 │   ├── src/state.rs · tofu.rs  # AppState(注册表/passphrase 缓存) + SshTofuManager
-│   ├── src/commands/           # connection / query / backup / share / dump / transaction / ...
+│   ├── src/commands/           # connection / query / copy / privilege / backup / share / dump / transaction / ...
 │   ├── src/config/             # encryption · store · history · recent_files · ssh_known_hosts
 │   ├── capabilities/default.json · tauri.conf.json · icons/
 ├── src/                        # app/ · components/(connection-form/dialogs/schema-browser)

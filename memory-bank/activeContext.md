@@ -6,9 +6,9 @@
 
 ## 当前状态
 
-**本轮：v0.7 功能开发完成（2026-08-24）**——FR-266 表拷贝、FR-262 权限、FR-222 EXPLAIN。待用户 GUI/RC。
+**本轮：PLAN 归档 v0.7 + 文档按代码对齐（2026-08-24）**——PLAN 只留 v0.4–v0.7 用户验收。版本号 `0.4.0-rc1`；command 前后端 54/54（不是旧文档的 50）。
 
-**前一轮：PLAN 归档 + 文档按代码对齐（2026-08-24）**——PLAN 只留三版用户验收。版本号 `0.4.0-rc1`、command 50/50。
+**前一轮：v0.7 功能开发完成（2026-08-24）**——FR-266 表拷贝、FR-262 权限、FR-222 EXPLAIN。待用户 GUI/RC。
 
 **前一轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
 
@@ -95,6 +95,8 @@
 
 ## 活跃文件
 
+- `docs/PLAN.md`：只留 v0.4–v0.7 用户验收。
+- `docs/{ARCHITECTURE,REQUIREMENTS,ROADMAP}.md`、`README.md` / `README_EN.md`、`CHANGELOG.md`、`memory-bank/*`：以代码为准对齐 54 个 command 与 v0.7 已落地能力。
 - `crates/db-driver/src/lib.rs`：`MySqlDriver::list_constraints` 改为两条 information_schema 等值查询，避免结构页卡死。
 - `crates/db-driver/tests/integration.rs`：结构页 MySQL 元数据 3s 超时回归。
 - `src-tauri/src/security.rs`：主密码状态机、v1↔v2 迁移回滚、secrets map（FR-102）。
@@ -169,8 +171,8 @@
 
 ## 下一步（按优先级）
 
-1. GUI 验收拷贝 / 权限 / EXPLAIN（对比台先开两条连接）。
-2. v0.4–v0.7 正式切版仍由用户发。
+1. GUI 验收 v0.4–v0.7（对比台先开两条连接；权限在工作台「权限」；EXPLAIN 在查询区）。
+2. 正式切版仍由用户发，版本号仍是 `0.4.0-rc1`。
 
 ## 阻塞 / 风险
 
