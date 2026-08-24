@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PlusIcon, ShieldCheckIcon } from "lucide-react";
+import { PlusIcon, Share2Icon, ShieldCheckIcon } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ConnectionDialogs } from "@/components/connection-dialogs";
 import { ConnectionForm } from "@/components/connection-form";
 import { CreateDatabaseDialog } from "@/components/create-database-dialog";
 import { SchemaBrowser } from "@/components/schema-browser";
+import { ShareDialog } from "@/components/share-dialog";
 import {
   SecuritySettingsDialog,
   UnlockDialog,
@@ -58,6 +59,7 @@ export default function Home() {
   const securityInitialized = useSecurityStore((s) => s.initialized);
   const refreshSecurity = useSecurityStore((s) => s.refresh);
   const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const {
     updateInfo,
     checkError,
@@ -151,6 +153,12 @@ export default function Home() {
         error={checkError}
         onDismiss={dismissCheckResult}
       />
+      <ShareDialog
+        open={shareOpen}
+        connections={connections}
+        onOpenChange={setShareOpen}
+        onImported={load}
+      />
       <CreateDatabaseDialog
         open={databaseDialogConn !== null}
         connection={databaseDialogConn}
@@ -209,6 +217,16 @@ export default function Home() {
               }
             >
               <ShieldCheckIcon data-icon="inline-start" />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              title="加密分享连接"
+              disabled={securityStatus === "locked"}
+              onClick={() => setShareOpen(true)}
+            >
+              <Share2Icon data-icon="inline-start" />
             </Button>
             <Button type="button" size="sm" onClick={startCreate}>
               <PlusIcon data-icon="inline-start" />

@@ -10,6 +10,7 @@ pub mod history;
 pub mod import;
 pub mod query;
 pub mod security;
+pub mod share;
 pub mod sql_file;
 pub mod ssh_tofu;
 pub mod transaction;

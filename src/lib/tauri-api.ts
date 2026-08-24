@@ -144,6 +144,12 @@ export const ERROR_ZH: Record<string, string> = {
   "error.backup.cancelled": "官方备份 / 恢复已取消",
   "error.backup.target_mismatch": "手输的目标库名与当前库不一致，已拒绝恢复",
   "error.backup.io": "备份文件读写失败，请检查路径与权限",
+  "error.share.empty_password": "分享口令不能为空",
+  "error.share.empty": "请至少选择一条连接",
+  "error.share.failed": "连接分享失败",
+  "error.share.invalid": "分享文件无效或已被篡改",
+  "error.share.wrong_password": "分享口令错误",
+  "error.share.io": "分享文件读写失败，请检查路径与权限",
   "error.sqlfile.read_failed": "SQL 文件读取失败，请检查路径与权限",
   "error.sqlfile.write_failed": "SQL 文件写入失败，请检查路径与磁盘权限",
   "error.sqlfile.too_large": "SQL 文件过大（超过 8MB），请拆分后打开",
@@ -299,7 +305,34 @@ export const connectionApi = {
       id,
       expectedSessionId: expectedSessionId ?? null,
     }),
+  shareExport: (
+    ids: string[],
+    password: string,
+    path: string,
+    includePrivateKeys: boolean,
+  ) =>
+    invoke<void>("connection_share_export", {
+      input: { ids, password, path, includePrivateKeys },
+    }),
+  sharePreview: (path: string, password: string) =>
+    invoke<SharePreviewResult>("connection_share_preview", {
+      input: { path, password },
+    }),
+  shareImport: (path: string, password: string) =>
+    invoke<number>("connection_share_import", {
+      input: { path, password },
+    }),
 };
+
+export interface SharePreviewItem {
+  name: string;
+  driver: string;
+  hopCount: number;
+}
+
+export interface SharePreviewResult {
+  connections: SharePreviewItem[];
+}
 
 // === 数据浏览（schema / 结果集）===
 
