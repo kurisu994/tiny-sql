@@ -9,7 +9,7 @@ last_updated: 2026-08-24
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-24）**：应用版本号为 `0.4.0-rc1`；稳定 Release 仍是 v0.3.0。main 已包含 v0.4–v0.7 功能编码（前后端各 54 个 command）。v0.8 范围见 §3.8（草案）。
+> **实现快照（2026-08-24）**：稳定 Release 与应用版本号均为 `v0.7.0`。v0.4–v0.7 功能打在同一正式版（54 个 command）。v0.8 范围见 §3.8（草案）。
 
 ## 1. 项目愿景
 

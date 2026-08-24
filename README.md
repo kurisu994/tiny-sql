@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：稳定 Release 为 v0.3.0；当前仓库版本号 `0.4.0-rc1`。** main 已包含 v0.4–v0.7 功能编码（待 GUI/RC 与正式切版）。GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：稳定 Release 为 v0.7.0。** 相对 v0.3.0 一次收录表格编辑、结构变更、官方备份、对比拷贝、权限与 EXPLAIN。GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -143,9 +143,9 @@ justfile                    # 项目命令入口
 
 ## 安装
 
-> 从 [v0.3.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.3.0) 下载当前稳定版。
+> 从 [v0.7.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.7.0) 下载当前稳定版（云端打包完成后资产才会齐）。
 
-v0.3.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
+v0.7.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
 
 正式版会在 GitHub Release 中附带 `latest.json` 与签名更新包，应用内自动更新只跟随 GitHub 的 latest 正式版。`v*-rc*`、beta、alpha 预发布版本仍需手动下载验证。
 

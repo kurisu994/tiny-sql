@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**Status: the latest stable GitHub Release is v0.3.0; the repo version string is `0.4.0-rc1`.** `main` already contains the v0.4–v0.7 feature code (GUI/RC and official cuts still pending). GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Status: the latest stable GitHub Release is v0.7.0.** This is the first stable cut since v0.3.0 and includes table editing, schema changes, official backups, compare/copy, privileges, and EXPLAIN. GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Why another SQL client
 
@@ -145,9 +145,9 @@ justfile                    # project command entry point
 
 ## Installation
 
-> Download the current stable release from [v0.3.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.3.0).
+> Download the current stable release from [v0.7.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.7.0) (assets appear after the cloud build finishes).
 
-v0.3.0 provides `.dmg` for **macOS (Apple Silicon + Intel)**, `.exe` for **Windows x64**, and `.AppImage` for **Linux x64**.
+v0.7.0 provides `.dmg` for **macOS (Apple Silicon + Intel)**, `.exe` for **Windows x64**, and `.AppImage` for **Linux x64**.
 
 Stable releases ship with `latest.json` and signed update packages on GitHub Releases; in-app auto-update only follows the latest stable release on GitHub. `v*-rc*`, beta, and alpha pre-releases still require manual download and verification.
 
