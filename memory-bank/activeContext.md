@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**本轮：v0.5 功能开发完成（2026-08-24）**——按 PLAN 跳过 V5-CP0，落地 FR-253 / FR-260 / FR-221。`just check` 全绿（app_lib 64、db-driver 43、ssh-multihop 8、vitest 134、Next build）。剩用户侧 V5-T8.1 GUI 回归与 T8.2 RC 试用。
+**本轮：归档 v0.5 + 立项 v0.6 草案（2026-08-24）**——PLAN 已交付周计划移入 progress.md；v0.6 定为 FR-220 双连接结构 diff（P0）、FR-261 结构同步脚本（P1，无数据拷贝）、FR-263 只读 ER（P1）。权限 / 行级同步 / BI/AI 挂 v0.7+。功能代码待 V6-CP0 与用户确认。
 
 **前一轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
 
@@ -109,6 +109,7 @@
 
 ## 近期决策
 
+- v0.6 不搬数据同步 / 权限 / BI / AI。P0 是两条已打开连接的结构 diff；跨 driver 只展示；同步脚本必须预览确认，DDL 失败不假装能整体回滚。
 - v0.5 不搬 ROADMAP 原 v0.5+ 整包。P0 是 FR-253 列级改表（补 FR-251 顺延）；FR-260 只编排官方 `mysqldump`/`mysql`，禁止回退成 FR-252 dump；FR-221 用独立口令信封，默认不打包私钥。同步 / 权限 / ER / BI / AI 挂 v0.6+。
 - v0.5 ALTER 生成放前端纯函数（沿用 `ddl.ts`），执行走现有 `db_query` 写确认，不新开 DDL 契约面；不承诺 RENAME COLUMN / 换主键向导。
 - 备份子进程凭据必须走 0600 临时文件，禁止出现在 argv；恢复必须手输目标库名。
@@ -165,9 +166,9 @@
 
 ## 下一步（按优先级）
 
-1. V5-T8.1：GUI 实测改表 / 索引 / 官方备份 / 连接分享（含直连与多跳）。
-2. V5-T8.2：RC 试用后再正式发布。
-3. v0.4.0 正式发布仍可并行（V4-CP5）。
+1. 用户确认 v0.6 范围（P0=结构 diff，同步不含数据，ER 只读）。
+2. V4/V5 GUI 回归与 RC 试用（用户侧）。
+3. 确认后才开 v0.6 Week 1。
 
 ## 阻塞 / 风险
 

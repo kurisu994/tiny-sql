@@ -11,7 +11,8 @@
 | v0.2 | ✅ 正式版已发布 | 2026-08-20 发布 `v0.2.0`（发布提交 `4f6b07f`）；V2-CP1~CP5 全部关闭。范围：多 driver + PostgreSQL、主密码加密/TLS 诊断、schema intelligence、查询工作台、SSH RTT/重连；详见 CHANGELOG `0.2.0` 段 |
 | v0.3 | ✅ 正式版已发布 | 2026-08-22 发布 `v0.3.0`（发布提交 `0825da5`，Release run `32546492367` 四平台成功，含四平台资产与 `latest.json`）。范围：可靠事务、服务端筛选分页、index/constraint 元数据树与对象搜索、多语句与格式化、SQL 文件工作流；详见 CHANGELOG `0.3.0` 段 |
 | v0.4 | 🚧 rc1 试用中 | 2026-08-22 完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑 / FR-251 结构查看、DDL 预览与新建表 / FR-252 CSV 导入与 SQL dump）+ 文档与自动化门禁；`just check` 全绿、integration 33/33、本机 dmg + updater 签名产物成功；同日发布 `v0.4.0-rc1`（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）；剩 GUI 真实回归、一周试用与正式发布（V4-CP5） |
-| v0.5 | 🚧 编码完成 | 2026-08-24 完成 FR-253 / FR-260 / FR-221 与 `just check`；待 GUI/RC 验收。同步/权限/ER 仍挂 v0.6+ |
+| v0.5 | 🚧 编码完成 | 2026-08-24 完成 FR-253 / FR-260 / FR-221 与 `just check`；待 GUI/RC 验收 |
+| v0.6 | 📝 草案 | 2026-08-24 立项：FR-220 双连接结构 diff（P0）、FR-261 结构同步脚本（P1，不含数据拷贝）、FR-263 只读 ER（P1）；权限/数据同步/BI/AI 挂 v0.7+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 
@@ -33,6 +34,20 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 | Week 8 剩余 | GUI 真实回归（T8.1）+ RC 试用（T8.2）+ 正式发布 | ~7h | V4-CP5 | ⏳ |
 
 门禁快照（发 rc1 前）：`just check` 全绿（db-driver 单测 43、app_lib 57、ssh-multihop 8、前端 vitest 125、Next build）；双 driver integration 33/33（MySQL 20、PG 13）。
+
+## v0.5 已交付周计划（归档）
+
+> 2026-08-24 从 `docs/PLAN.md` 移出 Week 1-7 明细与已关闭检查点，PLAN 只留用户验收与 v0.6 草案。
+
+| 周 | 内容 | 工时 | 检查点 | 状态 |
+|---|---|---|---|---|
+| Week 1 | FR-253 ALTER 差量纯函数（ddl.ts） | 13h | V5-CP1 | ✅ 2026-08-24 |
+| Week 2 | 结构页修改表对话框 + 预览确认 | 13h | — | ✅ 2026-08-24 |
+| Week 3 | 索引设计器、约束 DROP、View 只读 | 12h | V5-CP2 | ✅ 2026-08-24 |
+| Week 4-5 | FR-260 官方 mysqldump/mysql + pg_dump/pg_restore | 24h | V5-CP3 | ✅ 2026-08-24 |
+| Week 6-7 | FR-221 独立口令分享信封导入导出 | 25h | V5-CP4 | ✅ 2026-08-24 |
+| Week 8 | 文档 + `just check`（vitest 134 / app_lib 64） | 5h 已完 | — | ✅ 2026-08-24 |
+| Week 8 剩余 | GUI 回归（T8.1）+ RC 试用（T8.2）+ 正式发布 | ~7h | V5-CP5 | ⏳ |
 
 ## 开发阶段完成度（v0.1，5-6 周计划）
 
@@ -103,6 +118,8 @@ CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体�
 
 ## 重大决策与架构变更记录
 
+- **2026-08-24 立项 v0.6 草案**：主题收成「结构对比、可审阅同步与关系图」。P0 为 FR-220 双连接结构 diff（只对比已打开连接）；FR-261 本版只做结构脚本、不做数据拷贝；FR-263 只读 ER。用户权限与行级同步挂 v0.7+。跨 driver 只展示不生成执行脚本。
+- **2026-08-24 PLAN 归档 v0.5**：已交付周计划移入本文件；PLAN 只留 v0.4/v0.5 用户验收与 v0.6 草案。
 - **2026-08-24 立项 v0.5 草案**：主题收成「结构变更、官方备份与连接协作」，不把原 ROADMAP v0.5+ 整包（同步/权限/ER/BI/AI）塞进 8 周。P0 为 FR-253 列级改表；FR-260 走官方客户端而非自研 dump；FR-221 用独立口令信封补同事分享。功能代码待 V5-CP0。
 - **2026-08-24 PLAN 归档 v0.4 Week 1-7**：`docs/PLAN.md` 只保留尚未完成的 V4-CP5 发布收口（T8.1 GUI 回归 / T8.2 RC 试用 / 正式发布）；已交付周计划与门禁快照移入本文件。
 - **2026-08-22 MySQL 结构页约束查询拆 JOIN**：`list_constraints` 不再 JOIN `TABLE_CONSTRAINTS` 与 `KEY_COLUMN_USAGE`。MySQL 8 information_schema 对这两张表的 JOIN 经常无法下推库名/表名过滤，会扫全实例，浏览 tab「结构」一直停在加载。改为两条 `WHERE table_schema=? AND table_name=?` 查询再在内存归组；语义与原先 LEFT JOIN 一致（CHECK 无列时仍为空）。
