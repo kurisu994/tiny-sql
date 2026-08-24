@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { PlusIcon, XIcon } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { HistoryPanel } from "@/components/history-panel";
 import { BackupDialog } from "@/components/backup-dialog";
 import { CompareView } from "@/components/compare-view";
 import { ErView } from "@/components/er-view";
 import { PrivilegeView } from "@/components/privilege-view";
+import { CloneTableDialog } from "@/components/clone-table-dialog";
 import { CreateTableDialog } from "@/components/create-table-dialog";
 import { BrowseView } from "@/components/browse-view";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
@@ -21,7 +23,9 @@ import {
   envTextClass,
   isReadOnly,
 } from "@/lib/connection-meta";
+import { formatCellDisplay } from "@/lib/cell-inspect";
 import { buildExplainTree, explainSql, type ExplainNode } from "@/lib/explain";
+import { parseForeignKey } from "@/lib/schema-er";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
 import {
   dbApi,
@@ -109,6 +113,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [formatting, setFormatting] = useState(false);
   const [createTableOpen, setCreateTableOpen] = useState(false);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [importingDump, setImportingDump] = useState(false);
   const [dumpMsg, setDumpMsg] = useState<string | null>(null);
@@ -644,6 +649,22 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
               >
                 新建表
+              </button>
+              <button
+                type="button"
+                onClick={() => setCloneOpen(true)}
+                disabled={
+                  readOnly ||
+                  !connected ||
+                  !selectedDb ||
+                  !activeTab?.selectedTable ||
+                  (connection.driver === "postgresql" && !selectedSchema)
+                }
+                aria-label="复制为新表"
+                title="把当前表复制为同库新表"
+                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+              >
+                复制表
               </button>
               {/* 导入 SQL dump（FR-252）：流式执行整个文件 */}
               <button
@@ -1211,6 +1232,16 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           onOpenChange={setCreateTableOpen}
         />
       )}
+      {selectedDb && activeTab?.selectedTable && (
+        <CloneTableDialog
+          open={cloneOpen}
+          connection={connection}
+          database={selectedDb}
+          schema={connection.driver === "postgresql" ? selectedSchema : null}
+          sourceTable={activeTab.selectedTable}
+          onOpenChange={setCloneOpen}
+        />
+      )}
       {selectedDb && (
         <BackupDialog
           open={backupOpen}
@@ -1613,6 +1644,9 @@ function ExplainTreeView({ nodes }: { nodes: ExplainNode[] }) {
       {nodes.map((node, index) => (
         <li key={`${node.label}-${index}`}>
           {node.label}
+          {node.hint && (
+            <span className="ml-2 text-amber-600 dark:text-amber-400">[{node.hint}]</span>
+          )}
           {node.children.length > 0 && (
             <div className="ml-4">
               <ExplainTreeView nodes={node.children} />
@@ -1631,6 +1665,8 @@ export function ResultTable({
   truncated,
   sort,
   onSort,
+  constraints,
+  onOpenForeignKey,
 }: {
   rowSet: RowSet;
   connectionId: string;
@@ -1638,7 +1674,17 @@ export function ResultTable({
   /** 当前排序（FR-242）；与 onSort 同时提供时列头可点击切换 */
   sort?: { column: string; descending: boolean } | null;
   onSort?: (column: string) => void;
+  constraints?: ConstraintMeta[];
+  onOpenForeignKey?: (
+    table: string,
+    filters: { column: string; value: string }[],
+  ) => void;
 }) {
+  const [inspect, setInspect] = useState<{
+    column: string;
+    value: string | null;
+    row: (string | null)[];
+  } | null>(null);
   const { widthOf, customized, startResize, reset } = useColumnWidths(
     connectionId,
     rowSet.columns,
@@ -1729,6 +1775,11 @@ export function ResultTable({
                   {row.map((cell, ci) => (
                     <div
                       key={ci}
+                      role="button"
+                      tabIndex={0}
+                      onDoubleClick={() =>
+                        setInspect({ column: rowSet.columns[ci] ?? "", value: cell, row })
+                      }
                       className="truncate border-b border-neutral-100 px-2 py-1 dark:border-neutral-900"
                       title={cell ?? "NULL"}
                     >
@@ -1745,6 +1796,103 @@ export function ResultTable({
           )}
         </div>
       </div>
+      {inspect && (
+        <CellInspector
+          column={inspect.column}
+          value={inspect.value}
+          row={inspect.row}
+          columns={rowSet.columns}
+          constraints={constraints ?? []}
+          onClose={() => setInspect(null)}
+          onOpenForeignKey={onOpenForeignKey}
+        />
+      )}
+    </div>
+  );
+}
+
+function CellInspector({
+  column,
+  value,
+  row,
+  columns,
+  constraints,
+  onClose,
+  onOpenForeignKey,
+}: {
+  column: string;
+  value: string | null;
+  row: (string | null)[];
+  columns: string[];
+  constraints: ConstraintMeta[];
+  onClose: () => void;
+  onOpenForeignKey?: (
+    table: string,
+    filters: { column: string; value: string }[],
+  ) => void;
+}) {
+  const display = formatCellDisplay(value);
+  const fk = constraints
+    .map((constraint) => {
+      const parsed = parseForeignKey(constraint);
+      if (!parsed) return null;
+      const index = constraint.columns.findIndex(
+        (name) => name.toLowerCase() === column.toLowerCase(),
+      );
+      if (index < 0) return null;
+      return { constraint, parsed, index };
+    })
+    .find(Boolean);
+  const canJump =
+    fk &&
+    value !== null &&
+    fk.constraint.columns.every((name) => {
+      const i = columns.findIndex((c) => c.toLowerCase() === name.toLowerCase());
+      return i >= 0 && row[i] !== null;
+    });
+
+  return (
+    <div className="max-h-56 shrink-0 overflow-auto border-t border-neutral-200 p-2 text-xs dark:border-neutral-800">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="font-mono font-medium">{column}</span>
+        <button type="button" className="text-neutral-500" onClick={onClose}>
+          关闭
+        </button>
+      </div>
+      <p className="mb-1 text-neutral-500">
+        {display.kind === "null"
+          ? "SQL NULL"
+          : display.kind === "empty"
+            ? "空字符串（不是 NULL）"
+            : display.kind === "json"
+              ? "JSON"
+              : "文本"}
+      </p>
+      <pre className="whitespace-pre-wrap break-all font-mono">{display.text}</pre>
+      {canJump && fk && value && (
+        <Button
+          type="button"
+          size="sm"
+          className="mt-2"
+          onClick={() => {
+            const filters = fk.constraint.columns.flatMap((src, i) => {
+              const rowIndex = columns.findIndex(
+                (c) => c.toLowerCase() === src.toLowerCase(),
+              );
+              const dest = fk.parsed.columns[i];
+              const cell = rowIndex >= 0 ? row[rowIndex] : null;
+              return dest && cell !== null && cell !== undefined
+                ? [{ column: dest, value: cell }]
+                : [];
+            });
+            if (filters.length === fk.constraint.columns.length) {
+              onOpenForeignKey?.(fk.parsed.table, filters);
+            }
+          }}
+        >
+          打开引用行 {fk.parsed.table}.{fk.parsed.columns[fk.index]}
+        </Button>
+      )}
     </div>
   );
 }
