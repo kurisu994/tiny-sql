@@ -1,6 +1,6 @@
 ---
 title: tiny-sql 需求文档
-version: 0.6.0-draft-1
+version: 0.7.0-draft-1
 status: draft
 last_updated: 2026-08-24
 ---
@@ -9,7 +9,7 @@ last_updated: 2026-08-24
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-24）**：应用版本号为 `0.4.0-rc1`；稳定 Release 仍是 v0.3.0。main 已包含 v0.4–v0.6 功能编码（50 个 command），待各版 GUI/RC 与正式切版。后续以 [ROADMAP.md](./ROADMAP.md) / [PLAN.md](./PLAN.md) 为准。
+> **实现快照（2026-08-24）**：应用版本号为 `0.4.0-rc1`；稳定 Release 仍是 v0.3.0。main 已包含 v0.4–v0.6 功能编码（50 个 command）。v0.7 范围见 §3.7（草案）。
 
 ## 1. 项目愿景
 
@@ -363,6 +363,20 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-263** 只读 ER（P1）：用已有外键元数据画当前 schema 的表关系；点击定位结构页。不做正向工程、不持久化拖拽布局。
 
 实施顺序与验收见 [PLAN](./PLAN.md) 与 [RELEASE_CHECKLIST v0.6](./RELEASE_CHECKLIST.md#v06-发布检查清单)。
+
+---
+
+### 3.7 v0.7 范围（表数据搬迁、库内权限与执行计划）
+
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.7 开发计划](./PLAN.md#v07-开发计划)。
+
+> **实现状态（2026-08-24）**：草案已立项，功能代码未开工。
+
+- **FR-266** 双连接表级数据拷贝（P0）：两条已打开、同方言连接之间按表拷贝行。源侧分页读取，目标侧参数化批量插入（复用 `bulk_insert_rows`）。默认追加；若先清空目标必须手输目标表名并预览语句。跨 driver / 未打开连接拒绝。不做双向同步或冲突合并。
+- **FR-262** MySQL 用户与权限（P1）：列出账号与授权摘要（不含密码哈希），变更生成 GRANT/REVOKE/CREATE USER SQL 并二次确认。不引入 tiny-sql 应用账号。PG 角色变更可降级为只读。
+- **FR-222** EXPLAIN 可读化（P1）：查询 tab 对当前 SQL 执行 EXPLAIN 并以树/表展示。`EXPLAIN ANALYZE` 单独入口并确认（会真正执行）。不做慢查询采集或监控平台。
+
+实施顺序与验收见 [v0.7 开发计划](./PLAN.md#v07-开发计划)。
 
 ---
 

@@ -6,7 +6,9 @@
 
 ## 当前状态
 
-**本轮：PLAN 归档 + 文档按代码对齐（2026-08-24）**——PLAN 只留 v0.4/v0.5/v0.6 用户验收。事实：版本号 `0.4.0-rc1`、command 50/50 前后端一致、`connection_reconnect` 含 `database_override`、结构化错误不限于 `db_query`。README / ARCHITECTURE / techContext / REQUIREMENTS 已按代码改。
+**本轮：立项 v0.7 草案（2026-08-24）**——主题「表数据搬迁、库内权限与执行计划」：FR-266 拷贝（P0）、FR-262 MySQL 权限（P1）、FR-222 EXPLAIN（P1）。功能未开工。
+
+**前一轮：PLAN 归档 + 文档按代码对齐（2026-08-24）**——PLAN 只留三版用户验收。版本号 `0.4.0-rc1`、command 50/50。
 
 **前一轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
 
@@ -109,6 +111,7 @@
 
 ## 近期决策
 
+- v0.7 不搬双向同步 / BI / AI。拷贝只走已打开同方言连接；replace 必须手输目标表；EXPLAIN ANALYZE 单独确认。
 - v0.6 不搬数据同步 / 权限 / BI / AI。P0 是两条已打开连接的结构 diff；跨 driver 只展示；同步脚本必须预览确认，DDL 失败不假装能整体回滚。
 - v0.5 不搬 ROADMAP 原 v0.5+ 整包。P0 是 FR-253 列级改表（补 FR-251 顺延）；FR-260 只编排官方 `mysqldump`/`mysql`，禁止回退成 FR-252 dump；FR-221 用独立口令信封，默认不打包私钥。同步 / 权限 / ER / BI / AI 挂 v0.6+。
 - v0.5 ALTER 生成放前端纯函数（沿用 `ddl.ts`），执行走现有 `db_query` 写确认，不新开 DDL 契约面；不承诺 RENAME COLUMN / 换主键向导。
@@ -166,8 +169,9 @@
 
 ## 下一步（按优先级）
 
-1. 用户 GUI 验收 v0.4 / v0.5 / v0.6（对比台先开两条连接）。
-2. 按需 `just release` 切正式版（版本号仍停在 0.4.0-rc1）。
+1. 用户确认 v0.7 范围（P0=表拷贝，不是双向同步 / AI）。
+2. GUI 验收 v0.4–v0.6。
+3. 确认后再开 v0.7 Week 1。
 
 ## 阻塞 / 风险
 
