@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { AlterTableDialog } from "@/components/alter-table-dialog";
+import { Button } from "@/components/ui/button";
 import { buildPostgresCreateTablePreview } from "@/lib/ddl";
 import {
   dbApi,
@@ -10,6 +12,7 @@ import {
   type ConstraintMeta,
   type IndexMeta,
 } from "@/lib/tauri-api";
+import { useSessionStore } from "@/stores/session-store";
 
 /** 表结构数据：列定义 + 索引 + 约束 + DDL 预览文本 */
 interface StructureData {
@@ -43,6 +46,9 @@ export function TableStructureView({
 }) {
   const [data, setData] = useState<StructureData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [alterOpen, setAlterOpen] = useState(false);
+  const refreshMetadata = useSessionStore((s) => s.refreshMetadata);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,7 +92,7 @@ export function TableStructureView({
     return () => {
       cancelled = true;
     };
-  }, [connectionId, driver, database, schema, table]);
+  }, [connectionId, driver, database, schema, table, reloadToken]);
 
   if (error) {
     return (
@@ -99,6 +105,24 @@ export function TableStructureView({
 
   return (
     <div className="h-full overflow-auto p-3 text-xs">
+      <div className="mb-3 flex justify-end">
+        <Button type="button" size="sm" onClick={() => setAlterOpen(true)}>
+          修改表
+        </Button>
+      </div>
+      <AlterTableDialog
+        open={alterOpen}
+        driver={driver}
+        database={database}
+        schema={schema}
+        table={table}
+        original={data.columns}
+        onOpenChange={setAlterOpen}
+        onApplied={async () => {
+          await refreshMetadata();
+          setReloadToken((n) => n + 1);
+        }}
+      />
       {/* 列定义 */}
       <Section title={`列（${data.columns.length}）`}>
         <table className="w-full border-collapse">
