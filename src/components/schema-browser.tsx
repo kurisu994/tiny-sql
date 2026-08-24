@@ -5,6 +5,7 @@ import { Virtuoso } from "react-virtuoso";
 import { PlusIcon, XIcon } from "lucide-react";
 
 import { HistoryPanel } from "@/components/history-panel";
+import { BackupDialog } from "@/components/backup-dialog";
 import { CreateTableDialog } from "@/components/create-table-dialog";
 import { BrowseView } from "@/components/browse-view";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
@@ -97,6 +98,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [formatting, setFormatting] = useState(false);
   const [createTableOpen, setCreateTableOpen] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
   const [importingDump, setImportingDump] = useState(false);
   const [dumpMsg, setDumpMsg] = useState<string | null>(null);
 
@@ -555,6 +557,16 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
               >
                 {importingDump ? "导入中…" : "导入 SQL"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setBackupOpen(true)}
+                disabled={!connected || !selectedDb}
+                aria-label="官方备份"
+                title="官方 mysqldump / pg_dump 备份与恢复（不是 SQL dump）"
+                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+              >
+                官方备份
               </button>
               <button
                 type="button"
@@ -1057,6 +1069,17 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           database={selectedDb}
           schema={connection.driver === "postgresql" ? selectedSchema : null}
           onOpenChange={setCreateTableOpen}
+        />
+      )}
+      {selectedDb && (
+        <BackupDialog
+          open={backupOpen}
+          connectionId={connection.id}
+          driver={connection.driver}
+          database={selectedDb}
+          schema={connection.driver === "postgresql" ? selectedSchema : null}
+          table={activeTab?.selectedTable ?? null}
+          onOpenChange={setBackupOpen}
         />
       )}
     </div>

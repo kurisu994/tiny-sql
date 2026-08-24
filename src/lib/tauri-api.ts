@@ -139,6 +139,11 @@ export const ERROR_ZH: Record<string, string> = {
   "error.security.master_required": "需先启用并解锁主密码才能保存 passphrase",
   "error.export.io": "导出文件写入失败，请检查路径与磁盘权限",
   "error.dump.no_tables": "当前范围没有可导出的表",
+  "error.backup.tool_not_found": "未找到官方备份工具，请安装 mysqldump/mysql 或 pg_dump/pg_restore，或在对话框指定路径",
+  "error.backup.failed": "官方备份 / 恢复失败，请查看日志（不会回退成 SQL dump）",
+  "error.backup.cancelled": "官方备份 / 恢复已取消",
+  "error.backup.target_mismatch": "手输的目标库名与当前库不一致，已拒绝恢复",
+  "error.backup.io": "备份文件读写失败，请检查路径与权限",
   "error.sqlfile.read_failed": "SQL 文件读取失败，请检查路径与权限",
   "error.sqlfile.write_failed": "SQL 文件写入失败，请检查路径与磁盘权限",
   "error.sqlfile.too_large": "SQL 文件过大（超过 8MB），请拆分后打开",
@@ -481,6 +486,38 @@ export const dbApi = {
       id,
       input: { database, schema, path },
     }),
+  probeBackupTools: (id: string, dumpPath?: string, clientPath?: string) =>
+    invoke<BackupProbeResult>("backup_probe_tools", {
+      id,
+      input: {
+        dumpPath: dumpPath?.trim() ? dumpPath.trim() : null,
+        clientPath: clientPath?.trim() ? clientPath.trim() : null,
+      },
+    }),
+  backupExport: (id: string, input: BackupExportInput) =>
+    invoke<BackupJobResult>("db_backup_export", {
+      id,
+      input: {
+        database: input.database,
+        schema: input.schema ?? null,
+        table: input.table ?? null,
+        path: input.path,
+        dumpPath: input.dumpPath ?? null,
+        queryId: input.queryId ?? null,
+      },
+    }),
+  backupRestore: (id: string, input: BackupRestoreInput) =>
+    invoke<BackupJobResult>("db_backup_restore", {
+      id,
+      input: {
+        database: input.database,
+        confirmDatabase: input.confirmDatabase,
+        schema: input.schema ?? null,
+        path: input.path,
+        clientPath: input.clientPath ?? null,
+        queryId: input.queryId ?? null,
+      },
+    }),
   queryMany: (id: string, sql: string, options: QueryOptions = {}) =>
     invoke<MultiQueryResult>("db_query_many", {
       id,
@@ -607,6 +644,43 @@ export interface ImportDumpResult {
   /** 失败语句序号（1 起；null = 全部成功） */
   failedAt: number | null;
   failedPreview: string | null;
+}
+
+/** 官方备份工具探测（FR-260） */
+export interface BackupToolInfo {
+  path: string;
+  version: string;
+}
+
+export interface BackupProbeResult {
+  dump: BackupToolInfo | null;
+  client: BackupToolInfo | null;
+  exportPreview: string;
+  restorePreview: string;
+}
+
+export interface BackupExportInput {
+  database: string;
+  schema?: string | null;
+  table?: string | null;
+  path: string;
+  dumpPath?: string | null;
+  queryId?: string | null;
+}
+
+export interface BackupRestoreInput {
+  database: string;
+  confirmDatabase: string;
+  schema?: string | null;
+  path: string;
+  clientPath?: string | null;
+  queryId?: string | null;
+}
+
+export interface BackupJobResult {
+  bytes: number;
+  toolVersion: string;
+  log: string;
 }
 
 /** 多语句脚本的单条执行结果（FR-243） */

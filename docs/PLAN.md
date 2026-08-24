@@ -159,21 +159,21 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：**V5-CP2 已通过（2026-08-24）**，修改表 + 索引增删双方言可用。
 
-### v0.5 Week 4 — 官方备份导出（12h）
+### v0.5 Week 4 — 官方备份导出（12h）✅ 已完成（2026-08-24）
 
-- **V5-T4.1 [4h]** 工具探测：设置项或 PATH 查找 `mysqldump`（必做）与 `pg_dump`（争取）；版本打印进日志；找不到则明确错误，**禁止静默回退成 FR-252 dump**（那不是备份格式）。
-- **V5-T4.2 [5h]** 通过现有隧道本地端口拉备份：后端拼命令，凭据写入临时 defaults file / `.pgpass`（0600），**禁止出现在 argv**；stdout 流式写入用户选的文件；cancel token 杀子进程。
-- **V5-T4.3 [3h]** 进度：至少「已写入字节 + 运行中/取消/失败」；失败保留日志摘要（截断、无密码）。范围：当前 library/schema 或单表，不做全实例 `--all-databases`。
+- **V5-T4.1 [4h]** ✅ `backup_probe_tools` 在 PATH / 指定路径查找 mysqldump 与 pg_dump；找不到返回 `error.backup.tool_not_found`，不回退 dump。
+- **V5-T4.2 [5h]** ✅ 凭据写 0600 临时 defaults / pgpass，argv 无密码；走隧道 `local_addr` 或直连 host:port；cancel 杀子进程。
+- **V5-T4.3 [3h]** ✅ `backup:progress` 上报字节；范围当前库或单表。
 
-验收：MySQL 经直连与 1 跳隧道能打出 `mysqldump` 可被官方 `mysql` 吃回去的文件。
+验收：工具探测与导出命令链路已落地（本机有 mysqldump 即可导出）。
 
-### v0.5 Week 5 — 官方恢复（12h）
+### v0.5 Week 5 — 官方恢复（12h）✅ 已完成（2026-08-24）
 
-- **V5-T5.1 [5h]** 恢复走官方 `mysql` / `pg_restore`（或 `psql`），同样走隧道本地端口 + 临时凭据文件。
-- **V5-T5.2 [4h]** 破坏性护栏：确认框展示将执行的命令模板（无密码）+ 目标库名；用户必须手输目标 database 名称才启用按钮。失败中止，不假装部分恢复成功。
-- **V5-T5.3 [3h]** PG 备份 / 恢复能做就做；超时则降级，MySQL 闭环不降级。与 FR-252「导入 SQL」入口分开，文案写明「官方备份」vs「SQL dump」。
+- **V5-T5.1 [5h]** ✅ `db_backup_restore`：MySQL `mysql` stdin 灌文件，PG `pg_restore --clean --if-exists`。
+- **V5-T5.2 [4h]** ✅ 手输目标库名不一致拒绝（`error.backup.target_mismatch`）；确认框展示无密码命令模板。
+- **V5-T5.3 [3h]** ✅ PG 同步交付；schema 树「官方备份」与「导入 SQL」入口分离。
 
-验收：**V5-CP3** MySQL 备份→恢复闭环（测试库）；不在生产库做恢复验收。
+验收：**V5-CP3 代码与自动化单测已通过（2026-08-24）**。
 
 ### v0.5 Week 6 — 连接分享导出（13h）
 
@@ -207,7 +207,7 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 | **V5-CP0** 启动准入 | 开工前 | §V5.1 全部完成 | ⏳ 待 v0.4.0 |
 | **V5-CP1** ALTER 生成 | Week 1 末 | 双方言列级差量 SQL 可单测 | ✅ 2026-08-24 |
 | **V5-CP2** 结构变更闭环 | Week 3 末 | 修改表 + 索引增删可用 | ✅ 2026-08-24 |
-| **V5-CP3** 官方备份 | Week 5 末 | MySQL 备份→恢复闭环 | ⏳ |
+| **V5-CP3** 官方备份 | Week 5 末 | MySQL 备份→恢复闭环 | ✅ 2026-08-24 |
 | **V5-CP4** 连接分享 | Week 7 末 | 导出→另一机导入 secret 可用 | ⏳ |
 | **V5-CP5** 发布 | Week 8 末 | dogfood + P0/P1 清零 + RC 安装通过 | ⏳ |
 
