@@ -6,6 +6,8 @@ import { PlusIcon, XIcon } from "lucide-react";
 
 import { HistoryPanel } from "@/components/history-panel";
 import { BackupDialog } from "@/components/backup-dialog";
+import { CompareView } from "@/components/compare-view";
+import { ErView } from "@/components/er-view";
 import { CreateTableDialog } from "@/components/create-table-dialog";
 import { BrowseView } from "@/components/browse-view";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
@@ -101,6 +103,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const [backupOpen, setBackupOpen] = useState(false);
   const [importingDump, setImportingDump] = useState(false);
   const [dumpMsg, setDumpMsg] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<"browse" | "compare" | "er">("browse");
 
   /** 导入 SQL dump（FR-252）：选文件 → 确认（写操作一次性确认）→ 流式执行 */
   async function importDump() {
@@ -521,6 +524,34 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         </div>
       )}
 
+      <div className="flex shrink-0 gap-1 border-b border-neutral-200 px-3 py-1 text-xs dark:border-neutral-800">
+        {(
+          [
+            ["browse", "浏览"],
+            ["compare", "对比"],
+            ["er", "关系图"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setWorkspace(id)}
+            className={cn(
+              "rounded px-2 py-0.5",
+              workspace === id
+                ? "bg-neutral-200 dark:bg-neutral-800"
+                : "hover:bg-neutral-100 dark:hover:bg-neutral-800",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {workspace === "compare" ? (
+        <CompareView />
+      ) : workspace === "er" ? (
+        <ErView />
+      ) : (
       <div className="flex min-h-0 flex-1">
         {/* 左：database / schema / table 树 */}
         <aside className="w-72 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
@@ -1060,6 +1091,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           )}
         </section>
       </div>
+      )}
 
       {/* 新建表对话框（FR-251） */}
       {selectedDb && (
