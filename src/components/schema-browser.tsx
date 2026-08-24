@@ -630,10 +630,10 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       ) : (
       <div className="flex min-h-0 flex-1">
         {/* 左：database / schema / table 树 */}
-        <aside className="w-72 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
+        <aside className="w-80 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-100 bg-white/95 px-3 py-1.5 text-xs text-neutral-500 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
-            <span>数据库对象</span>
-            <div className="flex items-center gap-1">
+            <span className="shrink-0">数据库对象</span>
+            <div className="flex shrink-0 items-center gap-1">
               {/* 新建表（FR-251）：需已选中 database（MySQL）/ schema（PostgreSQL） */}
               <button
                 type="button"
@@ -646,9 +646,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 }
                 aria-label="新建表"
                 title="新建表"
-                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
               >
-                新建表
+                新建
               </button>
               <button
                 type="button"
@@ -662,9 +662,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 }
                 aria-label="复制为新表"
                 title="把当前表复制为同库新表"
-                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
               >
-                复制表
+                复制
               </button>
               {/* 导入 SQL dump（FR-252）：流式执行整个文件 */}
               <button
@@ -679,9 +679,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 }
                 aria-label="导入 SQL"
                 title="导入 SQL dump 文件（流式逐条执行）"
-                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
               >
-                {importingDump ? "导入中…" : "导入 SQL"}
+                {importingDump ? "导入中" : "导入"}
               </button>
               <button
                 type="button"
@@ -689,18 +689,19 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 disabled={!connected || !selectedDb}
                 aria-label="官方备份"
                 title="官方 mysqldump / pg_dump 备份与恢复（不是 SQL dump）"
-                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
               >
-                官方备份
+                备份
               </button>
               <button
                 type="button"
                 onClick={refreshMetadata}
                 disabled={!connected || refreshingMetadata}
                 aria-label="刷新数据库对象"
-                className="rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                title="刷新数据库对象"
+                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
               >
-                {refreshingMetadata ? "刷新中…" : "刷新"}
+                {refreshingMetadata ? "刷新中" : "刷新"}
               </button>
             </div>
           </div>
