@@ -374,7 +374,7 @@ describe("buildAlterTableStatements（FR-253 修改表）", () => {
     );
   });
 
-  it("标识符转义 + 拒绝重命名 / 删主键 / 非法类型", () => {
+  it("标识符转义 + 拒绝重命名主键 / 删主键 / 非法类型", () => {
     expect(
       buildAlterTableSql(
         mysqlInput({
@@ -401,7 +401,18 @@ describe("buildAlterTableStatements（FR-253 修改表）", () => {
           ],
         }),
       ),
-    ).toContain("不支持重命名");
+    ).toContain("不能重命名主键列");
+
+    expect(
+      buildAlterTableSql(
+        mysqlInput({
+          columns: [
+            alterCol("id", { dataType: "int", nullable: false }),
+            alterCol("name", { name: "title", dataType: "varchar(50)", nullable: true }),
+          ],
+        }),
+      ),
+    ).toContain("RENAME COLUMN `name` TO `title`");
 
     expect(
       validateAlterTable(

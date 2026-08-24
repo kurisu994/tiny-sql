@@ -179,7 +179,7 @@ export function buildPostgresCreateTablePreview(
 
 // === 修改表 SQL 生成（FR-253）===
 
-/** 修改表单中的一列。v0.5 不改主键、不做 RENAME。 */
+/** 修改表单中的一列。v0.8 支持非主键 RENAME COLUMN。 */
 export interface AlterColumnInput {
   /** 原列名；新增列为 null */
   originName: string | null;
@@ -208,7 +208,8 @@ export type AlterKind =
   | "set_not_null"
   | "drop_not_null"
   | "set_default"
-  | "drop_default";
+  | "drop_default"
+  | "rename";
 
 /** 一条独立 ALTER TABLE 语句 */
 export interface AlterStatement {
@@ -254,9 +255,14 @@ export function validateAlterTable(input: AlterTableInput): string | null {
     }
     if (
       column.originName &&
-      column.originName.trim().toLowerCase() !== column.name.trim().toLowerCase()
+      column.originName.trim() !== column.name.trim()
     ) {
-      return `不支持重命名列「${column.originName}」（请用 SQL）`;
+      const original = input.original.find(
+        (item) => item.name.toLowerCase() === column.originName!.trim().toLowerCase(),
+      );
+      if (original && isPrimaryColumn(original)) {
+        return `不能重命名主键列「${original.name}」`;
+      }
     }
   }
   const names = input.columns.map((c) => c.name.trim().toLowerCase());
@@ -336,6 +342,16 @@ export function buildAlterTableStatements(input: AlterTableInput): AlterStatemen
     const original = originals.get(key);
     if (!original) continue;
     kept.add(key);
+
+    const renamed = original.name !== column.name.trim();
+    if (renamed && !isPrimaryColumn(original)) {
+      push(
+        changes,
+        "rename",
+        `RENAME COLUMN ${quote(original.name)} TO ${quote(column.name.trim())}`,
+        false,
+      );
+    }
 
     const typeChanged =
       normalizeType(original.dataType) !== normalizeType(column.dataType);

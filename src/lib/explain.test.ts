@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildExplainTree, explainSql } from "@/lib/explain";
+import { buildExplainTree, explainHint, explainSql } from "@/lib/explain";
 
 describe("explainSql", () => {
   it("包装双方言 EXPLAIN", () => {
@@ -20,6 +20,8 @@ describe("buildExplainTree", () => {
     });
     expect(nodes[0].label).toContain("users");
     expect(nodes[0].label).toContain("type=ALL");
+    expect(nodes[0].hint).toBe("全表扫描");
+    expect(explainHint("Seq Scan · users")).toBe("顺序扫描");
   });
 
   it("PG JSON 递归子计划", () => {

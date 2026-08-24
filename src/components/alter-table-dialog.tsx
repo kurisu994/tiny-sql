@@ -88,7 +88,7 @@ interface AlterTableDialogProps {
 
 /**
  * 修改表对话框（FR-253）：回填现有列 → 双方言 ALTER 预览 → 二次确认后逐条执行。
- * 不改主键、不支持重命名；失败保留表单。
+ * 不改主键；非主键列可 RENAME COLUMN。失败保留表单。
  */
 export function AlterTableDialog({
   open,
@@ -222,7 +222,7 @@ export function AlterTableDialog({
             <TabsContent value="general">
               <div className="flex flex-col gap-3 py-2">
                 <p className="text-xs text-neutral-500">
-                  不能重命名列或拆换主键；危险变更会在预览里单独成条。
+                  不能重命名或删除主键列；危险变更会在预览里单独成条。
                 </p>
                 <div className="overflow-auto rounded-md border border-neutral-200 dark:border-neutral-800">
                   <table className="w-full border-collapse text-xs">

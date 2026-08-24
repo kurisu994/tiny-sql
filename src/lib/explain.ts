@@ -5,6 +5,17 @@ import type { DriverKind, RowSet } from "@/lib/tauri-api";
 export interface ExplainNode {
   label: string;
   children: ExplainNode[];
+  /** 只读提示（FR-275），不改写 SQL */
+  hint?: string;
+}
+
+export function explainHint(label: string): string | undefined {
+  const upper = label.toUpperCase();
+  if (upper.includes("TYPE=ALL")) return "全表扫描";
+  if (upper.includes("FILESORT")) return "额外排序";
+  if (upper.includes("TEMPORARY")) return "临时表";
+  if (upper.includes("SEQ SCAN")) return "顺序扫描";
+  return undefined;
 }
 
 const MAX_NODES = 200;
@@ -27,7 +38,8 @@ function mysqlTree(rowSet: RowSet): ExplainNode[] {
       rows && `rows=${rows}`,
       extra,
     ].filter(Boolean);
-    return { label: parts.join(" · "), children: [] };
+    const label = parts.join(" · ");
+    return { label, children: [], hint: explainHint(label) };
   });
 }
 
@@ -52,7 +64,8 @@ function pgNode(plan: PgPlan, budget: { left: number }): ExplainNode {
     budget.left -= 1;
     children.push(pgNode(child, budget));
   }
-  return { label: bits.join(" · "), children };
+  const label = bits.join(" · ");
+  return { label, children, hint: explainHint(label) };
 }
 
 function pgTree(rowSet: RowSet): ExplainNode[] {
@@ -68,7 +81,10 @@ function pgTree(rowSet: RowSet): ExplainNode[] {
       .split("\n")
       .filter((line) => line.trim())
       .slice(0, MAX_NODES)
-      .map((line) => ({ label: line.trim(), children: [] }));
+      .map((line) => {
+        const label = line.trim();
+        return { label, children: [], hint: explainHint(label) };
+      });
   }
 }
 
