@@ -621,6 +621,14 @@ pub enum DriverError {
 - **EXPLAIN（FR-222）**：无新 command。前端包装 `EXPLAIN` / `EXPLAIN ANALYZE`
   走现有 `db_query`；ANALYZE 单独确认。MySQL 行转树，PG 解析 FORMAT JSON。
 
+**v0.8 扩展点说明**：
+
+- **只读 / 环境（FR-270 / FR-271）**：`StoredConnection.read_only` / `env`，serde 缺省兼容。
+  写 command 与 ANALYZE 认只读。环境只做展示。
+- **复制新表（FR-272）**：前端生成 CREATE，执行走 `db_query`；灌数复用拷贝内核。
+- **检查器 / FK（FR-273）**：纯前端；跳转复用 `browse_table` 筛选。
+- **RENAME / EXPLAIN 提示（FR-274 / FR-275）**：`ddl.ts` 增 RENAME COLUMN；树节点加 hint。
+
 `DatabaseMeta.is_current` 与 `SchemaMeta.is_default` 是不同语义；`MetadataScope` 不把 MySQL 的 database/schema 同义关系强加给 PostgreSQL。MySQL scope 只携带 database，PostgreSQL scope 必须同时携带当前 database 与 schema。PostgreSQL 无法在一条连接上切换 database，请求非当前 database 时返回 `error.driver.database_switch_required`，由应用层重建目标连接。
 
 `DriverError` 的原始 sqlx 信息只保存在后端变体字段中，`Display` 与 Tauri IPC 均只输出稳定 i18n key；前端不得依赖或展示 driver 原文。这样调试信息不会因 `to_string()` 被意外带到用户界面，公共 key 仍保持只能新增、不能改名。
