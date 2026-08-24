@@ -583,6 +583,18 @@ pub enum DriverError {
   版本，跨块 lookahead 用字符队列等待），64KiB 块读取逐条执行，禁止整文件载入；
   失败中止并返回语句序号（原始错误不外泄）。
 
+**v0.5 扩展点说明**：
+
+- **列级 ALTER（FR-253）**：差量生成是前端纯函数（`src/lib/ddl.ts`），不新开
+  DDL 契约。ADD / 改类型 / 改空性 / 默认值 / DROP 各自独立成句；执行走现有
+  `db_query` + 写确认。不支持 RENAME COLUMN，不能删除主键列。
+- **官方备份（FR-260）**：`src-tauri/commands/backup.rs` 编排本机 mysqldump/mysql
+  与 pg_dump/pg_restore。凭据写入 0600 临时 defaults / pgpass，禁止出现在 argv。
+  SSH 连接使用隧道 `local_addr`。找不到工具返回 `error.backup.tool_not_found`，
+  禁止回退成 FR-252 dump。恢复必须手输目标库名。
+- **连接分享（FR-221）**：独立口令 Argon2id + AES-GCM 自描述信封（盐在文件内），
+  不含 master.key。默认不打包私钥内容；导入一律新 id，不写 known_hosts。
+
 ```
 
 `DatabaseMeta.is_current` 与 `SchemaMeta.is_default` 是不同语义；`MetadataScope` 不把 MySQL 的 database/schema 同义关系强加给 PostgreSQL。MySQL scope 只携带 database，PostgreSQL scope 必须同时携带当前 database 与 schema。PostgreSQL 无法在一条连接上切换 database，请求非当前 database 时返回 `error.driver.database_switch_required`，由应用层重建目标连接。
@@ -657,6 +669,12 @@ impl OpenConnection {
 | `db_import_csv` | `(id, database, schema?, table, path, mapping, has_header, skip_errors)` | `CsvImportResult` | CSV 分批导入（FR-252）；中止模式批内事务回滚，跳过模式收集失败行号 |
 | `db_export_dump` | `(id, database, schema?, table?, path)` | `ExportDumpResult` | SQL dump 导出：DDL + 多行 VALUES INSERT 流式写文件（FR-252） |
 | `db_import_dump` | `(id, database, schema?, path)` | `ImportDumpResult` | SQL dump 导入：流式分句逐条执行（FR-252）；失败返回语句序号 + 截断预览 |
+| `backup_probe_tools` | `(id, dump_path?, client_path?)` | `BackupProbeResult` | 探测官方备份/恢复工具（FR-260） |
+| `db_backup_export` | `(id, database, schema?, table?, path, dump_path?, query_id?)` | `BackupJobResult` | 官方工具导出备份，进度事件 `backup:progress` |
+| `db_backup_restore` | `(id, database, confirm_database, path, client_path?, query_id?)` | `BackupJobResult` | 官方工具恢复；库名不一致拒绝 |
+| `connection_share_export` | `(ids, password, path, include_private_keys)` | `()` | 独立口令导出连接分享文件（FR-221） |
+| `connection_share_preview` | `(path, password)` | `SharePreviewResult` | 预览分享文件（无 secret） |
+| `connection_share_import` | `(path, password)` | `usize` | 导入分享连接，生成新 id |
 | `db_list_indexes` | `(id, database, schema?, table)` | `Vec<IndexMeta>` | 列出表的索引（FR-241） |
 | `db_list_constraints` | `(id, database, schema?, table)` | `Vec<ConstraintMeta>` | 列出表的约束（FR-241） |
 | `transaction_begin` | `(id)` | `session_id` | 建立独占 session 并 BEGIN（FR-244） |

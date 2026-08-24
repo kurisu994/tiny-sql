@@ -151,7 +151,12 @@ fn read_version(path: &Path) -> String {
 }
 
 /// MySQL defaults-extra-file 内容（密码加引号并转义）。
-pub fn mysql_defaults_file(host: &str, port: u16, user: &str, password: &str) -> Result<String, QueryCommandError> {
+pub fn mysql_defaults_file(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+) -> Result<String, QueryCommandError> {
     if password.contains('\n') || password.contains('\r') {
         return Err(err("error.backup.failed"));
     }
@@ -162,7 +167,13 @@ pub fn mysql_defaults_file(host: &str, port: u16, user: &str, password: &str) ->
 }
 
 /// pgpass 一行：`:` `\` 转义。
-pub fn pgpass_line(host: &str, port: u16, database: &str, user: &str, password: &str) -> Result<String, QueryCommandError> {
+pub fn pgpass_line(
+    host: &str,
+    port: u16,
+    database: &str,
+    user: &str,
+    password: &str,
+) -> Result<String, QueryCommandError> {
     if password.contains('\n') || password.contains('\r') {
         return Err(err("error.backup.failed"));
     }
@@ -200,7 +211,10 @@ fn write_secret_file(contents: &str) -> Result<SecretFile, QueryCommandError> {
 }
 
 fn stored_of(state: &AppState, id: &str) -> Result<StoredConnection, QueryCommandError> {
-    let store = state.store.lock().map_err(|_| err("error.connection.not_found"))?;
+    let store = state
+        .store
+        .lock()
+        .map_err(|_| err("error.connection.not_found"))?;
     store
         .load()
         .map_err(QueryCommandError::from_key)?
@@ -215,7 +229,9 @@ async fn endpoint_of(
     stored: &StoredConnection,
 ) -> Result<(String, u16, DriverKind), QueryCommandError> {
     let conns = state.connections.lock().await;
-    let open = conns.get(id).ok_or_else(|| err("error.connection.not_open"))?;
+    let open = conns
+        .get(id)
+        .ok_or_else(|| err("error.connection.not_open"))?;
     let kind = Driver::kind(&open.driver);
     if let Some(tunnel) = &open.tunnel {
         let addr = tunnel.local_addr();
@@ -243,18 +259,33 @@ fn sanitize_log(text: &str) -> String {
     text.chars().take(800).collect()
 }
 
-async fn run_process(
-    program: &Path,
-    args: &[String],
-    envs: &[(String, String)],
-    stdout_path: Option<&Path>,
-    stdin_path: Option<&Path>,
+struct ProcessIo<'a> {
+    program: &'a Path,
+    args: &'a [String],
+    envs: &'a [(String, String)],
+    stdout_path: Option<&'a Path>,
+    stdin_path: Option<&'a Path>,
     token: CancellationToken,
-    app: &AppHandle,
-    query_id: &str,
-) -> Result<(u64, String), QueryCommandError> {
+    app: &'a AppHandle,
+    query_id: &'a str,
+}
+
+async fn run_process(io: ProcessIo<'_>) -> Result<(u64, String), QueryCommandError> {
+    let ProcessIo {
+        program,
+        args,
+        envs,
+        stdout_path,
+        stdin_path,
+        token,
+        app,
+        query_id,
+    } = io;
     let mut command = Command::new(program);
-    command.args(args).envs(envs.iter().cloned()).kill_on_drop(true);
+    command
+        .args(args)
+        .envs(envs.iter().cloned())
+        .kill_on_drop(true);
     if stdout_path.is_some() {
         command.stdout(Stdio::piped());
     } else {
@@ -483,16 +514,16 @@ pub async fn db_backup_export(
                     &stored.password,
                 )?)?;
                 let args = mysql_dump_args(&defaults.0, &database, table.as_deref());
-                run_process(
-                    &dump,
-                    &args,
-                    &[],
-                    Some(Path::new(&input.path)),
-                    None,
-                    token.clone(),
-                    &app,
-                    &query_id,
-                )
+                run_process(ProcessIo {
+                    program: &dump,
+                    args: &args,
+                    envs: &[],
+                    stdout_path: Some(Path::new(&input.path)),
+                    stdin_path: None,
+                    token: token.clone(),
+                    app: &app,
+                    query_id: &query_id,
+                })
                 .await
             }
             DriverKind::PostgreSql => {
@@ -512,16 +543,17 @@ pub async fn db_backup_export(
                     table.as_deref(),
                     &input.path,
                 );
-                run_process(
-                    &dump,
-                    &args,
-                    &[("PGPASSFILE".into(), pass.0.display().to_string())],
-                    None,
-                    None,
-                    token.clone(),
-                    &app,
-                    &query_id,
-                )
+                let envs = [("PGPASSFILE".into(), pass.0.display().to_string())];
+                run_process(ProcessIo {
+                    program: &dump,
+                    args: &args,
+                    envs: &envs,
+                    stdout_path: None,
+                    stdin_path: None,
+                    token: token.clone(),
+                    app: &app,
+                    query_id: &query_id,
+                })
                 .await
             }
         }
@@ -576,16 +608,16 @@ pub async fn db_backup_restore(
                     &stored.password,
                 )?)?;
                 let args = mysql_restore_args(&defaults.0, &database);
-                run_process(
-                    &client,
-                    &args,
-                    &[],
-                    None,
-                    Some(Path::new(&input.path)),
-                    token.clone(),
-                    &app,
-                    &query_id,
-                )
+                run_process(ProcessIo {
+                    program: &client,
+                    args: &args,
+                    envs: &[],
+                    stdout_path: None,
+                    stdin_path: Some(Path::new(&input.path)),
+                    token: token.clone(),
+                    app: &app,
+                    query_id: &query_id,
+                })
                 .await
             }
             DriverKind::PostgreSql => {
@@ -597,16 +629,17 @@ pub async fn db_backup_restore(
                     &stored.password,
                 )?)?;
                 let args = pg_restore_args(&host, port, &stored.user, &database, &input.path);
-                run_process(
-                    &client,
-                    &args,
-                    &[("PGPASSFILE".into(), pass.0.display().to_string())],
-                    None,
-                    None,
-                    token.clone(),
-                    &app,
-                    &query_id,
-                )
+                let envs = [("PGPASSFILE".into(), pass.0.display().to_string())];
+                run_process(ProcessIo {
+                    program: &client,
+                    args: &args,
+                    envs: &envs,
+                    stdout_path: None,
+                    stdin_path: None,
+                    token: token.clone(),
+                    app: &app,
+                    query_id: &query_id,
+                })
                 .await
             }
         }

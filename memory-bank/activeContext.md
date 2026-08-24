@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**本轮：归档 v0.4 + 立项 v0.5 草案（2026-08-24）**——`docs/PLAN.md` 已交付周计划移入 `progress.md`，只留 V4-CP5 收口；同时起草 v0.5（8 周约 99h）：FR-253 修改表/索引（P0）、FR-260 官方备份恢复（P1）、FR-221 加密分享连接（P1）。REQUIREMENTS §3.5、ROADMAP 已把同步/权限/ER 改挂 v0.6+。功能代码待 v0.4.0 正式发布（V5-CP0）。
+**本轮：v0.5 功能开发完成（2026-08-24）**——按 PLAN 跳过 V5-CP0，落地 FR-253 / FR-260 / FR-221。`just check` 全绿（app_lib 64、db-driver 43、ssh-multihop 8、vitest 134、Next build）。剩用户侧 V5-T8.1 GUI 回归与 T8.2 RC 试用。
 
 **前一轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
 
@@ -165,9 +165,9 @@
 
 ## 下一步（按优先级）
 
-1. 用户确认 v0.5 草案范围（尤其 P0=改表、备份走官方工具、分享进本版）；要改主题再说，未确认前不开工。
-2. V4-T8.1：用户 GUI 实测 v0.4 全功能（检查项见 RELEASE_CHECKLIST v0.4 节）；优先复测 MySQL「结构」页。V4-T8.2：rc1 一周试用。
-3. `just release v0.4.0` 正式发布（V4-CP5）后，才进入 v0.5 Week 1。
+1. V5-T8.1：GUI 实测改表 / 索引 / 官方备份 / 连接分享（含直连与多跳）。
+2. V5-T8.2：RC 试用后再正式发布。
+3. v0.4.0 正式发布仍可并行（V4-CP5）。
 
 ## 阻塞 / 风险
 

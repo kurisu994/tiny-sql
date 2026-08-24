@@ -11,7 +11,7 @@
 | v0.2 | ✅ 正式版已发布 | 2026-08-20 发布 `v0.2.0`（发布提交 `4f6b07f`）；V2-CP1~CP5 全部关闭。范围：多 driver + PostgreSQL、主密码加密/TLS 诊断、schema intelligence、查询工作台、SSH RTT/重连；详见 CHANGELOG `0.2.0` 段 |
 | v0.3 | ✅ 正式版已发布 | 2026-08-22 发布 `v0.3.0`（发布提交 `0825da5`，Release run `32546492367` 四平台成功，含四平台资产与 `latest.json`）。范围：可靠事务、服务端筛选分页、index/constraint 元数据树与对象搜索、多语句与格式化、SQL 文件工作流；详见 CHANGELOG `0.3.0` 段 |
 | v0.4 | 🚧 rc1 试用中 | 2026-08-22 完成 Week 1-7 全部三项 FR（FR-250 表格安全编辑 / FR-251 结构查看、DDL 预览与新建表 / FR-252 CSV 导入与 SQL dump）+ 文档与自动化门禁；`just check` 全绿、integration 33/33、本机 dmg + updater 签名产物成功；同日发布 `v0.4.0-rc1`（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）；剩 GUI 真实回归、一周试用与正式发布（V4-CP5） |
-| v0.5 | 📝 草案 | 2026-08-24 立项：FR-253 修改表/索引设计器（P0）、FR-260 官方备份恢复（P1）、FR-221 加密分享连接（P1）；待 v0.4.0 正式发布后开工。同步/权限/ER/BI/AI 改挂 v0.6+ |
+| v0.5 | 🚧 编码完成 | 2026-08-24 完成 FR-253 / FR-260 / FR-221 与 `just check`；待 GUI/RC 验收。同步/权限/ER 仍挂 v0.6+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 

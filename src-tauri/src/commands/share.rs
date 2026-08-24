@@ -3,12 +3,12 @@
 //! 独立口令 Argon2id → AES-256-GCM，自描述信封。不含 master.key / security.json。
 //! 默认不打包私钥文件内容；导入一律新 id，不带入 known_hosts。
 
-use std::fs;
 use aes_gcm::aead::{Aead, OsRng};
 use aes_gcm::{AeadCore, Aes256Gcm, Key, KeyInit, Nonce};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 

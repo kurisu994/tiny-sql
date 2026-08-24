@@ -193,10 +193,10 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 ### v0.5 Week 8 — dogfooding 与发布（12h）
 
-- **V5-T8.1 [4h]** 双 driver × 直连 / 1 跳 / 3 跳：改表、加索引、MySQL 备份恢复、分享往返。
-- **V5-T8.2 [3h]** 作者 + 至少 2 位试用者使用 RC ≥ 1 周：0 数据丢失、0 凭据泄露、0 不可恢复 crash。
-- **V5-T8.3 [3h]** 文档：REQUIREMENTS §3.5 收口、ARCHITECTURE 补 ALTER 生成 / 子进程备份 / 分享信封、RELEASE_CHECKLIST v0.5、CHANGELOG。
-- **V5-T8.4 [2h]** `just check` + 双 driver integration + 本机签名产物。
+- [ ] **V5-T8.1 [4h]** 双 driver × 直连 / 1 跳 / 3 跳：改表、加索引、MySQL 备份恢复、分享往返。（用户验收）
+- [ ] **V5-T8.2 [3h]** 作者 + 至少 2 位试用者使用 RC ≥ 1 周：0 数据丢失、0 凭据泄露、0 不可恢复 crash。（用户验收）
+- [x] **V5-T8.3 [3h]** 文档（2026-08-24）：REQUIREMENTS §3.5 收口、ARCHITECTURE 补 ALTER / 官方备份 / 分享信封与 command 列表、RELEASE_CHECKLIST v0.5、CHANGELOG `[Unreleased]`。
+- [x] **V5-T8.4 [2h]** `just check` 全绿（2026-08-24）：workspace 单测（app_lib 64、db-driver 43、ssh-multihop 8）、前端 vitest 134、Next build。双 driver integration 与本机签名产物由用户验收。
 
 验收：**V5-CP5** 发布门槛全部通过；未完成 P1 降级项明确移入 v0.5.1 或 v0.6，不在 Release notes 虚假承诺。
 
