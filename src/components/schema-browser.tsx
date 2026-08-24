@@ -8,11 +8,13 @@ import { HistoryPanel } from "@/components/history-panel";
 import { BackupDialog } from "@/components/backup-dialog";
 import { CompareView } from "@/components/compare-view";
 import { ErView } from "@/components/er-view";
+import { PrivilegeView } from "@/components/privilege-view";
 import { CreateTableDialog } from "@/components/create-table-dialog";
 import { BrowseView } from "@/components/browse-view";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
 import { TopologyGraph } from "@/components/topology-graph";
 import { useColumnWidths } from "@/hooks/use-column-widths";
+import { buildExplainTree, explainSql, type ExplainNode } from "@/lib/explain";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
 import {
   dbApi,
@@ -103,7 +105,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const [backupOpen, setBackupOpen] = useState(false);
   const [importingDump, setImportingDump] = useState(false);
   const [dumpMsg, setDumpMsg] = useState<string | null>(null);
-  const [workspace, setWorkspace] = useState<"browse" | "compare" | "er">("browse");
+  const [workspace, setWorkspace] = useState<"browse" | "compare" | "er" | "privilege">("browse");
+  const [explainTree, setExplainTree] = useState<ExplainNode[] | null>(null);
+  const [explainTruncated, setExplainTruncated] = useState(false);
 
   /** 导入 SQL dump（FR-252）：选文件 → 确认（写操作一次性确认）→ 流式执行 */
   async function importDump() {
@@ -353,6 +357,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       });
       if (!allowWrite) return;
     }
+    setExplainTree(null);
     await executeSql(sql, { rowLimit: 100000, allowWrite });
     // 多语句脚本的写确认回填：前端粗判只看首 token，漏网的写语句由后端
     // 返回 write_requires_confirmation，这里补确认后按确认态重试（FR-243）
@@ -375,6 +380,39 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       if (ok) {
         await executeSql(sql, { rowLimit: 100000, allowWrite: true });
       }
+    }
+  }
+
+  async function runExplain(analyze: boolean) {
+    const sql = activeTab?.sqlText.trim() ?? "";
+    if (!sql) return;
+    if (analyze) {
+      const ok = await confirm({
+        title: "EXPLAIN ANALYZE",
+        message: "会真正执行当前 SQL（含写语句的副作用）。确定继续？",
+        confirmText: "分析",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const wrapped = explainSql(connection.driver, sql, analyze);
+    const allowWrite =
+      analyze && needsWriteConfirmation(wrapped, connection.driver);
+    if (allowWrite) {
+      const ok = await confirm({
+        title: "确认写操作",
+        message: "EXPLAIN ANALYZE 将执行被分析的写语句。",
+        confirmText: "继续",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    await executeSql(wrapped, { rowLimit: 100000, allowWrite });
+    const latest = selectActiveTab(useSessionStore.getState());
+    if (latest?.rowSet) {
+      const tree = buildExplainTree(connection.driver, latest.rowSet);
+      setExplainTree(tree.nodes);
+      setExplainTruncated(tree.truncated);
     }
   }
 
@@ -530,6 +568,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
             ["browse", "浏览"],
             ["compare", "对比"],
             ["er", "关系图"],
+            ["privilege", "权限"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -551,6 +590,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         <CompareView />
       ) : workspace === "er" ? (
         <ErView />
+      ) : workspace === "privilege" ? (
+        <PrivilegeView />
       ) : (
       <div className="flex min-h-0 flex-1">
         {/* 左：database / schema / table 树 */}
@@ -971,6 +1012,32 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               >
                 {formatting ? "格式化…" : "格式化"}
               </button>
+              <button
+                type="button"
+                onClick={() => void runExplain(false)}
+                disabled={
+                  !connected ||
+                  !activeTab ||
+                  activeTab.queryRunning ||
+                  activeTab.sqlText.trim().length === 0
+                }
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+              >
+                解释
+              </button>
+              <button
+                type="button"
+                onClick={() => void runExplain(true)}
+                disabled={
+                  !connected ||
+                  !activeTab ||
+                  activeTab.queryRunning ||
+                  activeTab.sqlText.trim().length === 0
+                }
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+              >
+                ANALYZE
+              </button>
               {activeTab?.transaction?.inTransaction ? (
                 <div className="flex items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 dark:border-violet-900 dark:bg-violet-950/40">
                   <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
@@ -1070,6 +1137,14 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 )}
                 {activeTab?.loadingData && (
                   <p className="p-4 text-sm text-neutral-500">加载中…</p>
+                )}
+                {explainTree && (
+                  <div className="max-h-48 overflow-auto border-b border-neutral-200 p-2 text-xs dark:border-neutral-800">
+                    {explainTruncated && (
+                      <p className="mb-1 text-amber-600">计划过大，已截断展示</p>
+                    )}
+                    <ExplainTreeView nodes={explainTree} />
+                  </div>
                 )}
                 {!activeTab?.loadingData && activeTab?.rowSet && (
                   <ResultTable
@@ -1496,6 +1571,23 @@ function MultiResultView({
         {current.sql}
       </div>
     </div>
+  );
+}
+
+function ExplainTreeView({ nodes }: { nodes: ExplainNode[] }) {
+  return (
+    <ul className="font-mono leading-5">
+      {nodes.map((node, index) => (
+        <li key={`${node.label}-${index}`}>
+          {node.label}
+          {node.children.length > 0 && (
+            <div className="ml-4">
+              <ExplainTreeView nodes={node.children} />
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
