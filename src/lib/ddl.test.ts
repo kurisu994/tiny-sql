@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildAlterTableSql,
   buildAlterTableStatements,
+  buildCreateIndexSql,
   buildCreateTableSql,
+  buildDropConstraintSql,
+  buildDropIndexSql,
   buildPostgresCreateTablePreview,
   isValidDataType,
   validateAlterTable,
+  validateCreateIndex,
   validateCreateTable,
   type AlterColumnInput,
   type AlterTableInput,
@@ -420,5 +424,97 @@ describe("buildAlterTableStatements（FR-253 修改表）", () => {
         }),
       ),
     ).toContain("类型不合法");
+  });
+});
+
+describe("索引 / 约束 SQL（FR-253）", () => {
+  it("MySQL / PG 创建普通与唯一索引", () => {
+    expect(
+      buildCreateIndexSql({
+        driver: "mysql",
+        database: "app",
+        table: "users",
+        name: "idx_name",
+        columns: ["name"],
+        unique: false,
+      }),
+    ).toBe("ALTER TABLE `app`.`users` ADD INDEX `idx_name` (`name`);");
+    expect(
+      buildCreateIndexSql({
+        driver: "postgresql",
+        database: "app",
+        schema: "public",
+        table: "users",
+        name: "idx_email",
+        columns: ["email", "name"],
+        unique: true,
+      }),
+    ).toBe(
+      'CREATE UNIQUE INDEX "idx_email" ON "public"."users" ("email", "name");',
+    );
+  });
+
+  it("删除索引与外键约束", () => {
+    expect(
+      buildDropIndexSql({
+        driver: "mysql",
+        database: "app",
+        table: "users",
+        name: "idx_name",
+      }),
+    ).toBe("ALTER TABLE `app`.`users` DROP INDEX `idx_name`;");
+    expect(
+      buildDropIndexSql({
+        driver: "postgresql",
+        database: "app",
+        schema: "public",
+        table: "users",
+        name: "idx_name",
+      }),
+    ).toBe('DROP INDEX "public"."idx_name";');
+    expect(
+      buildDropConstraintSql({
+        driver: "mysql",
+        database: "app",
+        table: "orders",
+        name: "fk_user",
+        constraintType: "FOREIGN KEY",
+      }),
+    ).toBe("ALTER TABLE `app`.`orders` DROP FOREIGN KEY `fk_user`;");
+    expect(
+      buildDropConstraintSql({
+        driver: "postgresql",
+        database: "app",
+        schema: "public",
+        table: "orders",
+        name: "orders_user_id_fkey",
+        constraintType: "FOREIGN KEY",
+      }),
+    ).toBe(
+      'ALTER TABLE "public"."orders" DROP CONSTRAINT "orders_user_id_fkey";',
+    );
+  });
+
+  it("validateCreateIndex 拒绝空列 / 非法名", () => {
+    expect(
+      validateCreateIndex({
+        driver: "mysql",
+        database: "app",
+        table: "users",
+        name: "idx;drop",
+        columns: ["name"],
+        unique: false,
+      }),
+    ).toContain("索引名不合法");
+    expect(
+      validateCreateIndex({
+        driver: "mysql",
+        database: "app",
+        table: "users",
+        name: "idx_name",
+        columns: [],
+        unique: false,
+      }),
+    ).toBe("至少选择一列");
   });
 });

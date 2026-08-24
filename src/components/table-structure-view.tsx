@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 
 import { AlterTableDialog } from "@/components/alter-table-dialog";
+import { IndexDesignerDialog } from "@/components/index-designer-dialog";
 import { Button } from "@/components/ui/button";
-import { buildPostgresCreateTablePreview } from "@/lib/ddl";
+import { buildDropConstraintSql, buildPostgresCreateTablePreview } from "@/lib/ddl";
 import {
   dbApi,
   translateError,
@@ -12,6 +13,7 @@ import {
   type ConstraintMeta,
   type IndexMeta,
 } from "@/lib/tauri-api";
+import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
 
 /** 表结构数据：列定义 + 索引 + 约束 + DDL 预览文本 */
@@ -36,6 +38,7 @@ export function TableStructureView({
   database,
   schema,
   table,
+  tableType = "BASE TABLE",
 }: {
   connectionId: string;
   driver: "mysql" | "postgresql";
@@ -43,12 +46,47 @@ export function TableStructureView({
   /** MySQL 忽略 */
   schema: string | null;
   table: string;
+  /** VIEW 只读，不提供改表 / 索引设计器 */
+  tableType?: string;
 }) {
   const [data, setData] = useState<StructureData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [alterOpen, setAlterOpen] = useState(false);
+  const [indexOpen, setIndexOpen] = useState(false);
   const refreshMetadata = useSessionStore((s) => s.refreshMetadata);
+  const confirm = useConfirmStore((s) => s.confirm);
+  const isView = tableType.toUpperCase().includes("VIEW");
+
+  async function reloadStructure() {
+    await refreshMetadata();
+    setReloadToken((n) => n + 1);
+  }
+
+  async function dropConstraint(constraint: ConstraintMeta) {
+    if (constraint.constraintType === "PRIMARY KEY") return;
+    const sql = buildDropConstraintSql({
+      driver,
+      database,
+      schema,
+      table,
+      name: constraint.name,
+      constraintType: constraint.constraintType,
+    });
+    const ok = await confirm({
+      title: "删除约束",
+      message: `将删除约束「${constraint.name}」：\n\n${sql}\n\n确定执行吗？`,
+      confirmText: "删除",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await dbApi.query(connectionId, sql, { allowWrite: true, schema });
+      await reloadStructure();
+    } catch (e) {
+      setError(translateError(e));
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -105,10 +143,20 @@ export function TableStructureView({
 
   return (
     <div className="h-full overflow-auto p-3 text-xs">
-      <div className="mb-3 flex justify-end">
-        <Button type="button" size="sm" onClick={() => setAlterOpen(true)}>
-          修改表
-        </Button>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-neutral-500">
+          {isView ? "视图（只读结构，不能改表或改索引）" : tableType}
+        </p>
+        {!isView && (
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={() => setIndexOpen(true)}>
+              索引
+            </Button>
+            <Button type="button" size="sm" onClick={() => setAlterOpen(true)}>
+              修改表
+            </Button>
+          </div>
+        )}
       </div>
       <AlterTableDialog
         open={alterOpen}
@@ -118,10 +166,18 @@ export function TableStructureView({
         table={table}
         original={data.columns}
         onOpenChange={setAlterOpen}
-        onApplied={async () => {
-          await refreshMetadata();
-          setReloadToken((n) => n + 1);
-        }}
+        onApplied={reloadStructure}
+      />
+      <IndexDesignerDialog
+        open={indexOpen}
+        driver={driver}
+        database={database}
+        schema={schema}
+        table={table}
+        columns={data.columns}
+        indexes={data.indexes}
+        onOpenChange={setIndexOpen}
+        onApplied={reloadStructure}
       />
       {/* 列定义 */}
       <Section title={`列（${data.columns.length}）`}>
@@ -202,6 +258,7 @@ export function TableStructureView({
                 <Th>类型</Th>
                 <Th>列</Th>
                 <Th>引用 / 定义</Th>
+                {!isView && <Th />}
               </tr>
             </thead>
             <tbody>
@@ -216,6 +273,20 @@ export function TableStructureView({
                   <Td className="font-mono text-neutral-500">
                     {constraint.reference ?? ""}
                   </Td>
+                  {!isView && (
+                    <Td>
+                      {constraint.constraintType !== "PRIMARY KEY" && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => void dropConstraint(constraint)}
+                        >
+                          删除
+                        </Button>
+                      )}
+                    </Td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -255,7 +326,7 @@ function Section({
   );
 }
 
-function Th({ children }: { children: React.ReactNode }) {
+function Th({ children }: { children?: React.ReactNode }) {
   return <th className="px-2 py-1 font-medium">{children}</th>;
 }
 

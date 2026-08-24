@@ -62,7 +62,10 @@ export function BrowseView({
   const confirm = useConfirmStore((s) => s.confirm);
   const selectedDb = useSessionStore((s) => s.selectedDb);
   const selectedSchema = useSessionStore((s) => s.selectedSchema);
+  const tables = useSessionStore((s) => s.tables);
   const driver = useSessionStore((s) => s.activeConnection?.driver ?? "mysql");
+  const tableType =
+    tables.find((item) => item.name === browse?.table)?.tableType ?? "BASE TABLE";
   // 筛选草稿：本地编辑，点「应用」才提交查询（应用后 store 的 filters 即生效值）
   const [drafts, setDrafts] = useState<TableFilter[]>(browse?.filters ?? []);
   // 子视图：数据 / 结构（FR-251）；结构视图下暂停数据表格渲染
@@ -423,6 +426,7 @@ export function BrowseView({
             database={selectedDb}
             schema={driver === "postgresql" ? selectedSchema : null}
             table={browse.table}
+            tableType={tableType}
           />
         ) : tab.rowSet ? (
           editMode ? (

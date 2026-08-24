@@ -151,13 +151,13 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 
 验收：双方言「打开结构 → 改一列 → 预览 → 确认 → 树刷新」可走通。
 
-### v0.5 Week 3 — 索引 / 约束与 View 结构（12h）
+### v0.5 Week 3 — 索引 / 约束与 View 结构（12h）✅ 已完成（2026-08-24）
 
-- **V5-T3.1 [5h]** 索引设计器：基于已有 `list_indexes` 展示，支持新建（列、唯一性、名称）与删除；生成 `CREATE INDEX` / `DROP INDEX`（MySQL 用 `ALTER TABLE ... ADD/DROP INDEX` 或等价），同样预览确认。
-- **V5-T3.2 [4h]** 约束：UNIQUE 与之合并；FOREIGN KEY / CHECK 以只读 +「生成 DROP 语句」为底线，新建 FK 向导可降级。
-- **V5-T3.3 [3h]** View 结构只读：树与结构页能展开 view 的列，不提供编辑 view 定义。
+- **V5-T3.1 [5h]** ✅ 索引设计器：新建普通/唯一索引、删除非主键索引；MySQL `ALTER TABLE ADD/DROP INDEX`，PG `CREATE/DROP INDEX`，预览确认后执行。
+- **V5-T3.2 [4h]** ✅ UNIQUE 并入索引设计器；FK / CHECK 结构页提供「删除」生成 DROP 语句并确认执行。不提供新建 FK 向导。
+- **V5-T3.3 [3h]** ✅ schema 树 VIEW 标记；结构页对视图只读（不提供改表/索引）。
 
-验收：**V5-CP2** 修改表 + 至少索引增删双方言可用。
+验收：**V5-CP2 已通过（2026-08-24）**，修改表 + 索引增删双方言可用。
 
 ### v0.5 Week 4 — 官方备份导出（12h）
 
@@ -206,7 +206,7 @@ Week 8  12h  双 driver dogfooding + 文档 + RC / 正式发布
 |---|---|---|---|
 | **V5-CP0** 启动准入 | 开工前 | §V5.1 全部完成 | ⏳ 待 v0.4.0 |
 | **V5-CP1** ALTER 生成 | Week 1 末 | 双方言列级差量 SQL 可单测 | ✅ 2026-08-24 |
-| **V5-CP2** 结构变更闭环 | Week 3 末 | 修改表 + 索引增删可用 | ⏳ |
+| **V5-CP2** 结构变更闭环 | Week 3 末 | 修改表 + 索引增删可用 | ✅ 2026-08-24 |
 | **V5-CP3** 官方备份 | Week 5 末 | MySQL 备份→恢复闭环 | ⏳ |
 | **V5-CP4** 连接分享 | Week 7 末 | 导出→另一机导入 secret 可用 | ⏳ |
 | **V5-CP5** 发布 | Week 8 末 | dogfood + P0/P1 清零 + RC 安装通过 | ⏳ |

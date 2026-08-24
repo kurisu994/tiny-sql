@@ -1124,6 +1124,11 @@ function TableTreeList({
             >
               <TableTreeIcon active={selectedTable === table.name} />
               <span className="min-w-0 truncate">{table.name}</span>
+              {table.tableType.toUpperCase().includes("VIEW") && (
+                <span className="shrink-0 rounded bg-neutral-200 px-1 text-[10px] text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300">
+                  VIEW
+                </span>
+              )}
             </button>
           </div>
           {expandedTable === table.name && (

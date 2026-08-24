@@ -429,3 +429,91 @@ export function buildAlterTableSql(input: AlterTableInput): string {
     .map((item) => item.sql)
     .join("\n");
 }
+
+// === 索引 / 约束 SQL（FR-253）===
+
+const IDENT_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** 新建索引输入 */
+export interface CreateIndexInput {
+  driver: "mysql" | "postgresql";
+  database: string;
+  schema?: string | null;
+  table: string;
+  name: string;
+  columns: string[];
+  unique: boolean;
+}
+
+/** 删除索引 / 约束的公共定位 */
+export interface DropObjectInput {
+  driver: "mysql" | "postgresql";
+  database: string;
+  schema?: string | null;
+  table: string;
+  name: string;
+}
+
+function validateIdentName(label: string, name: string): string | null {
+  const trimmed = name.trim();
+  if (!trimmed) return `${label}不能为空`;
+  if (!IDENT_NAME_PATTERN.test(trimmed)) return `${label}不合法：${trimmed}`;
+  return null;
+}
+
+/** 新建索引校验 */
+export function validateCreateIndex(input: CreateIndexInput): string | null {
+  const nameError = validateIdentName("索引名", input.name);
+  if (nameError) return nameError;
+  if (input.columns.length === 0) return "至少选择一列";
+  for (const column of input.columns) {
+    if (!column.trim()) return "列名不能为空";
+    if (!IDENT_NAME_PATTERN.test(column.trim())) {
+      return `列名不合法：${column}`;
+    }
+  }
+  return null;
+}
+
+/** 双方言 CREATE INDEX / MySQL ALTER TABLE ADD INDEX */
+export function buildCreateIndexSql(input: CreateIndexInput): string {
+  const name = input.name.trim();
+  if (input.driver === "mysql") {
+    const unique = input.unique ? "UNIQUE " : "";
+    const cols = input.columns.map((c) => quoteMysqlIdent(c.trim())).join(", ");
+    return `ALTER TABLE ${qualifiedTable(input)} ADD ${unique}INDEX ${quoteMysqlIdent(name)} (${cols});`;
+  }
+  const unique = input.unique ? "UNIQUE " : "";
+  const cols = input.columns.map((c) => quoteIdent(c.trim())).join(", ");
+  return `CREATE ${unique}INDEX ${quoteIdent(name)} ON ${qualifiedTable(input)} (${cols});`;
+}
+
+/** 双方言 DROP INDEX（禁止用于主键） */
+export function buildDropIndexSql(input: DropObjectInput): string {
+  if (input.driver === "mysql") {
+    return `ALTER TABLE ${qualifiedTable(input)} DROP INDEX ${quoteMysqlIdent(input.name.trim())};`;
+  }
+  const schema = quoteIdent(input.schema?.trim() || "public");
+  return `DROP INDEX ${schema}.${quoteIdent(input.name.trim())};`;
+}
+
+/**
+ * 删除约束：MySQL 外键 / CHECK 走 ALTER TABLE DROP …；
+ * UNIQUE 请用 [`buildDropIndexSql`]；PostgreSQL 统一 DROP CONSTRAINT。
+ */
+export function buildDropConstraintSql(
+  input: DropObjectInput & { constraintType: string },
+): string {
+  const table = qualifiedTable(input);
+  if (input.driver === "postgresql") {
+    return `ALTER TABLE ${table} DROP CONSTRAINT ${quoteIdent(input.name.trim())};`;
+  }
+  const kind = input.constraintType.toUpperCase();
+  if (kind === "FOREIGN KEY") {
+    return `ALTER TABLE ${table} DROP FOREIGN KEY ${quoteMysqlIdent(input.name.trim())};`;
+  }
+  if (kind === "CHECK") {
+    return `ALTER TABLE ${table} DROP CHECK ${quoteMysqlIdent(input.name.trim())};`;
+  }
+  return `ALTER TABLE ${table} DROP INDEX ${quoteMysqlIdent(input.name.trim())}`;
+}
