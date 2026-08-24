@@ -38,6 +38,10 @@ pub struct ConnectionInput {
     pub ssl: SslConfig,
     #[serde(default)]
     pub advanced: AdvancedConfig,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub env: String,
 }
 
 /// 列出所有连接，按最近使用时间倒序（FR-003）。
@@ -71,6 +75,8 @@ pub async fn connection_create(
         ssl: input.ssl,
         advanced: input.advanced,
         last_used_at: None,
+        read_only: input.read_only,
+        env: store::normalize_env(&input.env),
     };
     state.store.lock().unwrap().upsert(conn.clone())?;
     Ok(conn)
@@ -80,8 +86,9 @@ pub async fn connection_create(
 #[tauri::command]
 pub async fn connection_update(
     state: State<'_, AppState>,
-    connection: StoredConnection,
+    mut connection: StoredConnection,
 ) -> Result<(), String> {
+    connection.env = store::normalize_env(&connection.env);
     state.store.lock().unwrap().upsert(connection)
 }
 

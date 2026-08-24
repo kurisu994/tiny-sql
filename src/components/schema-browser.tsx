@@ -14,6 +14,13 @@ import { BrowseView } from "@/components/browse-view";
 import { SqlCodeEditor } from "@/components/sql-code-editor";
 import { TopologyGraph } from "@/components/topology-graph";
 import { useColumnWidths } from "@/hooks/use-column-widths";
+import {
+  connectionEnv,
+  connectionSafetyLine,
+  envLabel,
+  envTextClass,
+  isReadOnly,
+} from "@/lib/connection-meta";
 import { buildExplainTree, explainSql, type ExplainNode } from "@/lib/explain";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
 import {
@@ -112,6 +119,10 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   /** 导入 SQL dump（FR-252）：选文件 → 确认（写操作一次性确认）→ 流式执行 */
   async function importDump() {
     if (!selectedDb) return;
+    if (isReadOnly(connection)) {
+      setDumpMsg("该连接已设为应用只读，已拒绝导入。");
+      return;
+    }
     const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({
       title: "导入 SQL dump",
@@ -348,10 +359,13 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     if (!sql) return;
     let allowWrite = false;
     if (needsWriteConfirmation(sql, connection.driver)) {
+      if (readOnly) {
+        setDumpMsg("该连接已设为应用只读，已拒绝写操作。");
+        return;
+      }
       allowWrite = await confirm({
         title: "确认写操作",
-        message:
-          "检测到写操作，请确认已使用只读账号或明确知道风险。是否继续执行？",
+        message: `${safety}\n检测到写操作，请确认已使用只读账号或明确知道风险。是否继续执行？`,
         confirmText: "继续执行",
         danger: true,
       });
@@ -387,9 +401,13 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     const sql = activeTab?.sqlText.trim() ?? "";
     if (!sql) return;
     if (analyze) {
+      if (readOnly) {
+        setDumpMsg("该连接已设为应用只读，已拒绝 ANALYZE。");
+        return;
+      }
       const ok = await confirm({
         title: "EXPLAIN ANALYZE",
-        message: "会真正执行当前 SQL（含写语句的副作用）。确定继续？",
+        message: `${safety}\n会真正执行当前 SQL（含写语句的副作用）。确定继续？`,
         confirmText: "分析",
         danger: true,
       });
@@ -491,12 +509,24 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   }
 
   const connected = status === "connected";
+  const readOnly = isReadOnly(connection);
+  const safety = connectionSafetyLine(connection);
 
   return (
     <div className="flex h-full flex-col">
       {/* 顶栏 */}
       <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
         <span className="text-sm font-semibold">{connection.name}</span>
+        {envLabel(connectionEnv(connection)) && (
+          <span className={cn("text-xs font-medium", envTextClass(connectionEnv(connection)))}>
+            {envLabel(connectionEnv(connection))}
+          </span>
+        )}
+        {isReadOnly(connection) && (
+          <span className="rounded bg-neutral-200 px-1.5 py-0.5 text-xs dark:bg-neutral-800">
+            应用只读
+          </span>
+        )}
         <span
           className={`rounded px-1.5 py-0.5 text-xs ${
             connected
@@ -604,6 +634,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 type="button"
                 onClick={() => setCreateTableOpen(true)}
                 disabled={
+                  readOnly ||
                   !connected ||
                   !selectedDb ||
                   (connection.driver === "postgresql" && !selectedSchema)
@@ -619,6 +650,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 type="button"
                 onClick={() => void importDump()}
                 disabled={
+                  readOnly ||
                   !connected ||
                   !selectedDb ||
                   importingDump ||
@@ -1029,6 +1061,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 type="button"
                 onClick={() => void runExplain(true)}
                 disabled={
+                  isReadOnly(connection) ||
                   !connected ||
                   !activeTab ||
                   activeTab.queryRunning ||

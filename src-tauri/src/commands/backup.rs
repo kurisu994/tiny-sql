@@ -581,6 +581,7 @@ pub async fn db_backup_restore(
     id: String,
     input: BackupRestoreInput,
 ) -> Result<BackupJobResult, QueryCommandError> {
+    crate::commands::query::reject_if_read_only(&state, &id)?;
     if input.confirm_database.trim() != input.database.trim() {
         return Err(err("error.backup.target_mismatch"));
     }

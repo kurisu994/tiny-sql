@@ -633,6 +633,10 @@ interface SessionState {
     path: string,
     options?: { force?: boolean },
   ) => Promise<"saved" | "conflict" | "failed">;
+  /** 连接配置更新后同步内存中的 activeConnection（FR-270 / FR-271） */
+  syncStoredConnection: (connection: StoredConnection) => void;
+  /** 丢弃所有浏览 tab 的未提交编辑 */
+  discardAllPendingEdits: () => void;
   markHopStatus: (payload: HopStatusPayload) => void;
   markHopRtt: (payload: HopRttPayload) => void;
   markHopLost: (hopIndex: number) => void;
@@ -1797,6 +1801,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     return "saved";
   },
 
+  syncStoredConnection: (connection) => {
+    const { openId, activeConnection } = get();
+    if (openId !== connection.id && activeConnection?.id !== connection.id) return;
+    set({ activeConnection: connection });
+  },
+  discardAllPendingEdits: () => {
+    set({
+      tabs: get().tabs.map((tab) =>
+        tab.browse
+          ? {
+              ...tab,
+              browse: { ...tab.browse, pendingEdits: [], editMode: false },
+            }
+          : tab,
+      ),
+    });
+  },
   markHopStatus: (payload) =>
     set((s) => {
       if (

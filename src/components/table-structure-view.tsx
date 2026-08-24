@@ -13,6 +13,7 @@ import {
   type ConstraintMeta,
   type IndexMeta,
 } from "@/lib/tauri-api";
+import { isReadOnly } from "@/lib/connection-meta";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
 
@@ -147,7 +148,7 @@ export function TableStructureView({
         <p className="text-neutral-500">
           {isView ? "视图（只读结构，不能改表或改索引）" : tableType}
         </p>
-        {!isView && (
+        {!isView && !isReadOnly(useSessionStore.getState().activeConnection) && (
           <div className="flex gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => setIndexOpen(true)}>
               索引

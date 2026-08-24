@@ -61,6 +61,50 @@ pub(crate) async fn driver_of(
         .ok_or_else(|| "error.connection.not_open".to_string())
 }
 
+/// 连接是否标记应用层只读（FR-270）。配置不存在视为非只读。
+pub(crate) fn connection_is_read_only(state: &AppState, id: &str) -> Result<bool, String> {
+    let conns = state.store.lock().map_err(|_| "error.security.locked".to_string())?;
+    Ok(conns.load()?.iter().any(|c| c.id == id && c.read_only))
+}
+
+/// 只读连接禁止写 command。
+pub(crate) fn reject_if_read_only(
+    state: &AppState,
+    id: &str,
+) -> Result<(), QueryCommandError> {
+    if connection_is_read_only(state, id).map_err(QueryCommandError::from_key)? {
+        Err(QueryCommandError::from_key("error.connection.read_only"))
+    } else {
+        Ok(())
+    }
+}
+
+/// EXPLAIN ANALYZE / EXPLAIN (ANALYZE …) 会真正执行，只读连接一律拒绝。
+pub(crate) fn sql_is_explain_analyze(sql: &str) -> bool {
+    let tokens: Vec<String> = sql
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|token| !token.is_empty())
+        .map(|token| token.to_ascii_uppercase())
+        .collect();
+    tokens.first().map(String::as_str) == Some("EXPLAIN")
+        && tokens.iter().take(6).any(|token| token == "ANALYZE")
+}
+
+pub(crate) fn reject_query_if_read_only(
+    state: &AppState,
+    id: &str,
+    sql: &str,
+    allow_write: bool,
+) -> Result<(), QueryCommandError> {
+    if !connection_is_read_only(state, id).map_err(QueryCommandError::from_key)? {
+        return Ok(());
+    }
+    if allow_write || sql_is_explain_analyze(sql) {
+        return Err(QueryCommandError::from_key("error.connection.read_only"));
+    }
+    Ok(())
+}
+
 fn metadata_scope(
     kind: DriverKind,
     database: String,
@@ -96,6 +140,9 @@ pub async fn db_create_database(
     charset: Option<String>,
     collation: Option<String>,
 ) -> Result<(), String> {
+    if connection_is_read_only(&state, &id)? {
+        return Err("error.connection.read_only".into());
+    }
     let driver = driver_of(&state, &id).await?;
     driver
         .as_mysql()
@@ -196,6 +243,12 @@ pub async fn db_query(
     allow_write: Option<bool>,
     schema: Option<String>,
 ) -> Result<RowSet, QueryCommandError> {
+    reject_query_if_read_only(
+        &state,
+        &id,
+        &sql,
+        allow_write.unwrap_or(false),
+    )?;
     let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     // 与 close/reconnect 串行化“取 driver + 注册 token”：这样重连要么能看到并
     // 取消本查询，要么查询取得的就是新 session driver，不会落进两个阶段之间。
@@ -395,6 +448,7 @@ pub async fn db_apply_table_edits(
     id: String,
     input: ApplyTableEditsInput,
 ) -> Result<db_driver::ApplyEditsResult, QueryCommandError> {
+    reject_if_read_only(&state, &id)?;
     let ApplyTableEditsInput {
         database,
         schema,
@@ -467,6 +521,12 @@ pub async fn db_query_many(
     allow_write: Option<bool>,
     schema: Option<String>,
 ) -> Result<db_driver::MultiQueryResult, QueryCommandError> {
+    reject_query_if_read_only(
+        &state,
+        &id,
+        &sql,
+        allow_write.unwrap_or(false),
+    )?;
     let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let (driver, token) = {
         let lifecycle = state.connection_lifecycle(&id);
@@ -558,5 +618,14 @@ mod tests {
         assert_eq!(value["key"], "error.driver.query_failed");
         assert_eq!(value["line"], 12);
         assert!(!value.to_string().contains("secret_table"));
+    }
+
+    #[test]
+    fn explain_analyze_variants_are_detected() {
+        assert!(sql_is_explain_analyze("EXPLAIN ANALYZE SELECT 1"));
+        assert!(sql_is_explain_analyze("explain (analyze, format json) select 1"));
+        assert!(!sql_is_explain_analyze("EXPLAIN SELECT 1"));
+        assert!(!sql_is_explain_analyze("EXPLAIN SELECT analyze_col FROM t"));
+        assert!(!sql_is_explain_analyze("SELECT 1"));
     }
 }

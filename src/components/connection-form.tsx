@@ -13,11 +13,14 @@ import {
   type SslMode,
   type SshConfig,
   type SshHopConfig,
+  type ConnectionEnv,
   type StoredConnection,
 } from "@/lib/tauri-api";
+import { isReadOnly } from "@/lib/connection-meta";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useConnectionStore } from "@/stores/connection-store";
+import { isTabDirty, useSessionStore } from "@/stores/session-store";
 import { Button } from "@/components/ui/button";
 import {
   Tabs,
@@ -128,6 +131,8 @@ export function ConnectionForm({
   const [advanced, setAdvanced] = useState<AdvancedConfig>(
     () => ({ ...DEFAULT_ADVANCED, ...editing?.advanced }),
   );
+  const [readOnly, setReadOnly] = useState(() => isReadOnly(editing));
+  const [env, setEnv] = useState<ConnectionEnv>(() => editing?.env ?? "none");
 
   const toInput = (): ConnectionInput => ({
     name: form.name,
@@ -140,6 +145,8 @@ export function ConnectionForm({
     ssh,
     ssl,
     advanced,
+    readOnly,
+    env,
   });
 
   const set = <K extends keyof FormFields>(key: K, value: FormFields[K]) =>
@@ -171,10 +178,29 @@ export function ConnectionForm({
     setSaving(true);
     setTest({ kind: "idle" });
     try {
+      const input = toInput();
       if (editing) {
-        await update({ ...editing, ...toInput() });
+        const session = useSessionStore.getState();
+        if (
+          input.readOnly &&
+          !isReadOnly(editing) &&
+          session.openId === editing.id &&
+          session.tabs.some(isTabDirty)
+        ) {
+          const ok = await confirm({
+            title: "改为应用只读",
+            message: "当前连接有未提交的编辑或未执行 SQL，改为只读将丢弃这些变更。",
+            confirmText: "丢弃并只读",
+            danger: true,
+          });
+          if (!ok) return;
+          session.discardAllPendingEdits();
+        }
+        const next = { ...editing, ...input };
+        await update(next);
+        session.syncStoredConnection(next);
       } else {
-        await create(toInput());
+        await create(input);
       }
       onDone();
     } catch (e) {
@@ -252,6 +278,27 @@ export function ConnectionForm({
               value={form.password}
               onChange={(v) => set("password", v)}
             />
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-neutral-600 dark:text-neutral-400">环境</span>
+              <select
+                value={env}
+                onChange={(event) => setEnv(event.target.value as ConnectionEnv)}
+                className="rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900"
+              >
+                <option value="none">无</option>
+                <option value="prod">生产</option>
+                <option value="staging">预发</option>
+                <option value="dev">开发</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={readOnly}
+                onChange={(event) => setReadOnly(event.target.checked)}
+              />
+              <span>应用只读（拒绝写操作，不替代数据库账号权限）</span>
+            </label>
           </div>
           {driver === "postgresql" && (
             <p className="mt-3 text-xs text-neutral-500">

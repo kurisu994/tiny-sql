@@ -48,6 +48,7 @@ pub async fn transaction_begin(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<String, QueryCommandError> {
+    crate::commands::query::reject_if_read_only(&state, &id)?;
     // 与 close/reconnect 串行化「取 driver + 建 session + 注册」：
     // session 要么注册后被重连清理，要么就建立在新连接上，不会落进两阶段之间。
     let lifecycle = state.connection_lifecycle(&id);
@@ -88,6 +89,12 @@ pub async fn transaction_query(
     id: String,
     input: TxQueryInput,
 ) -> Result<TxQueryResult, QueryCommandError> {
+    crate::commands::query::reject_query_if_read_only(
+        &state,
+        &id,
+        &input.sql,
+        input.allow_write.unwrap_or(false),
+    )?;
     let TxQueryInput {
         session_id,
         sql,

@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useUpdateChecker } from "@/hooks/use-update-checker";
+import { connectionEnv, envDotClass, envLabel, isReadOnly } from "@/lib/connection-meta";
 import type { StoredConnection } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
@@ -264,10 +265,24 @@ export default function Home() {
                           selectedId === c.id && "bg-blue-50 dark:bg-blue-950",
                         )}
                       >
-                        <span className="truncate text-sm font-medium">
+                        <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium">
+                          <span
+                            className={cn("inline-block h-2 w-2 shrink-0 rounded-full", envDotClass(connectionEnv(c)))}
+                            title={envLabel(connectionEnv(c)) || "无环境标签"}
+                          />
                           {c.name}
                           {isOpen && (
                             <span className="ml-1 text-green-600">●</span>
+                          )}
+                          {isReadOnly(c) && (
+                            <span className="rounded bg-neutral-200 px-1 text-[10px] font-normal dark:bg-neutral-800">
+                              只读
+                            </span>
+                          )}
+                          {envLabel(connectionEnv(c)) && (
+                            <span className="text-[10px] font-normal text-neutral-500">
+                              {envLabel(connectionEnv(c))}
+                            </span>
                           )}
                         </span>
                         <span className="truncate text-xs text-neutral-500">
@@ -307,7 +322,7 @@ export default function Home() {
                         进入命令列界面
                       </ContextMenuItem>
                       <ContextMenuItem
-                        disabled={!isConnected || c.driver !== "mysql"}
+                        disabled={!isConnected || c.driver !== "mysql" || isReadOnly(c)}
                         onSelect={() => setDatabaseDialogConn(c)}
                       >
                         新建数据库

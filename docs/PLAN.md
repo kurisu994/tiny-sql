@@ -57,7 +57,7 @@ v0.7 GUI 入口：对比台「拷贝数据」；工作台「权限」；查询�
 
 ## V8.1 Phase 0：启动准入（不计入 8 周）
 
-- [ ] v0.4–v0.7 无阻塞 P0/P1 反馈；补丁走旧版号，不混进 v0.8。
+- [x] v0.4–v0.7 前置按用户要求跳过。
 - [x] `REQUIREMENTS.md` 已补 §3.8（2026-08-24）。
 
 真实用户反馈的 P0/P1 始终优先于 v0.8 任何任务。
@@ -86,11 +86,11 @@ Week 8  12h  dogfood + 文档 + RC
 
 ## V8.3 分周任务
 
-### Week 1 — 只读内核（13h）
+### Week 1 — 只读内核（13h）✅ 已完成（2026-08-24）
 
-- **V8-T1.1 [5h]** `StoredConnection` 增加 `readOnly: bool`（缺省 false，旧密文兼容不重写）。
-- **V8-T1.2 [5h]** 写路径拒绝：`db_query(allow_write)`、`db_query_many`、`db_apply_table_edits`、CSV/dump 导入、备份恢复、拷贝目标、权限变更、建库/建表/ALTER。稳定 key `error.connection.read_only`。
-- **V8-T1.3 [3h]** 只读连接仍允许：浏览、EXPLAIN（非 ANALYZE）、导出、官方备份导出、结构对比（作为源）。ANALYZE / 同步脚本目标 / 拷贝目标一律拒绝。
+- **V8-T1.1 [5h]** ✅ `readOnly` / `env` 缺省兼容旧密文。
+- **V8-T1.2 [5h]** ✅ 写 command 与 ANALYZE 返回 `error.connection.read_only`。
+- **V8-T1.3 [3h]** ✅ 浏览 / 普通 EXPLAIN / 导出 / 备份导出仍允许。
 
 ### Week 2 — 只读 UI（13h）
 

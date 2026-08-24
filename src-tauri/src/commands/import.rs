@@ -260,6 +260,7 @@ pub async fn db_import_csv(
     id: String,
     input: CsvImportInput,
 ) -> Result<CsvImportResult, QueryCommandError> {
+    crate::commands::query::reject_if_read_only(&state, &id)?;
     let CsvImportInput {
         database,
         schema,

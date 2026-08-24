@@ -343,6 +343,7 @@ pub async fn db_import_dump(
     id: String,
     input: ImportDumpInput,
 ) -> Result<ImportDumpResult, QueryCommandError> {
+    crate::commands::query::reject_if_read_only(&state, &id)?;
     let ImportDumpInput {
         database,
         schema,

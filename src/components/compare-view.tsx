@@ -14,6 +14,7 @@ import {
 } from "@/lib/schema-diff";
 import { loadSchemaSnapshot } from "@/lib/schema-snapshot";
 import { buildSyncStatements, joinSyncSql, type SyncDirection } from "@/lib/schema-sync";
+import { isReadOnly } from "@/lib/connection-meta";
 import { copyTargetToken } from "@/lib/table-copy";
 import {
   dbApi,
@@ -25,6 +26,7 @@ import {
 } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
+import { useConnectionStore } from "@/stores/connection-store";
 import { useSessionStore, type OpenSessionInfo } from "@/stores/session-store";
 
 interface SidePick {
@@ -513,6 +515,10 @@ function CopyPanel({
   tables: string[];
 }) {
   const confirm = useConfirmStore((s) => s.confirm);
+  const destConn = useConnectionStore((s) =>
+    s.connections.find((c) => c.id === right.connectionId),
+  );
+  const destReadOnly = isReadOnly(destConn);
   const [sourceTable, setSourceTable] = useState(tables[0] ?? "");
   const [destTable, setDestTable] = useState(tables[0] ?? "");
   const [mode, setMode] = useState<"append" | "replace">("append");
@@ -556,6 +562,10 @@ function CopyPanel({
   }, [queryId]);
 
   async function runCopy() {
+    if (destReadOnly) {
+      setMessage("目标连接已设为应用只读，已拒绝拷贝。");
+      return;
+    }
     if (!preview || preview.crossDriver || preview.mappings.length === 0) return;
     if (confirmTarget.trim() !== expected) return;
     const ok = await confirm({
@@ -644,6 +654,7 @@ function CopyPanel({
           type="button"
           size="sm"
           disabled={
+            destReadOnly ||
             running ||
             !preview ||
             preview.crossDriver ||

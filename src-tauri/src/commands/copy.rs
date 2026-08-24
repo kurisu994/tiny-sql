@@ -259,6 +259,7 @@ pub async fn db_copy_table_rows(
     state: State<'_, AppState>,
     input: CopyTableInput,
 ) -> Result<CopyTableResult, QueryCommandError> {
+    crate::commands::query::reject_if_read_only(&state, &input.dest.id)?;
     if input.confirm_target.trim() != expected_target(&input.dest) {
         return Err(err("error.copy.target_mismatch"));
     }

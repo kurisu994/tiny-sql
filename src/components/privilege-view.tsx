@@ -16,6 +16,7 @@ import {
   type PrivilegeListResult,
 } from "@/lib/tauri-api";
 import { useConfirmStore } from "@/stores/confirm-store";
+import { isReadOnly } from "@/lib/connection-meta";
 import { useSessionStore } from "@/stores/session-store";
 
 /**
@@ -24,6 +25,7 @@ import { useSessionStore } from "@/stores/session-store";
 export function PrivilegeView() {
   const openId = useSessionStore((s) => s.openId);
   const driver = useSessionStore((s) => s.activeConnection?.driver ?? "mysql");
+  const appReadOnly = isReadOnly(useSessionStore((s) => s.activeConnection));
   const confirm = useConfirmStore((s) => s.confirm);
   const [list, setList] = useState<PrivilegeListResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +69,10 @@ export function PrivilegeView() {
   }
 
   async function runSql(sql: string | null, title: string) {
+    if (appReadOnly) {
+      setError("该连接已设为应用只读，已拒绝权限变更。");
+      return;
+    }
     if (!sql || !openId) {
       setError("参数不合法");
       return;
@@ -121,7 +127,7 @@ export function PrivilegeView() {
           {grants.join("\n") || "选择账号查看 SHOW GRANTS"}
         </pre>
       </div>
-      {driver === "mysql" && !list?.readOnly && (
+      {driver === "mysql" && !list?.readOnly && !appReadOnly && (
         <div className="flex flex-wrap items-end gap-2 rounded border border-neutral-200 p-2 dark:border-neutral-800">
           <label>
             用户

@@ -7,6 +7,7 @@ import { EditableTable } from "@/components/editable-table";
 import { ImportCsvDialog } from "@/components/import-csv-dialog";
 import { ResultTable } from "@/components/schema-browser";
 import { TableStructureView } from "@/components/table-structure-view";
+import { isReadOnly } from "@/lib/connection-meta";
 import { cn } from "@/lib/utils";
 import {
   dbApi,
@@ -81,6 +82,7 @@ export function BrowseView({
   const columns = tab.rowSet?.columns ?? [];
   const running = tab.queryRunning;
   const editMode = browse.editMode;
+  const readOnly = isReadOnly(useSessionStore((s) => s.activeConnection));
   const pendingCount = browse.pendingEdits.length;
   const insertCount = browse.pendingEdits.filter((e) => e.kind === "insert").length;
   const updateCount = browse.pendingEdits.filter((e) => e.kind === "update").length;
@@ -284,7 +286,7 @@ export function BrowseView({
             </span>
           )}
           {/* 编辑模式开关（FR-250）：仅显式主键表可进入 */}
-          {browse.editable && (
+          {browse.editable && !readOnly && (
             <button
               type="button"
               onClick={() => void handleToggleEditMode()}
@@ -299,7 +301,12 @@ export function BrowseView({
               {editMode ? "编辑中" : "编辑"}
             </button>
           )}
-          {!browse.editable && (
+          {readOnly && (
+            <span className="text-xs text-neutral-400" title="应用只读连接不可编辑">
+              应用只读
+            </span>
+          )}
+          {!browse.editable && !readOnly && (
             <span className="text-xs text-neutral-400" title="仅带主键的表可编辑">
               无主键，不可编辑
             </span>
@@ -342,7 +349,7 @@ export function BrowseView({
                 }
               })();
             }}
-            disabled={!selectedDb || editMode}
+            disabled={!selectedDb || editMode || readOnly}
             className="rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
             导入 CSV

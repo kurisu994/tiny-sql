@@ -17,7 +17,9 @@ import {
   translateError,
   type BackupProbeResult,
 } from "@/lib/tauri-api";
+import { connectionSafetyLine, isReadOnly } from "@/lib/connection-meta";
 import { useConfirmStore } from "@/stores/confirm-store";
+import { useSessionStore } from "@/stores/session-store";
 
 interface BackupDialogProps {
   open: boolean;
@@ -43,6 +45,8 @@ export function BackupDialog({
   onOpenChange,
 }: BackupDialogProps) {
   const confirm = useConfirmStore((s) => s.confirm);
+  const connection = useSessionStore((s) => s.activeConnection);
+  const readOnly = isReadOnly(connection);
   const [dumpPath, setDumpPath] = useState("");
   const [clientPath, setClientPath] = useState("");
   const [probe, setProbe] = useState<BackupProbeResult | null>(null);
@@ -126,6 +130,10 @@ export function BackupDialog({
   }
 
   async function runRestore() {
+    if (readOnly) {
+      setError("该连接已设为应用只读，已拒绝恢复。");
+      return;
+    }
     if (confirmDb.trim() !== database.trim()) {
       setError("请手输当前数据库名以确认恢复目标");
       return;
@@ -139,7 +147,7 @@ export function BackupDialog({
     const preview = probe?.restorePreview ?? "";
     const ok = await confirm({
       title: "执行官方恢复",
-      message: `将覆盖目标库「${database}」。\n\n${preview}\n文件：${path}\n\n这不是 SQL dump 导入。`,
+      message: `${connectionSafetyLine(connection)}\n将覆盖目标库「${database}」。\n\n${preview}\n文件：${path}\n\n这不是 SQL dump 导入。`,
       confirmText: "恢复",
       danger: true,
     });
@@ -265,7 +273,10 @@ export function BackupDialog({
               type="button"
               variant="destructive"
               disabled={
-                running || !probe?.client || confirmDb.trim() !== database.trim()
+                readOnly ||
+                running ||
+                !probe?.client ||
+                confirmDb.trim() !== database.trim()
               }
               onClick={() => void runRestore()}
             >

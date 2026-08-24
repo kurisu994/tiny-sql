@@ -51,6 +51,24 @@ pub struct StoredConnection {
     /// 最近使用时间（ISO 8601），用于列表排序（FR-003）
     #[serde(default)]
     pub last_used_at: Option<String>,
+    /// 应用层只读（FR-270）。缺省 false，不替代数据库账号权限。
+    #[serde(default)]
+    pub read_only: bool,
+    /// 环境标签 none/prod/staging/dev（FR-271）。缺省 none。
+    #[serde(default = "default_env")]
+    pub env: String,
+}
+
+fn default_env() -> String {
+    "none".into()
+}
+
+/// 只允许四个稳定值，非法输入回落 none。
+pub fn normalize_env(raw: &str) -> String {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "prod" | "staging" | "dev" => raw.trim().to_ascii_lowercase(),
+        _ => "none".into(),
+    }
 }
 
 /// SSH 隧道配置 —— 支持任意 N 跳串联，hops 顺序即链路顺序
@@ -281,6 +299,8 @@ mod tests {
             ssl: SslConfig::default(),
             advanced: AdvancedConfig::default(),
             last_used_at: None,
+            read_only: false,
+            env: default_env(),
         }
     }
 
@@ -317,6 +337,10 @@ mod tests {
         assert_eq!(conn.advanced.connect_timeout_seconds, 30);
         assert!(conn.advanced.keep_alive_enabled);
         assert_eq!(conn.advanced.keep_alive_interval_seconds, 60);
+        assert!(!conn.read_only);
+        assert_eq!(conn.env, "none");
+        assert_eq!(normalize_env("PROD"), "prod");
+        assert_eq!(normalize_env("weird"), "none");
         assert_eq!(conn.advanced.keep_alive_failure_threshold, 3);
         assert!(conn.advanced.write_timeout_enabled);
     }

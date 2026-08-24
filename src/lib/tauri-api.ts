@@ -59,6 +59,9 @@ export interface AdvancedConfig {
 /** 数据库 Driver 类型；序列化值与 Rust DriverKind 保持一致。 */
 export type DriverKind = "mysql" | "postgresql";
 
+/** 连接环境标签（FR-271），缺省 none */
+export type ConnectionEnv = "none" | "prod" | "staging" | "dev";
+
 /** 持久化的连接配置（与后端 StoredConnection 对齐，camelCase） */
 export interface StoredConnection {
   id: string;
@@ -73,6 +76,10 @@ export interface StoredConnection {
   ssl: SslConfig;
   advanced: AdvancedConfig;
   lastUsedAt?: string | null;
+  /** 应用层只读（FR-270），旧记录缺省 false */
+  readOnly?: boolean;
+  /** 环境标签（FR-271），旧记录缺省 none */
+  env?: ConnectionEnv;
 }
 
 /** 新建 / 测试连接的入参（不含 id） */
@@ -87,6 +94,8 @@ export interface ConnectionInput {
   ssh: SshConfig;
   ssl: SslConfig;
   advanced: AdvancedConfig;
+  readOnly?: boolean;
+  env?: ConnectionEnv;
 }
 
 /** 错误 i18n key → 中文文案 */
@@ -128,6 +137,7 @@ export const ERROR_ZH: Record<string, string> = {
   "error.driver.edit_conflict": "该行已被其他会话修改或删除，提交已取消，请刷新后重试",
   "error.connection.not_found": "连接配置不存在",
   "error.connection.not_open": "连接尚未打开",
+  "error.connection.read_only": "该连接已设为应用只读，已拒绝写操作（不是数据库账号权限）",
   "error.security.locked": "已锁定，请先输入主密码解锁",
   "error.security.wrong_password": "主密码错误",
   "error.security.empty_password": "主密码不能为空",
