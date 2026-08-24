@@ -595,6 +595,16 @@ pub enum DriverError {
 - **连接分享（FR-221）**：独立口令 Argon2id + AES-GCM 自描述信封（盐在文件内），
   不含 master.key。默认不打包私钥内容；导入一律新 id，不写 known_hosts。
 
+**v0.6 扩展点说明**：
+
+- **结构 diff（FR-220）**：纯前端组合已有 metadata 命令。`diffSchemas` 对比两份
+  快照；切换工作台焦点不再 `connection_close` 旧连接，便于两侧同时在线。
+  不新开同步协议契约。
+- **结构同步（FR-261）**：`buildSyncStatements` 复用 `ddl.ts` 生成可审阅 SQL，
+  经 `db_query_many` 写确认执行。跨 driver 拒绝生成。DDL 失败不假装整体回滚。
+- **只读 ER（FR-263）**：解析 MySQL `schema.table(cols)` 与 PG `REFERENCES`
+  文本构图，SVG 分层布局，无新依赖。
+
 ```
 
 `DatabaseMeta.is_current` 与 `SchemaMeta.is_default` 是不同语义；`MetadataScope` 不把 MySQL 的 database/schema 同义关系强加给 PostgreSQL。MySQL scope 只携带 database，PostgreSQL scope 必须同时携带当前 database 与 schema。PostgreSQL 无法在一条连接上切换 database，请求非当前 database 时返回 `error.driver.database_switch_required`，由应用层重建目标连接。

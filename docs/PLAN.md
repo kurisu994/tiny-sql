@@ -131,10 +131,10 @@ Week 8  12h  双连接 dogfooding + 文档 + RC / 正式发布
 
 ### v0.6 Week 8 — dogfooding 与发布（12h）
 
-- **V6-T8.1 [4h]** 双连接 × 直连 / 1 跳：diff、生成脚本、（可选）在测试库执行、ER。
-- **V6-T8.2 [3h]** RC ≥ 1 周：0 误执行生产破坏性脚本、0 凭据泄露、0 不可恢复 crash。
-- **V6-T8.3 [3h]** REQUIREMENTS §3.6 收口、ARCHITECTURE 补 diff/同步/ER、RELEASE_CHECKLIST v0.6、CHANGELOG。
-- **V6-T8.4 [2h]** `just check` + 针对性单测。
+- [ ] **V6-T8.1 [4h]** 双连接 × 直连 / 1 跳：diff、生成脚本、（可选）在测试库执行、ER。（用户验收）
+- [ ] **V6-T8.2 [3h]** RC ≥ 1 周：0 误执行生产破坏性脚本、0 凭据泄露、0 不可恢复 crash。（用户验收）
+- [x] **V6-T8.3 [3h]** 文档（2026-08-24）：REQUIREMENTS §3.6、ARCHITECTURE v0.6 扩展点、RELEASE_CHECKLIST v0.6、CHANGELOG。
+- [x] **V6-T8.4 [2h]** `just check` 全绿（2026-08-24）：前端 vitest 153、app_lib 64、db-driver 43、ssh-multihop 8、Next build。
 
 验收：**V6-CP5** 发布门槛通过。
 

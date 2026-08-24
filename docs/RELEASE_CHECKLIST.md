@@ -2,6 +2,24 @@
 
 > 本文件用于各版本 dogfooding、RC 和正式发布。不要在这里记录真实 host、用户名、库名、表名、IP 或公司环境细节；真实记录写到被忽略的 `docs/dogfooding-log.md`。
 
+## v0.6 发布检查清单
+
+### v0.6 RC 前本地检查
+
+- `just check` 全绿。
+- schema-diff / schema-sync / schema-er 单测覆盖空库、加表、删列、跨 driver 拒绝、FK 解析。
+- `CHANGELOG.md` `[Unreleased]` 覆盖 v0.6 用户可见变更。
+
+### v0.6 功能验收
+
+- 对比：两条已打开连接可选；未打开的不会被偷偷连接；表仅左/仅右/变更能看出来。
+- 同步：同方言能生成 SQL；跨 driver 拒绝；确认框含目标连接名；失败能看到语句序号。
+- ER：有 FK 能连线；无 FK 不崩；点击表能进结构。
+
+### v0.6 正式发布追加条件
+
+- V6-T8.1 / T8.2 由作者验收后再 `just release`。
+
 ## v0.5 发布检查清单
 
 ### v0.5 RC 前本地检查

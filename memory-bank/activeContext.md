@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**本轮：归档 v0.5 + 立项 v0.6 草案（2026-08-24）**——PLAN 已交付周计划移入 progress.md；v0.6 定为 FR-220 双连接结构 diff（P0）、FR-261 结构同步脚本（P1，无数据拷贝）、FR-263 只读 ER（P1）。权限 / 行级同步 / BI/AI 挂 v0.7+。功能代码待 V6-CP0 与用户确认。
+**本轮：v0.6 功能开发完成（2026-08-24）**——跳过 V6-CP0，落地 FR-220 / FR-261 / FR-263。切换连接不再拆旧隧道；工作台可对比、生成同步 SQL、看只读 ER。`just check` 全绿（vitest 153）。剩用户 V6-T8.1 / T8.2。
 
 **前一轮文档对齐（2026-08-22）**——按用户要求以代码为准核对全部文档：版本号四文件一致（0.4.0-rc1）、44 个 command 与 ARCHITECTURE §3.3 表格一一对应、Driver 契约 / DriverError 变体 / 事件契约 / AppState 字段全部一致；将 fix 提交（`1f2ceb1`）后实际为 33/33（MySQL 20、PG 13）的 integration 数字同步到 PLAN / ROADMAP / RELEASE_CHECKLIST / ARCHITECTURE / memory-bank 共 6 处（此前写 32/32、MySQL 19）；README/README_EN 项目结构补齐 security-store 与 lib/hooks 列举。历史验收快照（v0.3 20/20、Week 1 27/27 等）保持原样。
 
@@ -166,9 +166,9 @@
 
 ## 下一步（按优先级）
 
-1. 用户确认 v0.6 范围（P0=结构 diff，同步不含数据，ER 只读）。
-2. V4/V5 GUI 回归与 RC 试用（用户侧）。
-3. 确认后才开 v0.6 Week 1。
+1. V6-T8.1：GUI 实测对比 / 同步脚本 / 关系图（先开两条连接）。
+2. V6-T8.2：RC 试用。
+3. v0.4 / v0.5 正式发布仍可并行。
 
 ## 阻塞 / 风险
 
