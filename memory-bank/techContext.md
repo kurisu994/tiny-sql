@@ -97,6 +97,7 @@
 | 集成测试 env | `TINY_SQL_TEST_MYSQL_URL` / `TINY_SQL_TEST_POSTGRES_URL`（见 `.env.example`，`.env` 已忽略） |
 | 加密 store 路径 | `~/Library/Application Support/tiny-sql/{connections.enc, master.key, security.json, secrets.enc, history.enc}`（AES-GCM / Argon2id，整体加密） |
 | 连接 driver 持久化值 | `mysql` / `postgresql`；旧记录缺字段默认 `mysql`，兼容读取不主动重写密文 |
+| 连接只读 / 环境 | `readOnly` 缺省 false；`env` 为 `none` / `prod` / `staging` / `dev`（FR-270 / FR-271） |
 | known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
 
 ## 当前 command（src-tauri 实际，54 个）

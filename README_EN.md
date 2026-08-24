@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**Status: the latest stable GitHub Release is v0.7.0.** This is the first stable cut since v0.3.0 and includes table editing, schema changes, official backups, compare/copy, privileges, and EXPLAIN. GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Status: the latest stable GitHub Release is v0.7.0.** `main` also contains the v0.8 feature code (GUI/RC and the `v0.8.0` cut still pending). GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Why another SQL client
 
@@ -48,6 +48,7 @@ Built for personal use, usable by colleagues, and open source. Free of charge, n
 - CSV import + SQL dump import/export; official mysqldump/pg_dump backup (local tools required).
 - Encrypted connection sharing; two-connection schema diff and reviewable sync SQL; read-only ER diagram.
 - Same-dialect table copy (append or truncate-then-insert; target name must be typed); MySQL privilege preview (PostgreSQL roles are read-only); EXPLAIN plan tree (ANALYZE requires confirmation).
+- Per-connection app-level read-only switch and env tags; clone table in the same database; cell inspector with FK jump; previewable RENAME COLUMN for non-PK columns.
 
 **Security & distribution**
 
@@ -129,7 +130,7 @@ src-tauri/                  # Tauri shell
 src/                        # frontend source (Next.js App Router)
 ├── app/                    # layout / page / globals.css
 ├── components/             # business components (connection form / schema tree / SQL editor / topology graph, etc.)
-├── lib/                    # tauri-api / ddl / schema-diff / schema-sync / schema-er / table-copy / privilege / explain
+├── lib/                    # tauri-api / ddl / connection-meta / clone-table / cell-inspect / explain
 ├── stores/                 # zustand (connection / security / session / confirm)
 └── hooks/                  # use-update-checker / use-column-widths
 

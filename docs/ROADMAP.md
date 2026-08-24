@@ -1,7 +1,7 @@
 ---
 title: tiny-sql 路线图
-version: 0.8.0-draft-1
-status: draft
+version: 0.8.0
+status: awaiting-acceptance
 last_updated: 2026-08-24
 ---
 
@@ -163,7 +163,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 ### v0.8 — 防连错与查询补齐（编码完成，待验收）
 
-详细任务见 [v0.8 开发计划](./PLAN.md#v08-开发计划)。
+详细任务历史见 [progress.md v0.8 归档](../memory-bank/progress.md#v08-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：2026-08-24 六项 FR 编码完成；待 GUI/RC。
 

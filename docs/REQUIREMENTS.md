@@ -1,7 +1,7 @@
 ---
 title: tiny-sql 需求文档
-version: 0.8.0-draft-1
-status: draft
+version: 0.8.0
+status: awaiting-acceptance
 last_updated: 2026-08-24
 ---
 
@@ -9,7 +9,7 @@ last_updated: 2026-08-24
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-24）**：稳定 Release 与应用版本号均为 `v0.7.0`。v0.4–v0.7 功能打在同一正式版（54 个 command）。v0.8 范围见 §3.8（草案）。
+> **实现快照（2026-08-24）**：稳定 Release 与应用版本号均为 `v0.7.0`。main 另含 v0.8 功能编码（仍 54 个 command，未切 `v0.8.0`）。v0.8 范围见 §3.8。
 
 ## 1. 项目愿景
 
@@ -382,7 +382,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 ### 3.8 v0.8 范围（防连错与查询补齐）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [v0.8 开发计划](./PLAN.md#v08-开发计划)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.8 归档](../memory-bank/progress.md#v08-已交付周计划归档)。
 
 > **实现状态（2026-08-24）**：六项 FR 编码与单测已完成；GUI/RC 由用户验收。
 
@@ -393,7 +393,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-274** RENAME COLUMN 预览（P1）：修改表对话框可重命名列，生成双方言 `RENAME COLUMN` 并确认。仍不换主键。可整项降级。
 - **FR-275** EXPLAIN 读后提示（P1）：在已有计划树上标注全表扫描 / filesort / Seq Scan 等，不改写 SQL，不做采集。可整项降级。
 
-实施顺序与验收见 [v0.8 开发计划](./PLAN.md#v08-开发计划)。
+验收见 [PLAN](./PLAN.md) 与 [RELEASE_CHECKLIST v0.8](./RELEASE_CHECKLIST.md#v08-发布检查清单)。
 
 ---
 

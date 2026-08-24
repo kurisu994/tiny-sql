@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：稳定 Release 为 v0.7.0。** 相对 v0.3.0 一次收录表格编辑、结构变更、官方备份、对比拷贝、权限与 EXPLAIN。GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：稳定 Release 为 v0.7.0。** main 另含 v0.8 功能编码（待 GUI/RC 与 `v0.8.0` 切版）。GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -46,6 +46,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 - CSV 导入 + SQL dump 导入导出；官方 mysqldump/pg_dump 备份恢复（需本机工具）。
 - 加密分享连接（独立口令）；双连接结构对比与可审阅同步 SQL；只读 ER 关系图。
 - 同方言表数据拷贝（追加或先清空再插入，须手输目标表）；MySQL 权限预览（PG 角色只读）；EXPLAIN 计划树（ANALYZE 需确认）。
+- 连接可设应用只读与生产/预发/开发标签；同库复制为新表；结果格检查器与外键跳转；非主键列可预览重命名。
 
 **安全与分发**
 
@@ -127,7 +128,7 @@ src-tauri/                  # Tauri 壳
 src/                        # 前端源码（Next.js App Router）
 ├── app/                    # layout / page / globals.css
 ├── components/             # 业务组件（连接表单 / schema 树 / SQL 编辑器 / 拓扑图等）
-├── lib/                    # tauri-api / ddl / schema-diff / schema-sync / schema-er / table-copy / privilege / explain 等
+├── lib/                    # tauri-api / ddl / connection-meta / clone-table / cell-inspect / explain 等
 ├── stores/                 # zustand（connection / security / session / confirm）
 └── hooks/                  # use-update-checker / use-column-widths
 

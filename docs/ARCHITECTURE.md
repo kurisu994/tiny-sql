@@ -1,6 +1,6 @@
 ---
 title: tiny-sql 架构设计
-version: 0.7.0
+version: 0.8.0
 status: awaiting-acceptance
 last_updated: 2026-08-24
 ---
@@ -1206,6 +1206,8 @@ interface StoredConnection {
   ssl: SslConfig;
   advanced: AdvancedConfig;
   lastUsedAt?: string;   // ISO 8601
+  readOnly?: boolean;    // FR-270，缺省 false
+  env?: "none" | "prod" | "staging" | "dev"; // FR-271，缺省 none
 }
 
 interface SshConfig {
