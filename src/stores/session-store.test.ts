@@ -124,6 +124,7 @@ beforeEach(() => {
     activeTabId: "tab-1",
     hopStatuses: {},
     lostHops: [],
+    openSessions: [],
   });
 });
 
@@ -548,7 +549,7 @@ describe("session-store", () => {
     expect(tab.sqlText).toBe("SELECT * FROM users");
   });
 
-  it("切换连接前按 session 代号关闭旧连接", async () => {
+  it("切换连接焦点时不关闭旧连接（FR-220）", async () => {
     const oldConnection = sampleConnection("mysql");
     const nextConnection = {
       ...sampleConnection("postgresql"),
@@ -558,22 +559,27 @@ describe("session-store", () => {
       openId: "c1",
       runtimeSessionId: "session-old",
       activeConnection: oldConnection,
+      openSessions: [
+        { id: "c1", sessionId: "session-old", connection: oldConnection },
+      ],
       status: "connected",
     });
     routeInvoke({
-      connection_close: undefined,
       connection_open: "session-next",
       db_list_databases: [{ name: "app", isCurrent: true }],
     });
 
     await useSessionStore.getState().open("c2", undefined, nextConnection);
 
-    expect(mockInvoke).toHaveBeenCalledWith("connection_close", {
-      id: "c1",
-      expectedSessionId: "session-old",
-    });
+    expect(mockInvoke).not.toHaveBeenCalledWith(
+      "connection_close",
+      expect.anything(),
+    );
     expect(useSessionStore.getState().openId).toBe("c2");
     expect(useSessionStore.getState().runtimeSessionId).toBe("session-next");
+    expect(useSessionStore.getState().openSessions.map((s) => s.id).sort()).toEqual(
+      ["c1", "c2"],
+    );
   });
 
   it("重连后忽略旧 session 的迟到 SSH 状态事件", () => {

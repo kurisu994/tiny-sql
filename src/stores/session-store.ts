@@ -495,6 +495,20 @@ function connectedHopStatuses(
   );
 }
 
+/** 仍保持后端打开的连接（FR-220 对比台用；焦点仍由 openId 决定） */
+export interface OpenSessionInfo {
+  id: string;
+  sessionId: string;
+  connection: StoredConnection;
+}
+
+function upsertOpenSession(
+  sessions: OpenSessionInfo[],
+  next: OpenSessionInfo,
+): OpenSessionInfo[] {
+  return [...sessions.filter((item) => item.id !== next.id), next];
+}
+
 interface SessionState {
   /** 当前打开的连接 id（未连接为 null） */
   openId: string | null;
@@ -537,6 +551,8 @@ interface SessionState {
   hopStatuses: Record<number, TopologyHopStatus>;
   /** keepalive 已断开的跳序号 */
   lostHops: number[];
+  /** 已打开且未关闭的连接，切换焦点时不再拆旧隧道 */
+  openSessions: OpenSessionInfo[];
 
   open: (
     id: string,
@@ -656,12 +672,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   ...initialTabs(),
   hopStatuses: {},
   lostHops: [],
+  openSessions: [],
 
   open: async (id, passphrase, connection, rememberPassphrase) => {
     const requestEpoch = beginSessionRequest();
     invalidateMetadataRequests();
-    const previousOpenId = get().openId;
-    const previousSessionId = get().runtimeSessionId;
     set({
       activeConnection: connection ?? get().activeConnection,
       openId: null,
@@ -678,21 +693,26 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     });
     let openedSessionId: string | null = null;
     try {
-      if (previousOpenId && previousOpenId !== id) {
-        await connectionApi.close(previousOpenId, previousSessionId ?? undefined);
-        metadataCache.clearConnection(previousOpenId);
-        if (!isCurrentSessionRequest(requestEpoch)) return;
-      }
+      // FR-220：切换焦点不关闭旧连接，对比台需要两侧同时在线
       openedSessionId = await connectionApi.open(id, passphrase, rememberPassphrase);
       if (!isCurrentSessionRequest(requestEpoch)) return;
       set({ openId: id, runtimeSessionId: openedSessionId });
       metadataCache.clearConnection(id);
       const databases = await dbApi.listDatabases(id);
       if (!isCurrentSessionRequest(requestEpoch)) return;
+      const focused = connection ?? get().activeConnection;
       set({
         openId: id,
         runtimeSessionId: openedSessionId,
-        activeConnection: connection ?? get().activeConnection,
+        activeConnection: focused,
+        openSessions:
+          focused && openedSessionId
+            ? upsertOpenSession(get().openSessions, {
+                id,
+                sessionId: openedSessionId,
+                connection: focused,
+              })
+            : get().openSessions,
         status: "connected",
         databases,
         expandedDb: null,
@@ -821,6 +841,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       openId: null,
       runtimeSessionId: null,
       activeConnection: null,
+      openSessions: get().openSessions.filter((item) => item.id !== openId),
       status: "idle",
       errorMsg: null,
       pendingDbSwitch: null,
