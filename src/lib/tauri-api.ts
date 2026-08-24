@@ -150,6 +150,13 @@ export const ERROR_ZH: Record<string, string> = {
   "error.share.invalid": "分享文件无效或已被篡改",
   "error.share.wrong_password": "分享口令错误",
   "error.share.io": "分享文件读写失败，请检查路径与权限",
+  "error.copy.cross_driver": "不能跨 MySQL / PostgreSQL 拷贝数据",
+  "error.copy.no_mapped_columns": "没有同名列可以拷贝",
+  "error.copy.target_mismatch": "手输的目标表名与实际目标不一致，已拒绝",
+  "error.copy.cancelled": "数据拷贝已取消",
+  "error.copy.failed": "数据拷贝失败",
+  "error.privilege.unsupported": "当前数据库类型不支持该权限操作",
+  "error.privilege.forbidden": "当前账号无权查看或修改用户权限",
   "error.sqlfile.read_failed": "SQL 文件读取失败，请检查路径与权限",
   "error.sqlfile.write_failed": "SQL 文件写入失败，请检查路径与磁盘权限",
   "error.sqlfile.too_large": "SQL 文件过大（超过 8MB），请拆分后打开",
@@ -539,6 +546,16 @@ export const dbApi = {
         queryId: input.queryId ?? null,
       },
     }),
+  copyPreview: (input: CopyPreviewInput) =>
+    invoke<CopyPreviewResult>("db_copy_preview", { input }),
+  copyTableRows: (input: CopyTableInput) =>
+    invoke<CopyTableResult>("db_copy_table_rows", { input }),
+  listAccounts: (id: string) => invoke<PrivilegeListResult>("db_list_accounts", { id }),
+  showGrants: (id: string, name: string, host?: string | null) =>
+    invoke<string[]>("db_show_grants", {
+      id,
+      input: { name, host: host ?? null },
+    }),
   backupRestore: (id: string, input: BackupRestoreInput) =>
     invoke<BackupJobResult>("db_backup_restore", {
       id,
@@ -714,6 +731,56 @@ export interface BackupJobResult {
   bytes: number;
   toolVersion: string;
   log: string;
+}
+
+export interface CopyEndpoint {
+  id: string;
+  database: string;
+  schema?: string | null;
+  table: string;
+}
+
+export interface CopyPreviewInput {
+  source: CopyEndpoint;
+  dest: CopyEndpoint;
+}
+
+export interface CopyColumnMapping {
+  source: string;
+  dest: string;
+}
+
+export interface CopyPreviewResult {
+  mappings: CopyColumnMapping[];
+  sourceTotal: number | null;
+  destTotal: number | null;
+  replaceSql: string;
+  crossDriver: boolean;
+}
+
+export interface CopyTableInput {
+  source: CopyEndpoint;
+  dest: CopyEndpoint;
+  mode: "append" | "replace";
+  confirmTarget: string;
+  queryId?: string | null;
+}
+
+export interface CopyTableResult {
+  copied: number;
+  truncated: boolean;
+}
+
+export interface PrivilegeAccount {
+  name: string;
+  host: string | null;
+  canLogin: boolean;
+}
+
+export interface PrivilegeListResult {
+  driver: string;
+  accounts: PrivilegeAccount[];
+  readOnly: boolean;
 }
 
 /** 多语句脚本的单条执行结果（FR-243） */

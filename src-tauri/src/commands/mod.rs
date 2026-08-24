@@ -4,9 +4,11 @@
 
 pub mod backup;
 pub mod connection;
+pub mod copy;
 pub mod dump;
 pub mod export;
 pub mod history;
+pub mod privilege;
 pub mod import;
 pub mod query;
 pub mod security;

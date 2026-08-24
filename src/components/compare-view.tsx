@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +14,15 @@ import {
 } from "@/lib/schema-diff";
 import { loadSchemaSnapshot } from "@/lib/schema-snapshot";
 import { buildSyncStatements, joinSyncSql, type SyncDirection } from "@/lib/schema-sync";
-import { dbApi, sqlFileApi, translateError, type DatabaseMeta, type SchemaMeta } from "@/lib/tauri-api";
+import { copyTargetToken } from "@/lib/table-copy";
+import {
+  dbApi,
+  sqlFileApi,
+  translateError,
+  type CopyPreviewResult,
+  type DatabaseMeta,
+  type SchemaMeta,
+} from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore, type OpenSessionInfo } from "@/stores/session-store";
@@ -342,6 +351,16 @@ export function CompareView() {
           </pre>
         </div>
       )}
+
+      {leftSession && rightSession && left.database && right.database && (
+        <CopyPanel
+          left={left}
+          right={right}
+          leftName={leftSession.connection.name}
+          rightName={rightSession.connection.name}
+          tables={diff?.tables.map((table) => table.name) ?? []}
+        />
+      )}
     </div>
   );
 }
@@ -476,6 +495,180 @@ function TableDetail({ table }: { table: TableDiff }) {
           </p>
         ))}
       </section>
+    </div>
+  );
+}
+
+function CopyPanel({
+  left,
+  right,
+  leftName,
+  rightName,
+  tables,
+}: {
+  left: SidePick;
+  right: SidePick;
+  leftName: string;
+  rightName: string;
+  tables: string[];
+}) {
+  const confirm = useConfirmStore((s) => s.confirm);
+  const [sourceTable, setSourceTable] = useState(tables[0] ?? "");
+  const [destTable, setDestTable] = useState(tables[0] ?? "");
+  const [mode, setMode] = useState<"append" | "replace">("append");
+  const [confirmTarget, setConfirmTarget] = useState("");
+  const [preview, setPreview] = useState<CopyPreviewResult | null>(null);
+  const [copied, setCopied] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [queryId, setQueryId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const expected = copyTargetToken(right.database, destTable);
+
+  useEffect(() => {
+    if (!sourceTable || !destTable) return;
+    void dbApi
+      .copyPreview({
+        source: {
+          id: left.connectionId,
+          database: left.database,
+          schema: left.schema || null,
+          table: sourceTable,
+        },
+        dest: {
+          id: right.connectionId,
+          database: right.database,
+          schema: right.schema || null,
+          table: destTable,
+        },
+      })
+      .then(setPreview)
+      .catch(() => setPreview(null));
+  }, [left, right, sourceTable, destTable]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<{ queryId: string; copied: number }>("copy:progress", (event) => {
+      if (event.payload.queryId === queryId) setCopied(event.payload.copied);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [queryId]);
+
+  async function runCopy() {
+    if (!preview || preview.crossDriver || preview.mappings.length === 0) return;
+    if (confirmTarget.trim() !== expected) return;
+    const ok = await confirm({
+      title: "拷贝表数据",
+      message: `从「${leftName}」.${left.database}.${sourceTable} 拷到「${rightName}」.${right.database}.${destTable}\n模式：${mode}${mode === "replace" ? `\n将先执行：${preview.replaceSql}` : "（追加）"}\n映射 ${preview.mappings.length} 列。`,
+      confirmText: "拷贝",
+      danger: mode === "replace",
+    });
+    if (!ok) return;
+    const id = crypto.randomUUID();
+    setQueryId(id);
+    setRunning(true);
+    setCopied(0);
+    setMessage(null);
+    try {
+      const result = await dbApi.copyTableRows({
+        source: {
+          id: left.connectionId,
+          database: left.database,
+          schema: left.schema || null,
+          table: sourceTable,
+        },
+        dest: {
+          id: right.connectionId,
+          database: right.database,
+          schema: right.schema || null,
+          table: destTable,
+        },
+        mode,
+        confirmTarget,
+        queryId: id,
+      });
+      setMessage(`已拷贝 ${result.copied} 行`);
+    } catch (e) {
+      setMessage(translateError(e));
+    } finally {
+      setRunning(false);
+      setQueryId(null);
+    }
+  }
+
+  return (
+    <div className="shrink-0 rounded border border-neutral-200 p-2 dark:border-neutral-800">
+      <p className="mb-1 font-medium">拷贝数据（左 → 右）</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <label>
+          源表
+          <input
+            value={sourceTable}
+            onChange={(e) => setSourceTable(e.target.value)}
+            list="copy-tables"
+            className="ml-1 h-7 rounded border border-neutral-300 bg-white px-1 font-mono dark:border-neutral-700 dark:bg-neutral-950"
+          />
+        </label>
+        <label>
+          目标表
+          <input
+            value={destTable}
+            onChange={(e) => setDestTable(e.target.value)}
+            list="copy-tables"
+            className="ml-1 h-7 rounded border border-neutral-300 bg-white px-1 font-mono dark:border-neutral-700 dark:bg-neutral-950"
+          />
+        </label>
+        <datalist id="copy-tables">
+          {tables.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+        <select
+          value={mode}
+          onChange={(e) => setMode(e.target.value as "append" | "replace")}
+          className="h-7 rounded border border-neutral-300 bg-white px-1 dark:border-neutral-700 dark:bg-neutral-950"
+        >
+          <option value="append">追加</option>
+          <option value="replace">先清空再插入</option>
+        </select>
+        <label>
+          手输目标 {expected}
+          <input
+            value={confirmTarget}
+            onChange={(e) => setConfirmTarget(e.target.value)}
+            className="ml-1 h-7 rounded border border-neutral-300 bg-white px-1 font-mono dark:border-neutral-700 dark:bg-neutral-950"
+          />
+        </label>
+        <Button
+          type="button"
+          size="sm"
+          disabled={
+            running ||
+            !preview ||
+            preview.crossDriver ||
+            preview.mappings.length === 0 ||
+            confirmTarget.trim() !== expected
+          }
+          onClick={() => void runCopy()}
+        >
+          {running ? `拷贝中… ${copied}` : "预览并拷贝"}
+        </Button>
+        {running && queryId && (
+          <Button type="button" size="sm" variant="outline" onClick={() => void dbApi.cancelQuery(queryId)}>
+            取消
+          </Button>
+        )}
+      </div>
+      {preview && (
+        <p className="mt-1 text-neutral-500">
+          {preview.crossDriver
+            ? "方言不同，不能拷贝"
+            : `源 ${preview.sourceTotal ?? "未知"} 行 · 目标已有 ${preview.destTotal ?? "未知"} 行 · 映射 ${preview.mappings.map((m) => `${m.source}→${m.dest}`).join(", ") || "无"}`}
+          {mode === "replace" && preview.replaceSql ? ` · ${preview.replaceSql}` : ""}
+        </p>
+      )}
+      {message && <p className="mt-1">{message}</p>}
     </div>
   );
 }
