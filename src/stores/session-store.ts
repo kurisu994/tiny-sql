@@ -575,6 +575,8 @@ interface SessionState {
   createDatabase: (id: string, input: CreateDatabaseInput) => Promise<void>;
   /** 双击表：新开 tab 执行前 1000 行预览 */
   selectTable: (table: string) => Promise<void>;
+  /** 外键跳转：打开目标表浏览并带等值筛选（FR-273） */
+  openFilteredBrowse: (table: string, filters: TableFilter[]) => Promise<void>;
   /** 新建查询 tab 并激活 */
   newTab: (sql?: string) => void;
   /** 关闭 tab；正在执行的查询会先取消。dirty 确认由 UI 层完成 */
@@ -1350,6 +1352,32 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }));
     await browseTabData(get, set, tab.id);
     // 异步探测主键（FR-250）：有显式主键才允许进入编辑模式
+    void resolveBrowseEditable(get, set, tab.id);
+  },
+
+  openFilteredBrowse: async (table, filters) => {
+    const { openId, selectedDb, selectedSchema, activeConnection } = get();
+    if (!openId || !selectedDb) return;
+    const driver = activeConnection?.driver ?? "mysql";
+    if (driver === "postgresql" && !selectedSchema) return;
+    const tab = createTab(table, "");
+    tab.selectedTable = table;
+    tab.browse = {
+      table,
+      filters,
+      order: null,
+      page: 0,
+      pageSize: 1000,
+      total: null,
+      hasNextPage: false,
+      editable: false,
+      pkColumns: [],
+      editMode: false,
+      pendingEdits: [],
+      submitting: false,
+    };
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id }));
+    await browseTabData(get, set, tab.id);
     void resolveBrowseEditable(get, set, tab.id);
   },
 

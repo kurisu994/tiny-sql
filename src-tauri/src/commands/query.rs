@@ -63,15 +63,15 @@ pub(crate) async fn driver_of(
 
 /// 连接是否标记应用层只读（FR-270）。配置不存在视为非只读。
 pub(crate) fn connection_is_read_only(state: &AppState, id: &str) -> Result<bool, String> {
-    let conns = state.store.lock().map_err(|_| "error.security.locked".to_string())?;
+    let conns = state
+        .store
+        .lock()
+        .map_err(|_| "error.security.locked".to_string())?;
     Ok(conns.load()?.iter().any(|c| c.id == id && c.read_only))
 }
 
 /// 只读连接禁止写 command。
-pub(crate) fn reject_if_read_only(
-    state: &AppState,
-    id: &str,
-) -> Result<(), QueryCommandError> {
+pub(crate) fn reject_if_read_only(state: &AppState, id: &str) -> Result<(), QueryCommandError> {
     if connection_is_read_only(state, id).map_err(QueryCommandError::from_key)? {
         Err(QueryCommandError::from_key("error.connection.read_only"))
     } else {
@@ -243,12 +243,7 @@ pub async fn db_query(
     allow_write: Option<bool>,
     schema: Option<String>,
 ) -> Result<RowSet, QueryCommandError> {
-    reject_query_if_read_only(
-        &state,
-        &id,
-        &sql,
-        allow_write.unwrap_or(false),
-    )?;
+    reject_query_if_read_only(&state, &id, &sql, allow_write.unwrap_or(false))?;
     let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     // 与 close/reconnect 串行化“取 driver + 注册 token”：这样重连要么能看到并
     // 取消本查询，要么查询取得的就是新 session driver，不会落进两个阶段之间。
@@ -521,12 +516,7 @@ pub async fn db_query_many(
     allow_write: Option<bool>,
     schema: Option<String>,
 ) -> Result<db_driver::MultiQueryResult, QueryCommandError> {
-    reject_query_if_read_only(
-        &state,
-        &id,
-        &sql,
-        allow_write.unwrap_or(false),
-    )?;
+    reject_query_if_read_only(&state, &id, &sql, allow_write.unwrap_or(false))?;
     let query_id = query_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let (driver, token) = {
         let lifecycle = state.connection_lifecycle(&id);
@@ -623,7 +613,9 @@ mod tests {
     #[test]
     fn explain_analyze_variants_are_detected() {
         assert!(sql_is_explain_analyze("EXPLAIN ANALYZE SELECT 1"));
-        assert!(sql_is_explain_analyze("explain (analyze, format json) select 1"));
+        assert!(sql_is_explain_analyze(
+            "explain (analyze, format json) select 1"
+        ));
         assert!(!sql_is_explain_analyze("EXPLAIN SELECT 1"));
         assert!(!sql_is_explain_analyze("EXPLAIN SELECT analyze_col FROM t"));
         assert!(!sql_is_explain_analyze("SELECT 1"));

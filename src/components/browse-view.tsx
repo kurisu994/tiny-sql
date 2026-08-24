@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckIcon, PencilIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 
 import { EditableTable } from "@/components/editable-table";
@@ -77,6 +77,30 @@ export function BrowseView({
   // SQL dump 导出（FR-252）
   const [dumping, setDumping] = useState(false);
   const [dumpMsg, setDumpMsg] = useState<string | null>(null);
+  const constraintsByTable = useSessionStore((s) => s.constraintsByTable);
+  const openFilteredBrowse = useSessionStore((s) => s.openFilteredBrowse);
+  const openId = useSessionStore((s) => s.openId);
+
+  useEffect(() => {
+    const table = browse?.table;
+    if (!table || !openId || !selectedDb || constraintsByTable[table]) return;
+    void dbApi
+      .listConstraints(
+        openId,
+        selectedDb,
+        driver === "postgresql" ? selectedSchema : null,
+        table,
+      )
+      .then((list) => {
+        useSessionStore.setState((state) => ({
+          constraintsByTable: { ...state.constraintsByTable, [table]: list },
+        }));
+      })
+      .catch(() => {
+        // 约束加载失败时检查器仍可用，只是没有外键跳转
+      });
+  }, [browse?.table, openId, selectedDb, selectedSchema, driver, constraintsByTable]);
+
   if (!browse) return null;
 
   const columns = tab.rowSet?.columns ?? [];
@@ -454,6 +478,17 @@ export function BrowseView({
               connectionId={connectionId}
               sort={browse.order}
               onSort={toggleSort}
+              constraints={constraintsByTable[browse.table] ?? []}
+              onOpenForeignKey={(table, filters) => {
+                void openFilteredBrowse(
+                  table,
+                  filters.map((filter) => ({
+                    column: filter.column,
+                    op: "eq",
+                    value: filter.value,
+                  })),
+                );
+              }}
             />
           )
         ) : (
