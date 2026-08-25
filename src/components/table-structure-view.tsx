@@ -11,6 +11,7 @@ import {
   translateError,
   type ColumnMeta,
   type ConstraintMeta,
+  type DriverKind,
   type IndexMeta,
 } from "@/lib/tauri-api";
 import { isReadOnly } from "@/lib/connection-meta";
@@ -42,7 +43,7 @@ export function TableStructureView({
   tableType = "BASE TABLE",
 }: {
   connectionId: string;
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   /** MySQL 忽略 */
   schema: string | null;
@@ -106,6 +107,15 @@ export function TableStructureView({
           const result = await dbApi.query(connectionId, `SHOW CREATE TABLE ${quoted}`);
           // SHOW CREATE TABLE 返回 (Table, Create Table) 两列一行
           ddl = result.rows[0]?.[1] ?? "";
+        } else if (driver === "sqlite") {
+          // SQLite 把建表语句原文存在 sqlite_master.sql 里，比按元数据重建更忠实
+          const db = `"${database.replace(/"/g, '""')}"`;
+          const name = `'${table.replace(/'/g, "''")}'`;
+          const result = await dbApi.query(
+            connectionId,
+            `SELECT sql FROM ${db}.sqlite_master WHERE type = 'table' AND name = ${name}`,
+          );
+          ddl = result.rows[0]?.[0] ?? "";
         } else {
           ddl = buildPostgresCreateTablePreview(
             schema ?? "public",

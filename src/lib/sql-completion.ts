@@ -1,6 +1,7 @@
 import {
   MySQL,
   PostgreSQL,
+  SQLite,
   type SQLConfig,
   type SQLDialect,
   type SQLNamespace,
@@ -62,7 +63,9 @@ export interface JoinCandidate {
 
 /** 按连接 driver 选择 CodeMirror SQL 方言。 */
 export function sqlDialectFor(driver: DriverKind): SQLDialect {
-  return driver === "postgresql" ? PostgreSQL : MySQL;
+  if (driver === "postgresql") return PostgreSQL;
+  if (driver === "sqlite") return SQLite;
+  return MySQL;
 }
 
 /** 构造 CodeMirror 原生 schema completion 配置，列信息含类型与约束摘要。 */
@@ -269,8 +272,9 @@ function singularize(table: string): string {
 
 function quoteIdentifier(identifier: string, driver: DriverKind): string {
   if (/^[A-Za-z_][\w$]*$/.test(identifier)) return identifier;
-  if (driver === "postgresql") return `"${identifier.replace(/"/g, '""')}"`;
-  return `\`${identifier.replace(/`/g, "``")}\``;
+  // 只有 MySQL 用反引号，PG / SQLite 都是标准双引号
+  if (driver === "mysql") return `\`${identifier.replace(/`/g, "``")}\``;
+  return `"${identifier.replace(/"/g, '""')}"`;
 }
 
 interface SqlToken {

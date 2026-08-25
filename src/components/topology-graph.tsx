@@ -2,7 +2,12 @@
 
 import { useMemo } from "react";
 
-import { translateError, type StoredConnection } from "@/lib/tauri-api";
+import {
+  driverLabel,
+  isFileBasedDriver,
+  translateError,
+  type StoredConnection,
+} from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import type { TopologyHopStatus } from "@/stores/session-store";
 
@@ -107,8 +112,10 @@ function buildNodes(
     }),
     {
       id: "database",
-      title: connection.driver === "postgresql" ? "PostgreSQL" : "MySQL",
-      subtitle: `${connection.host}:${connection.port}`,
+      title: driverLabel(connection.driver),
+      subtitle: isFileBasedDriver(connection.driver)
+        ? connection.database
+        : `${connection.host}:${connection.port}`,
       status: mysqlStatus,
       reason: null,
       rttState: "idle",

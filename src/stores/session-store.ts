@@ -38,9 +38,10 @@ import {
 
 /** 按 driver 方言引用标识符。 */
 function quoteIdent(name: string, driver: StoredConnection["driver"]): string {
-  return driver === "postgresql"
-    ? '"' + name.replace(/"/g, '""') + '"'
-    : "`" + name.replace(/`/g, "``") + "`";
+  // 只有 MySQL 用反引号，PG / SQLite 都是标准双引号
+  return driver === "mysql"
+    ? "`" + name.replace(/`/g, "``") + "`"
+    : '"' + name.replace(/"/g, '""') + '"';
 }
 
 type Status = "idle" | "connecting" | "connected" | "error";
@@ -1189,12 +1190,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         driver === "postgresql"
           ? dbApi.listSchemas(openId, selectedDb)
           : Promise.resolve<SchemaMeta[] | null>(null);
+      // 只有 PostgreSQL 需要先选中 schema 才能取表；MySQL / SQLite 直接按库取
       const tablesPromise =
-        driver === "mysql" || schema
+        driver !== "postgresql" || schema
           ? dbApi.listTables(openId, selectedDb, schema)
           : Promise.resolve<TableMeta[] | null>(null);
       const columnsPromise =
-        expandedTable && (driver === "mysql" || schema)
+        expandedTable && (driver !== "postgresql" || schema)
           ? dbApi.listColumns(openId, selectedDb, schema, expandedTable)
           : Promise.resolve<ColumnMeta[] | null>(null);
       const [databases, schemas, tables, tableColumns] = await Promise.all([

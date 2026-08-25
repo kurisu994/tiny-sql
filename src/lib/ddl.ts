@@ -1,14 +1,22 @@
 // DDL 预览拼装（FR-251）：PostgreSQL 由已加载 metadata 重建建表语句。
 //
-// MySQL 直接走后端 `SHOW CREATE TABLE` 服务端原文，不经过本模块。
-// 本模块输出是「重建预览」而非服务端原文：列定义、主键、约束、索引按
-// information_schema / pg_catalog 已加载数据拼装，注释与表选项不还原。
+// MySQL 直接走后端 `SHOW CREATE TABLE` 服务端原文，SQLite 走 sqlite_master 原文，
+// 都不经过本模块。本模块输出是「重建预览」而非服务端原文：列定义、主键、约束、
+// 索引按 information_schema / pg_catalog 已加载数据拼装，注释与表选项不还原。
+//
+// SQLite 的 ALTER TABLE 只支持 RENAME / ADD COLUMN / DROP COLUMN，改类型、改空性、
+// 改默认值都要重建表 —— 这类改动在校验阶段直接拒绝，不生成执行必失败的 SQL。
 
-import type { ColumnMeta, ConstraintMeta, IndexMeta } from "@/lib/tauri-api";
+import type { ColumnMeta, ConstraintMeta, DriverKind, IndexMeta } from "@/lib/tauri-api";
 
-/** PG 双引号标识符引用（内部双引号双写转义） */
+/** PG / SQLite 双引号标识符引用（内部双引号双写转义） */
 function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+/** SQLite 的库名即 ATTACH 名，未指定时是主库 main */
+function sqliteDatabase(database: string | null | undefined): string {
+  return database?.trim() || "main";
 }
 
 /** MySQL 反引号标识符引用（内部反引号双写转义） */
@@ -33,7 +41,7 @@ export interface CreateTableColumnInput {
 
 /** 新建表输入 */
 export interface CreateTableInput {
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   /** MySQL 用于全限定表名 */
   database: string;
   /** PostgreSQL 目标 schema（缺省 public） */
@@ -69,6 +77,18 @@ export function validateCreateTable(input: CreateTableInput): string | null {
   for (const pk of pkColumns) {
     if (pk.nullable) return `主键列「${pk.name}」必须 NOT NULL`;
   }
+  // SQLite 的 AUTOINCREMENT 只能用在单列 INTEGER PRIMARY KEY 上
+  if (input.driver === "sqlite") {
+    const auto = input.columns.filter((c) => c.autoIncrement);
+    for (const column of auto) {
+      if (!column.primaryKey || pkColumns.length !== 1) {
+        return `列「${column.name}」自增要求它是唯一的主键列`;
+      }
+      if (normalizeType(column.dataType) !== "integer") {
+        return `列「${column.name}」自增要求类型为 INTEGER`;
+      }
+    }
+  }
   return null;
 }
 
@@ -83,21 +103,28 @@ function quoteLiteral(value: string): string {
  */
 export function buildCreateTableSql(input: CreateTableInput): string {
   const mysql = input.driver === "mysql";
+  const sqlite = input.driver === "sqlite";
   const quote = mysql ? quoteMysqlIdent : quoteIdent;
-  const qualified = mysql
-    ? `${quoteMysqlIdent(input.database)}.${quoteMysqlIdent(input.table.trim())}`
-    : `${quoteIdent(input.schema?.trim() || "public")}.${quoteIdent(input.table.trim())}`;
+  const qualified = qualifiedTable(input);
 
   const pkColumns = input.columns.filter((c) => c.primaryKey);
+  // SQLite 的 AUTOINCREMENT 必须写成列内联的 INTEGER PRIMARY KEY AUTOINCREMENT，
+  // 拆到表级 PRIMARY KEY 子句里会语法错误
+  const inlinePk =
+    sqlite && pkColumns.length === 1 && pkColumns[0].autoIncrement ? pkColumns[0] : null;
   const lines: string[] = [];
   for (const column of input.columns) {
     let line = `  ${quote(column.name.trim())} ${column.dataType.trim()}`;
-    if (!column.nullable) line += " NOT NULL";
+    if (column === inlinePk) {
+      line += " PRIMARY KEY AUTOINCREMENT";
+    } else if (!column.nullable) {
+      line += " NOT NULL";
+    }
     if (column.defaultValue.trim()) line += ` DEFAULT ${column.defaultValue.trim()}`;
     if (mysql && column.autoIncrement) line += " AUTO_INCREMENT";
     lines.push(line);
   }
-  if (pkColumns.length > 0) {
+  if (pkColumns.length > 0 && !inlinePk) {
     lines.push(
       `  PRIMARY KEY (${pkColumns.map((c) => quote(c.name.trim())).join(", ")})`,
     );
@@ -177,6 +204,52 @@ export function buildPostgresCreateTablePreview(
   return statements.join("\n\n");
 }
 
+/**
+ * 由元数据拼装 SQLite 建表预览语句（表结构复制用）。
+ *
+ * 表结构页展示的 DDL 走 `sqlite_master.sql` 服务端原文，不用本函数。
+ * 外键的 `reference` 由 db-driver 统一成 `目标表(列, 列)` 文本，这里解析回
+ * 标准 `REFERENCES` 子句；解析不出来的外键直接跳过，不产出半截 SQL。
+ */
+export function buildSqliteCreateTablePreview(
+  table: string,
+  columns: ColumnMeta[],
+  constraints: ConstraintMeta[],
+): string {
+  const lines: string[] = [];
+  for (const column of columns) {
+    let line = `  ${quoteIdent(column.name)} ${column.dataType}`;
+    if (!column.nullable) line += " NOT NULL";
+    if (column.defaultValue !== null) line += ` DEFAULT ${column.defaultValue}`;
+    lines.push(line);
+  }
+
+  const pk = constraints.find((c) => c.constraintType === "PRIMARY KEY");
+  if (pk && pk.columns.length > 0) {
+    lines.push(`  PRIMARY KEY (${pk.columns.map(quoteIdent).join(", ")})`);
+  }
+  for (const constraint of constraints) {
+    if (constraint.constraintType === "UNIQUE" && constraint.columns.length > 0) {
+      lines.push(`  UNIQUE (${constraint.columns.map(quoteIdent).join(", ")})`);
+    } else if (constraint.constraintType === "FOREIGN KEY" && constraint.reference) {
+      const match = constraint.reference.match(/^(.+?)\(([^)]*)\)$/);
+      if (!match || constraint.columns.length === 0) continue;
+      const target = match[1].trim();
+      const targetColumns = match[2]
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (!target || targetColumns.length === 0) continue;
+      lines.push(
+        `  FOREIGN KEY (${constraint.columns.map(quoteIdent).join(", ")}) ` +
+          `REFERENCES ${quoteIdent(target)} (${targetColumns.map(quoteIdent).join(", ")})`,
+      );
+    }
+  }
+
+  return `CREATE TABLE ${quoteIdent(table)} (\n${lines.join(",\n")}\n);`;
+}
+
 // === 修改表 SQL 生成（FR-253）===
 
 /** 修改表单中的一列。v0.8 支持非主键 RENAME COLUMN。 */
@@ -192,7 +265,7 @@ export interface AlterColumnInput {
 
 /** 修改表输入：original 为当前服务端列，columns 为表单目标态 */
 export interface AlterTableInput {
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema?: string | null;
   table: string;
@@ -220,13 +293,16 @@ export interface AlterStatement {
 }
 
 function qualifiedTable(input: {
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema?: string | null;
   table: string;
 }): string {
   if (input.driver === "mysql") {
     return `${quoteMysqlIdent(input.database)}.${quoteMysqlIdent(input.table.trim())}`;
+  }
+  if (input.driver === "sqlite") {
+    return `${quoteIdent(sqliteDatabase(input.database))}.${quoteIdent(input.table.trim())}`;
   }
   return `${quoteIdent(input.schema?.trim() || "public")}.${quoteIdent(input.table.trim())}`;
 }
@@ -276,6 +352,35 @@ export function validateAlterTable(input: AlterTableInput): string | null {
   for (const original of input.original) {
     if (isPrimaryColumn(original) && !kept.has(original.name.toLowerCase())) {
       return `不能删除主键列「${original.name}」`;
+    }
+  }
+  if (input.driver === "sqlite") {
+    return validateSqliteAlterTable(input);
+  }
+  return null;
+}
+
+/**
+ * SQLite ALTER TABLE 只支持 RENAME / ADD COLUMN / DROP COLUMN。
+ * 改类型、改空性、改默认值都要「建新表 + 搬数据 + 换名」，不在本对话框范围内，
+ * 这里直接拒绝，避免生成一条执行必然失败的语句。
+ */
+function validateSqliteAlterTable(input: AlterTableInput): string | null {
+  const originals = new Map(
+    input.original.map((column) => [column.name.toLowerCase(), column]),
+  );
+  for (const column of input.columns) {
+    if (!column.originName) continue;
+    const original = originals.get(column.originName.trim().toLowerCase());
+    if (!original) continue;
+    if (normalizeType(original.dataType) !== normalizeType(column.dataType)) {
+      return `SQLite 不支持修改列类型：「${original.name}」需重建表`;
+    }
+    if (original.nullable !== column.nullable) {
+      return `SQLite 不支持修改列空性：「${original.name}」需重建表`;
+    }
+    if (normalizeDefault(original.defaultValue) !== normalizeDefault(column.defaultValue)) {
+      return `SQLite 不支持修改列默认值：「${original.name}」需重建表`;
     }
   }
   return null;
@@ -359,6 +464,11 @@ export function buildAlterTableStatements(input: AlterTableInput): AlterStatemen
     const oldDefault = normalizeDefault(original.defaultValue);
     const newDefault = normalizeDefault(column.defaultValue);
     const defaultChanged = oldDefault !== newDefault;
+
+    if (input.driver === "sqlite") {
+      // 类型 / 空性 / 默认值的差异已在 validateAlterTable 里拒绝，这里只做 rename + add/drop
+      continue;
+    }
 
     if (input.driver === "mysql") {
       if (typeChanged) {
@@ -452,7 +562,7 @@ const IDENT_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** 新建索引输入 */
 export interface CreateIndexInput {
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema?: string | null;
   table: string;
@@ -463,7 +573,7 @@ export interface CreateIndexInput {
 
 /** 删除索引 / 约束的公共定位 */
 export interface DropObjectInput {
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema?: string | null;
   table: string;
@@ -501,6 +611,11 @@ export function buildCreateIndexSql(input: CreateIndexInput): string {
   }
   const unique = input.unique ? "UNIQUE " : "";
   const cols = input.columns.map((c) => quoteIdent(c.trim())).join(", ");
+  if (input.driver === "sqlite") {
+    // SQLite 限定的是索引名而不是表名：ON 后面只能写裸表名
+    const qualifiedIndex = `${quoteIdent(sqliteDatabase(input.database))}.${quoteIdent(name)}`;
+    return `CREATE ${unique}INDEX ${qualifiedIndex} ON ${quoteIdent(input.table.trim())} (${cols});`;
+  }
   return `CREATE ${unique}INDEX ${quoteIdent(name)} ON ${qualifiedTable(input)} (${cols});`;
 }
 
@@ -508,6 +623,9 @@ export function buildCreateIndexSql(input: CreateIndexInput): string {
 export function buildDropIndexSql(input: DropObjectInput): string {
   if (input.driver === "mysql") {
     return `ALTER TABLE ${qualifiedTable(input)} DROP INDEX ${quoteMysqlIdent(input.name.trim())};`;
+  }
+  if (input.driver === "sqlite") {
+    return `DROP INDEX ${quoteIdent(sqliteDatabase(input.database))}.${quoteIdent(input.name.trim())};`;
   }
   const schema = quoteIdent(input.schema?.trim() || "public");
   return `DROP INDEX ${schema}.${quoteIdent(input.name.trim())};`;
@@ -521,6 +639,13 @@ export function buildDropConstraintSql(
   input: DropObjectInput & { constraintType: string },
 ): string {
   const table = qualifiedTable(input);
+  if (input.driver === "sqlite") {
+    // SQLite 的 UNIQUE 约束背后就是索引，可以直接删；主键 / 外键 / CHECK 只能重建表
+    if (input.constraintType.toUpperCase() === "UNIQUE") {
+      return buildDropIndexSql(input);
+    }
+    return `-- SQLite 不支持删除 ${input.constraintType} 约束，需要重建表`;
+  }
   if (input.driver === "postgresql") {
     return `ALTER TABLE ${table} DROP CONSTRAINT ${quoteIdent(input.name.trim())};`;
   }

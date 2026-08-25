@@ -15,13 +15,14 @@ import {
   translateError,
   type ColumnMeta,
   type CsvPreview,
+  type DriverKind,
 } from "@/lib/tauri-api";
 import { useSessionStore } from "@/stores/session-store";
 
 interface ImportCsvDialogProps {
   open: boolean;
   connectionId: string;
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema: string | null;
   table: string;

@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useUpdateChecker } from "@/hooks/use-update-checker";
 import { connectionEnv, envDotClass, envLabel, isReadOnly } from "@/lib/connection-meta";
-import type { StoredConnection } from "@/lib/tauri-api";
+import { driverLabel, isFileBasedDriver, type StoredConnection } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useConnectionStore } from "@/stores/connection-store";
@@ -286,8 +286,13 @@ export default function Home() {
                           )}
                         </span>
                         <span className="truncate text-xs text-neutral-500">
-                          {c.driver === "postgresql" ? "PostgreSQL" : "MySQL"} · {c.host}:{c.port}
-                          {c.ssh.enabled ? ` · SSH×${c.ssh.hops.length}` : ""}
+                          {driverLabel(c.driver)} ·{" "}
+                          {isFileBasedDriver(c.driver)
+                            ? c.database
+                            : `${c.host}:${c.port}`}
+                          {c.ssh.enabled && !isFileBasedDriver(c.driver)
+                            ? ` · SSH×${c.ssh.hops.length}`
+                            : ""}
                         </span>
                       </button>
                     </ContextMenuTrigger>

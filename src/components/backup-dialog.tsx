@@ -16,6 +16,7 @@ import {
   dbApi,
   translateError,
   type BackupProbeResult,
+  type DriverKind,
 } from "@/lib/tauri-api";
 import { connectionSafetyLine, isReadOnly } from "@/lib/connection-meta";
 import { useConfirmStore } from "@/stores/confirm-store";
@@ -24,7 +25,7 @@ import { useSessionStore } from "@/stores/session-store";
 interface BackupDialogProps {
   open: boolean;
   connectionId: string;
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema: string | null;
   table: string | null;
@@ -89,7 +90,8 @@ export function BackupDialog({
 
   async function runExport() {
     const { save } = await import("@tauri-apps/plugin-dialog");
-    const ext = driver === "mysql" ? "sql" : "dump";
+    // sqlite3 .dump 与 mysqldump 一样产出纯 SQL 文本；pg_dump 用自定义归档格式
+    const ext = driver === "postgresql" ? "dump" : "sql";
     const path = await save({
       title: "官方备份导出",
       defaultPath: `${scopeTable && table ? table : database}.${ext}`,

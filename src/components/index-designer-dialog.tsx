@@ -15,13 +15,19 @@ import {
   buildDropIndexSql,
   validateCreateIndex,
 } from "@/lib/ddl";
-import { dbApi, translateError, type ColumnMeta, type IndexMeta } from "@/lib/tauri-api";
+import {
+  dbApi,
+  translateError,
+  type ColumnMeta,
+  type DriverKind,
+  type IndexMeta,
+} from "@/lib/tauri-api";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
 
 interface IndexDesignerDialogProps {
   open: boolean;
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema: string | null;
   table: string;

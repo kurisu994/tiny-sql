@@ -1,6 +1,6 @@
 // 同库复制为新表（FR-272）。
 
-import { buildPostgresCreateTablePreview } from "@/lib/ddl";
+import { buildPostgresCreateTablePreview, buildSqliteCreateTablePreview } from "@/lib/ddl";
 import { copyTargetToken } from "@/lib/table-copy";
 import type { ColumnMeta, ConstraintMeta, DriverKind, IndexMeta } from "@/lib/tauri-api";
 
@@ -14,7 +14,7 @@ export function isSafeTableName(name: string): boolean {
   return IDENT.test(name.trim());
 }
 
-/** MySQL LIKE；PG 用结构重建并改名（非服务端原文）。 */
+/** MySQL LIKE；PG / SQLite 用结构重建并改名（非服务端原文，SQLite 不含索引）。 */
 export function buildCloneTableSql(input: {
   driver: DriverKind;
   database: string;
@@ -32,6 +32,11 @@ export function buildCloneTableSql(input: {
   }
   if (input.driver === "mysql") {
     return `CREATE TABLE ${quoteMysqlIdent(dest)} LIKE ${quoteMysqlIdent(source)};`;
+  }
+  if (input.driver === "sqlite") {
+    if (!input.columns) return null;
+    // 索引名在 SQLite 里是库级唯一的，照搬会撞名，复制表不带索引
+    return buildSqliteCreateTablePreview(dest, input.columns, input.constraints ?? []);
   }
   const schema = input.schema?.trim() || "public";
   if (!isSafeTableName(schema) || !input.columns) return null;

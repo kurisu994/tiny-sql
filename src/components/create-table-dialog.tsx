@@ -23,7 +23,7 @@ import {
   validateCreateTable,
   type CreateTableColumnInput,
 } from "@/lib/ddl";
-import { dbApi, translateError } from "@/lib/tauri-api";
+import { dbApi, translateError, type DriverKind } from "@/lib/tauri-api";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
 
@@ -54,9 +54,28 @@ const PG_TYPES = [
   "jsonb",
 ];
 
+/** SQLite 只有 5 种存储类别，这里给常用的声明类型（亲和性由声明名推导） */
+const SQLITE_TYPES = [
+  "INTEGER",
+  "TEXT",
+  "REAL",
+  "NUMERIC",
+  "BLOB",
+  "BOOLEAN",
+  "DATETIME",
+  "DATE",
+];
+
+/** 默认主键列类型：SQLite 的 AUTOINCREMENT 只认 INTEGER。 */
+function defaultIdType(driver: DriverKind): string {
+  if (driver === "mysql") return "int";
+  if (driver === "sqlite") return "INTEGER";
+  return "integer";
+}
+
 interface CreateTableDialogProps {
   open: boolean;
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema: string | null;
   onOpenChange: (open: boolean) => void;
@@ -89,12 +108,13 @@ export function CreateTableDialog({
   const [table, setTable] = useState("");
   const [comment, setComment] = useState("");
   const [columns, setColumns] = useState<CreateTableColumnInput[]>([
-    { ...emptyColumn(), name: "id", dataType: driver === "mysql" ? "int" : "integer", nullable: false, primaryKey: true, autoIncrement: driver === "mysql" },
+    { ...emptyColumn(), name: "id", dataType: defaultIdType(driver), nullable: false, primaryKey: true, autoIncrement: driver !== "postgresql" },
   ]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const typeOptions = driver === "mysql" ? MYSQL_TYPES : PG_TYPES;
+  const typeOptions =
+    driver === "mysql" ? MYSQL_TYPES : driver === "sqlite" ? SQLITE_TYPES : PG_TYPES;
 
   const input = useMemo(
     () => ({
@@ -141,7 +161,7 @@ export function CreateTableDialog({
     // 执行 DDL 前必须展示完整 SQL 并二次确认（V4-R06）
     const ok = await confirm({
       title: "执行建表 DDL",
-      message: `将在 ${driver === "mysql" ? database : (schema ?? "public")} 下创建表「${table.trim()}」：\n\n${sql}\n\n确定执行吗？`,
+      message: `将在 ${driver === "postgresql" ? (schema ?? "public") : database} 下创建表「${table.trim()}」：\n\n${sql}\n\n确定执行吗？`,
       confirmText: "执行",
     });
     if (!ok) return;
@@ -157,7 +177,7 @@ export function CreateTableDialog({
       setTable("");
       setComment("");
       setColumns([
-        { ...emptyColumn(), name: "id", dataType: driver === "mysql" ? "int" : "integer", nullable: false, primaryKey: true, autoIncrement: driver === "mysql" },
+        { ...emptyColumn(), name: "id", dataType: defaultIdType(driver), nullable: false, primaryKey: true, autoIncrement: driver !== "postgresql" },
       ]);
     } catch (err) {
       setError(translateError(err));
@@ -172,7 +192,7 @@ export function CreateTableDialog({
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>
-              新建表（{driver === "mysql" ? database : (schema ?? "public")}）
+              新建表（{driver === "postgresql" ? (schema ?? "public") : database}）
             </DialogTitle>
           </DialogHeader>
 

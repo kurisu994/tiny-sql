@@ -8,7 +8,13 @@ import {
   type SchemaSnapshot,
   type TableSnapshot,
 } from "@/lib/schema-diff";
-import type { ColumnMeta, ConstraintMeta, IndexMeta, TableMeta } from "@/lib/tauri-api";
+import type {
+  ColumnMeta,
+  ConstraintMeta,
+  DriverKind,
+  IndexMeta,
+  TableMeta,
+} from "@/lib/tauri-api";
 
 function col(overrides: Partial<ColumnMeta> = {}): ColumnMeta {
   return {
@@ -36,7 +42,7 @@ function table(name: string, overrides: Partial<TableSnapshot> = {}): TableSnaps
 }
 
 function snap(
-  driver: "mysql" | "postgresql",
+  driver: DriverKind,
   tables: TableSnapshot[],
   extras: Partial<SchemaSnapshot> = {},
 ): SchemaSnapshot {

@@ -24,7 +24,12 @@ import {
   validateAlterTable,
   type AlterColumnInput,
 } from "@/lib/ddl";
-import { dbApi, translateError, type ColumnMeta } from "@/lib/tauri-api";
+import {
+  dbApi,
+  translateError,
+  type ColumnMeta,
+  type DriverKind,
+} from "@/lib/tauri-api";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
 
@@ -54,6 +59,18 @@ const PG_TYPES = [
   "jsonb",
 ];
 
+/** SQLite 只有 5 种存储类别，这里给常用的声明类型（亲和性由声明名推导） */
+const SQLITE_TYPES = [
+  "INTEGER",
+  "TEXT",
+  "REAL",
+  "NUMERIC",
+  "BLOB",
+  "BOOLEAN",
+  "DATETIME",
+  "DATE",
+];
+
 function emptyColumn(): AlterColumnInput {
   return {
     originName: null,
@@ -76,7 +93,7 @@ function fromMeta(column: ColumnMeta): AlterColumnInput {
 
 interface AlterTableDialogProps {
   open: boolean;
-  driver: "mysql" | "postgresql";
+  driver: DriverKind;
   database: string;
   schema: string | null;
   table: string;
@@ -114,7 +131,8 @@ export function AlterTableDialog({
     setSaving(false);
   }, [open, original]);
 
-  const typeOptions = driver === "mysql" ? MYSQL_TYPES : PG_TYPES;
+  const typeOptions =
+    driver === "mysql" ? MYSQL_TYPES : driver === "sqlite" ? SQLITE_TYPES : PG_TYPES;
   const pkNames = useMemo(
     () =>
       new Set(
@@ -209,7 +227,7 @@ export function AlterTableDialog({
           <DialogHeader>
             <DialogTitle>
               修改表 {table}（
-              {driver === "mysql" ? database : (schema ?? "public")}）
+              {driver === "postgresql" ? (schema ?? "public") : database}）
             </DialogTitle>
           </DialogHeader>
 

@@ -32,7 +32,9 @@ export function needsWriteConfirmation(
   const safePrefixes =
     driver === "postgresql"
       ? ["SELECT", "TABLE", "VALUES", "SHOW", "EXPLAIN"]
-      : ["SELECT", "SHOW", "EXPLAIN", "DESC", "DESCRIBE"];
+      : driver === "sqlite"
+        ? ["SELECT", "VALUES", "PRAGMA", "EXPLAIN"]
+        : ["SELECT", "SHOW", "EXPLAIN", "DESC", "DESCRIBE"];
   if (!safePrefixes.includes(first)) return true;
   // EXPLAIN ANALYZE 会真正执行被分析的语句：分析写语句时仍需确认
   if (first === "EXPLAIN" && tokens[1] === "ANALYZE") {

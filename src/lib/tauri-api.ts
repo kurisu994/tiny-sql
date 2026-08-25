@@ -57,7 +57,24 @@ export interface AdvancedConfig {
 }
 
 /** 数据库 Driver 类型；序列化值与 Rust DriverKind 保持一致。 */
-export type DriverKind = "mysql" | "postgresql";
+export type DriverKind = "mysql" | "postgresql" | "sqlite";
+
+/** 文件型数据库：连接目标是本地文件路径，没有 host/port/账号，也不走 SSH。 */
+export function isFileBasedDriver(driver: DriverKind): boolean {
+  return driver === "sqlite";
+}
+
+/** Driver 的界面显示名。 */
+export function driverLabel(driver: DriverKind): string {
+  switch (driver) {
+    case "postgresql":
+      return "PostgreSQL";
+    case "sqlite":
+      return "SQLite";
+    default:
+      return "MySQL";
+  }
+}
 
 /** 连接环境标签（FR-271），缺省 none */
 export type ConnectionEnv = "none" | "prod" | "staging" | "dev";

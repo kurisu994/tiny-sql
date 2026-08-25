@@ -17,11 +17,8 @@ import {
   joinCompletionSource,
   type SqlCompletionMetadata,
 } from "@/lib/sql-completion";
-import type {
-  ColumnMeta,
-  DriverKind,
-  TableMeta,
-} from "@/lib/tauri-api";
+import { driverLabel } from "@/lib/tauri-api";
+import type { ColumnMeta, DriverKind, TableMeta } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 
 interface SqlCodeEditorProps {
@@ -288,7 +285,7 @@ function serverErrorDiagnostic(
     to,
     severity: "error",
     message,
-    source: driver === "postgresql" ? "PostgreSQL" : "MySQL",
+    source: driverLabel(driver),
   };
 }
 

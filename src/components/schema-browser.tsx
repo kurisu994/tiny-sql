@@ -448,7 +448,12 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     try {
       const { format } = await import("sql-formatter");
       const formatted = format(sql, {
-        language: connection.driver === "postgresql" ? "postgresql" : "mysql",
+        language:
+          connection.driver === "postgresql"
+            ? "postgresql"
+            : connection.driver === "sqlite"
+              ? "sqlite"
+              : "mysql",
         tabWidth: 2,
         keywordCase: "upper",
       });
@@ -772,7 +777,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                   </span>
                 )}
               </button>
-              {expandedDb === db.name && connection.driver === "mysql" && (
+              {expandedDb === db.name && connection.driver !== "postgresql" && (
                 <TableTreeList
                   tables={tables}
                   loading={loadingData}

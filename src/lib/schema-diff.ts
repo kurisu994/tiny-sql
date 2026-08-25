@@ -1,16 +1,17 @@
 // 双连接结构快照与差量（FR-220）。
 //
-// 纯函数：不发 IPC。MySQL 标识符按不区分大小写匹配，PostgreSQL 区分。
+// 纯函数：不发 IPC。MySQL / SQLite 标识符按不区分大小写匹配，PostgreSQL 区分。
 // 仅注释不同不视为必须同步的结构变更。
 
 import type {
   ColumnMeta,
   ConstraintMeta,
+  DriverKind,
   IndexMeta,
   TableMeta,
 } from "@/lib/tauri-api";
 
-export type SchemaDriver = "mysql" | "postgresql";
+export type SchemaDriver = DriverKind;
 
 /** 单表结构快照 */
 export interface TableSnapshot {
@@ -73,9 +74,9 @@ export interface SchemaDiffResult {
   tables: TableDiff[];
 }
 
-/** 按方言规范化标识符，用于匹配 */
+/** 按方言规范化标识符，用于匹配（只有 PostgreSQL 区分大小写） */
 export function identKey(name: string, driver: SchemaDriver): string {
-  return driver === "mysql" ? name.toLowerCase() : name;
+  return driver === "postgresql" ? name : name.toLowerCase();
 }
 
 function matchKey(

@@ -81,7 +81,9 @@ export function CloneTableDialog({
         setNote(
           connection.driver === "mysql"
             ? "MySQL：CREATE TABLE … LIKE 会复制列与索引，不含数据。"
-            : "PostgreSQL：由元数据重建 DDL（非服务端原文），不含数据。",
+            : connection.driver === "sqlite"
+              ? "SQLite：由元数据重建 DDL（非服务端原文），不含索引与数据。"
+              : "PostgreSQL：由元数据重建 DDL（非服务端原文），不含数据。",
         );
       } catch (e) {
         if (!cancelled) setError(translateError(e));

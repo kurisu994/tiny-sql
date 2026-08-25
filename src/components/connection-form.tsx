@@ -15,6 +15,7 @@ import {
   type SshHopConfig,
   type ConnectionEnv,
   type StoredConnection,
+  isFileBasedDriver,
 } from "@/lib/tauri-api";
 import { isReadOnly } from "@/lib/connection-meta";
 import { cn } from "@/lib/utils";
@@ -50,6 +51,8 @@ const EMPTY: FormFields = {
 const DRIVER_DEFAULTS: Record<DriverKind, Pick<FormFields, "port" | "user">> = {
   mysql: { port: 3306, user: "root" },
   postgresql: { port: 5432, user: "postgres" },
+  // SQLite 连的是本地文件，端口与账号不参与连接，留空占位
+  sqlite: { port: 0, user: "" },
 };
 
 const DEFAULT_SSH: SshConfig = { enabled: false, hops: [] };
@@ -152,6 +155,21 @@ export function ConnectionForm({
   const set = <K extends keyof FormFields>(key: K, value: FormFields[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
+  // SQLite 等文件型 driver：database 字段承载数据库文件路径，主机/端口/账号均不适用
+  const fileBased = isFileBasedDriver(driver);
+
+  async function pickDatabaseFile() {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      title: "选择 SQLite 数据库文件",
+      filters: [{ name: "SQLite", extensions: ["db", "sqlite", "sqlite3", "db3"] }],
+      multiple: false,
+    });
+    if (typeof selected !== "string") return;
+    set("database", selected);
+    setTest({ kind: "idle" });
+  }
+
   const changeDriver = (next: DriverKind) => {
     const previousDefaults = DRIVER_DEFAULTS[driver];
     const nextDefaults = DRIVER_DEFAULTS[next];
@@ -223,7 +241,10 @@ export function ConnectionForm({
     onDone();
   }
 
-  const canSave = form.name.trim() !== "" && form.host.trim() !== "";
+  // 文件型 driver 校验的是文件路径，网络型校验主机
+  const canSave =
+    form.name.trim() !== "" &&
+    (fileBased ? form.database.trim() !== "" : form.host.trim() !== "");
 
   return (
     <div className="flex flex-col gap-4">
@@ -234,8 +255,10 @@ export function ConnectionForm({
       <Tabs defaultValue="general">
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="general">常规</TabsTrigger>
-          <TabsTrigger value="ssh">SSH</TabsTrigger>
-          <TabsTrigger value="ssl" disabled={driver === "postgresql"}>
+          <TabsTrigger value="ssh" disabled={fileBased}>
+            SSH
+          </TabsTrigger>
+          <TabsTrigger value="ssl" disabled={driver === "postgresql" || fileBased}>
             SSL
           </TabsTrigger>
           <TabsTrigger value="advanced">高级</TabsTrigger>
@@ -252,6 +275,7 @@ export function ConnectionForm({
               >
                 <option value="mysql">MySQL</option>
                 <option value="postgresql">PostgreSQL</option>
+                <option value="sqlite">SQLite</option>
               </select>
             </label>
             <Field
@@ -259,25 +283,44 @@ export function ConnectionForm({
               value={form.name}
               onChange={(v) => set("name", v)}
             />
-            <Field
-              label="默认数据库（可空）"
-              value={form.database}
-              onChange={(v) => set("database", v)}
-            />
-            <Field label="主机" value={form.host} onChange={(v) => set("host", v)} />
-            <Field
-              label="端口"
-              type="number"
-              value={String(form.port)}
-              onChange={(v) => set("port", Number(v))}
-            />
-            <Field label="用户" value={form.user} onChange={(v) => set("user", v)} />
-            <Field
-              label="密码"
-              type="password"
-              value={form.password}
-              onChange={(v) => set("password", v)}
-            />
+            {fileBased ? (
+              <label className="col-span-2 flex flex-col gap-1 text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">数据库文件</span>
+                <div className="flex gap-2">
+                  <input
+                    value={form.database}
+                    onChange={(event) => set("database", event.target.value)}
+                    placeholder="/path/to/app.db"
+                    className="flex-1 rounded-md border border-neutral-300 px-2 py-1 dark:border-neutral-600 dark:bg-neutral-900"
+                  />
+                  <Button type="button" variant="outline" onClick={pickDatabaseFile}>
+                    浏览…
+                  </Button>
+                </div>
+              </label>
+            ) : (
+              <>
+                <Field
+                  label="默认数据库（可空）"
+                  value={form.database}
+                  onChange={(v) => set("database", v)}
+                />
+                <Field label="主机" value={form.host} onChange={(v) => set("host", v)} />
+                <Field
+                  label="端口"
+                  type="number"
+                  value={String(form.port)}
+                  onChange={(v) => set("port", Number(v))}
+                />
+                <Field label="用户" value={form.user} onChange={(v) => set("user", v)} />
+                <Field
+                  label="密码"
+                  type="password"
+                  value={form.password}
+                  onChange={(v) => set("password", v)}
+                />
+              </>
+            )}
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-neutral-600 dark:text-neutral-400">环境</span>
               <select
@@ -303,6 +346,12 @@ export function ConnectionForm({
           {driver === "postgresql" && (
             <p className="mt-3 text-xs text-neutral-500">
               PostgreSQL 默认端口为 5432；证书路径将在安全阶段接入，当前使用驱动默认 TLS 策略。
+            </p>
+          )}
+          {fileBased && (
+            <p className="mt-3 text-xs text-neutral-500">
+              SQLite 直接打开本地文件：不需要主机 / 账号，SSH 与 SSL 配置不生效；
+              文件不存在时连接会失败，不会自动创建。
             </p>
           )}
         </TabsContent>

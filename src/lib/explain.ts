@@ -104,5 +104,10 @@ export function explainSql(driver: DriverKind, sql: string, analyze: boolean): s
       ? `EXPLAIN (ANALYZE, FORMAT JSON) ${trimmed}`
       : `EXPLAIN (FORMAT JSON) ${trimmed}`;
   }
+  if (driver === "sqlite") {
+    // SQLite 没有 ANALYZE 变体：EXPLAIN 出的是虚拟机字节码，
+    // QUERY PLAN 才是人能读的执行计划，两种情况都用后者
+    return `EXPLAIN QUERY PLAN ${trimmed}`;
+  }
   return analyze ? `EXPLAIN ANALYZE ${trimmed}` : `EXPLAIN ${trimmed}`;
 }
