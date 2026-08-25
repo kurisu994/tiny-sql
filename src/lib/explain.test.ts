@@ -9,6 +9,15 @@ describe("explainSql", () => {
       "EXPLAIN (ANALYZE, FORMAT JSON) SELECT 1",
     );
   });
+
+  it("SQLite 无论是否 analyze 都用 QUERY PLAN", () => {
+    expect(explainSql("sqlite", "SELECT 1;", false)).toBe(
+      "EXPLAIN QUERY PLAN SELECT 1",
+    );
+    expect(explainSql("sqlite", "SELECT 1", true)).toBe(
+      "EXPLAIN QUERY PLAN SELECT 1",
+    );
+  });
 });
 
 describe("buildExplainTree", () => {

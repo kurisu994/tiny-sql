@@ -8,6 +8,7 @@ import {
   buildDropConstraintSql,
   buildDropIndexSql,
   buildPostgresCreateTablePreview,
+  buildSqliteCreateTablePreview,
   isValidDataType,
   validateAlterTable,
   validateCreateIndex,
@@ -527,5 +528,214 @@ describe("索引 / 约束 SQL（FR-253）", () => {
         unique: false,
       }),
     ).toBe("至少选择一列");
+  });
+});
+
+describe("ddl · SQLite", () => {
+  const table = "users";
+
+  it("单列 INTEGER 主键自增内联成 AUTOINCREMENT", () => {
+    const input: CreateTableInput = {
+      driver: "sqlite",
+      database: "main",
+      table,
+      columns: [
+        {
+          name: "id",
+          dataType: "INTEGER",
+          nullable: false,
+          defaultValue: "",
+          primaryKey: true,
+          autoIncrement: true,
+        },
+        {
+          name: "email",
+          dataType: "TEXT",
+          nullable: false,
+          defaultValue: "",
+          primaryKey: false,
+          autoIncrement: false,
+        },
+      ],
+    };
+    expect(validateCreateTable(input)).toBeNull();
+    const sql = buildCreateTableSql(input);
+    expect(sql).toContain('CREATE TABLE "main"."users"');
+    expect(sql).toContain('"id" INTEGER PRIMARY KEY AUTOINCREMENT');
+    expect(sql).not.toContain("PRIMARY KEY (");
+    expect(sql).toContain('"email" TEXT NOT NULL');
+  });
+
+  it("非 INTEGER 或多列主键上的自增被拒绝", () => {
+    const base: CreateTableInput = {
+      driver: "sqlite",
+      database: "main",
+      table,
+      columns: [
+        {
+          name: "id",
+          dataType: "TEXT",
+          nullable: false,
+          defaultValue: "",
+          primaryKey: true,
+          autoIncrement: true,
+        },
+      ],
+    };
+    expect(validateCreateTable(base)).toContain("INTEGER");
+  });
+
+  it("多列主键走表级 PRIMARY KEY 子句", () => {
+    const sql = buildCreateTableSql({
+      driver: "sqlite",
+      database: "main",
+      table: "kv",
+      columns: [
+        {
+          name: "k",
+          dataType: "TEXT",
+          nullable: false,
+          defaultValue: "",
+          primaryKey: true,
+          autoIncrement: false,
+        },
+        {
+          name: "v",
+          dataType: "TEXT",
+          nullable: false,
+          defaultValue: "",
+          primaryKey: true,
+          autoIncrement: false,
+        },
+      ],
+    });
+    expect(sql).toContain('PRIMARY KEY ("k", "v")');
+  });
+
+  it("ALTER 只放行 RENAME / ADD / DROP，改类型空性默认值一律拒绝", () => {
+    const original: ColumnMeta[] = [
+      col({ name: "id", dataType: "INTEGER", columnKey: "PRI" }),
+      col({ name: "email", dataType: "TEXT", nullable: true }),
+    ];
+    const base = (columns: AlterColumnInput[]): AlterTableInput => ({
+      driver: "sqlite",
+      database: "main",
+      table,
+      original,
+      columns,
+    });
+
+    const renameAndAdd = base([
+      { originName: "id", name: "id", dataType: "INTEGER", nullable: false, defaultValue: "" },
+      { originName: "email", name: "mail", dataType: "TEXT", nullable: true, defaultValue: "" },
+      { originName: null, name: "age", dataType: "INTEGER", nullable: true, defaultValue: "" },
+    ]);
+    expect(validateAlterTable(renameAndAdd)).toBeNull();
+    const sql = buildAlterTableSql(renameAndAdd);
+    expect(sql).toContain('ALTER TABLE "main"."users" ADD COLUMN "age" INTEGER;');
+    expect(sql).toContain('RENAME COLUMN "email" TO "mail";');
+
+    const typeChange = base([
+      { originName: "id", name: "id", dataType: "INTEGER", nullable: false, defaultValue: "" },
+      { originName: "email", name: "email", dataType: "BLOB", nullable: true, defaultValue: "" },
+    ]);
+    expect(validateAlterTable(typeChange)).toContain("不支持修改列类型");
+
+    const nullChange = base([
+      { originName: "id", name: "id", dataType: "INTEGER", nullable: false, defaultValue: "" },
+      { originName: "email", name: "email", dataType: "TEXT", nullable: false, defaultValue: "" },
+    ]);
+    expect(validateAlterTable(nullChange)).toContain("不支持修改列空性");
+
+    const defaultChange = base([
+      { originName: "id", name: "id", dataType: "INTEGER", nullable: false, defaultValue: "" },
+      { originName: "email", name: "email", dataType: "TEXT", nullable: true, defaultValue: "''" },
+    ]);
+    expect(validateAlterTable(defaultChange)).toContain("不支持修改列默认值");
+
+    const dropped = base([
+      { originName: "id", name: "id", dataType: "INTEGER", nullable: false, defaultValue: "" },
+    ]);
+    expect(buildAlterTableSql(dropped)).toContain('DROP COLUMN "email";');
+  });
+
+  it("索引名带库限定、表名不带；DROP INDEX 同理", () => {
+    expect(
+      buildCreateIndexSql({
+        driver: "sqlite",
+        database: "main",
+        table,
+        name: "idx_users_email",
+        columns: ["email"],
+        unique: true,
+      }),
+    ).toBe(
+      'CREATE UNIQUE INDEX "main"."idx_users_email" ON "users" ("email");',
+    );
+    expect(
+      buildDropIndexSql({
+        driver: "sqlite",
+        database: "main",
+        table,
+        name: "idx_users_email",
+      }),
+    ).toBe('DROP INDEX "main"."idx_users_email";');
+  });
+
+  it("UNIQUE 约束退化成删索引，其余约束给出不支持说明", () => {
+    expect(
+      buildDropConstraintSql({
+        driver: "sqlite",
+        database: "main",
+        table,
+        name: "idx_users_email",
+        constraintType: "UNIQUE",
+      }),
+    ).toBe('DROP INDEX "main"."idx_users_email";');
+    expect(
+      buildDropConstraintSql({
+        driver: "sqlite",
+        database: "main",
+        table,
+        name: "fk_orders_0",
+        constraintType: "FOREIGN KEY",
+      }),
+    ).toContain("SQLite 不支持删除");
+  });
+
+  it("建表预览把 `目标表(列)` 外键还原成 REFERENCES 子句", () => {
+    const columns: ColumnMeta[] = [
+      col({ name: "id", dataType: "INTEGER" }),
+      col({ name: "user_id", dataType: "INTEGER" }),
+    ];
+    const constraints: ConstraintMeta[] = [
+      { name: "PRIMARY", constraintType: "PRIMARY KEY", columns: ["id"], reference: null },
+      {
+        name: "fk_orders_0",
+        constraintType: "FOREIGN KEY",
+        columns: ["user_id"],
+        reference: "users(id)",
+      },
+    ];
+    const sql = buildSqliteCreateTablePreview("orders", columns, constraints);
+    expect(sql).toContain('CREATE TABLE "orders"');
+    expect(sql).toContain('PRIMARY KEY ("id")');
+    expect(sql).toContain('FOREIGN KEY ("user_id") REFERENCES "users" ("id")');
+  });
+
+  it("解析不出来的外键直接跳过，不产出半截 SQL", () => {
+    const sql = buildSqliteCreateTablePreview(
+      "orders",
+      [col({ name: "user_id", dataType: "INTEGER" })],
+      [
+        {
+          name: "fk",
+          constraintType: "FOREIGN KEY",
+          columns: ["user_id"],
+          reference: "看不懂的文本",
+        },
+      ],
+    );
+    expect(sql).not.toContain("REFERENCES");
   });
 });

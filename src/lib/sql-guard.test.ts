@@ -78,3 +78,16 @@ describe("invalidatesMetadataCache", () => {
     expect(invalidatesMetadataCache("UPDATE users SET name = 'ALTER'")).toBe(false);
   });
 });
+
+describe("needsWriteConfirmation · SQLite", () => {
+  it("SELECT / VALUES / PRAGMA / EXPLAIN 免确认，其余需确认", () => {
+    expect(needsWriteConfirmation("SELECT * FROM users", "sqlite")).toBe(false);
+    expect(needsWriteConfirmation("VALUES (1), (2)", "sqlite")).toBe(false);
+    expect(needsWriteConfirmation("PRAGMA table_info('users')", "sqlite")).toBe(false);
+    expect(needsWriteConfirmation("EXPLAIN QUERY PLAN SELECT 1", "sqlite")).toBe(false);
+    expect(needsWriteConfirmation("DELETE FROM users", "sqlite")).toBe(true);
+    // MySQL 专属语句在 SQLite 里不算安全前缀
+    expect(needsWriteConfirmation("SHOW TABLES", "sqlite")).toBe(true);
+    expect(needsWriteConfirmation("DESCRIBE users", "sqlite")).toBe(true);
+  });
+});
