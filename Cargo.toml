@@ -23,6 +23,7 @@ russh = "0.54"
 sqlx = { version = "0.8", default-features = false, features = [
     "mysql",
     "postgres",
+    "sqlite",
     "runtime-tokio-rustls",
     "chrono",
     "bigdecimal",

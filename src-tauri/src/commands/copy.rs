@@ -80,7 +80,8 @@ fn err(key: &str) -> QueryCommandError {
 
 fn ident_key(name: &str, kind: DriverKind) -> String {
     match kind {
-        DriverKind::MySql => name.to_ascii_lowercase(),
+        // SQLite 与 MySQL 一样按大小写不敏感匹配列名
+        DriverKind::MySql | DriverKind::Sqlite => name.to_ascii_lowercase(),
         DriverKind::PostgreSql => name.to_string(),
     }
 }
@@ -121,6 +122,7 @@ fn scope_of(kind: DriverKind, endpoint: &CopyEndpoint) -> Result<MetadataScope, 
                 .ok_or_else(|| err("error.driver.schema_required"))?;
             Ok(MetadataScope::postgresql(endpoint.database.trim(), schema))
         }
+        DriverKind::Sqlite => Ok(MetadataScope::sqlite(endpoint.database.trim())),
     }
 }
 
@@ -144,11 +146,22 @@ fn quote_table(kind: DriverKind, endpoint: &CopyEndpoint) -> Result<String, Quer
                 endpoint.table.trim().replace('"', "\"\"")
             ))
         }
+        // SQLite 的 database 是 ATTACH 名（主库 main），标识符用双引号
+        DriverKind::Sqlite => Ok(format!(
+            "\"{}\".\"{}\"",
+            endpoint.database.trim().replace('"', "\"\""),
+            endpoint.table.trim().replace('"', "\"\"")
+        )),
     }
 }
 
 fn replace_sql(kind: DriverKind, endpoint: &CopyEndpoint) -> Result<String, QueryCommandError> {
-    Ok(format!("TRUNCATE TABLE {};", quote_table(kind, endpoint)?))
+    let table = quote_table(kind, endpoint)?;
+    // SQLite 没有 TRUNCATE，用无条件 DELETE（SQLite 会走 truncate 优化）
+    Ok(match kind {
+        DriverKind::Sqlite => format!("DELETE FROM {table};"),
+        _ => format!("TRUNCATE TABLE {table};"),
+    })
 }
 
 fn project_row(

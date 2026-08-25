@@ -25,9 +25,11 @@ use tokio_util::sync::CancellationToken;
 
 mod postgres;
 mod session;
+mod sqlite;
 
 pub use postgres::{PostgresConnectSettings, PostgresDriver};
 pub use session::DriverSession;
+pub use sqlite::{SqliteConnectSettings, SqliteDriver};
 
 /// 表浏览默认服务端行数上限（FR-021）。
 pub const TABLE_PREVIEW_LIMIT: usize = 1_000;
@@ -46,15 +48,23 @@ pub enum DriverKind {
     #[default]
     MySql,
     PostgreSql,
+    /// 本地 SQLite 文件；无 host/port/账号，连接目标是文件路径。
+    Sqlite,
 }
 
 impl DriverKind {
-    /// 与 serde 持久化值一致的稳定字符串（"mysql" / "postgresql"）。
+    /// 与 serde 持久化值一致的稳定字符串（"mysql" / "postgresql" / "sqlite"）。
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::MySql => "mysql",
             Self::PostgreSql => "postgresql",
+            Self::Sqlite => "sqlite",
         }
+    }
+
+    /// 是否为本地文件型数据库（无网络地址、无账号、不走 SSH 隧道）。
+    pub fn is_file_based(&self) -> bool {
+        matches!(self, Self::Sqlite)
     }
 }
 
@@ -263,6 +273,15 @@ impl MetadataScope {
         Self {
             database: database.into(),
             schema: Some(schema.into()),
+        }
+    }
+
+    /// 构造 SQLite metadata 作用域。SQLite 的 "database" 即 ATTACH 名
+    /// （主库固定 `main`），没有独立 schema 层级。
+    pub fn sqlite(database: impl Into<String>) -> Self {
+        Self {
+            database: database.into(),
+            schema: None,
         }
     }
 }
@@ -667,6 +686,11 @@ fn build_edit_sql(
 /// PostgreSQL 双引号标识符引用（内部双引号双写转义）。
 fn quote_pg_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// SQLite 双引号标识符引用；SQLite 也接受反引号/方括号，但双引号是标准写法。
+fn quote_sqlite_ident(name: &str) -> String {
+    quote_pg_ident(name)
 }
 
 /// MySQL / PostgreSQL 共用的最小数据库 Driver 契约。
@@ -2251,7 +2275,10 @@ impl StatementSplitter {
         while let Some(&ch) = self.carry.front() {
             match self.state {
                 SplitState::Normal => match ch {
-                    '\'' | '"' | '`' if ch != '`' || self.dialect == SqlDialect::MySql => {
+                    '\'' | '"' | '`'
+                        if ch != '`'
+                            || matches!(self.dialect, SqlDialect::MySql | SqlDialect::Sqlite) =>
+                    {
                         self.current.push(ch);
                         self.carry.pop_front();
                         self.state = match ch {
@@ -2545,6 +2572,7 @@ fn prepare_statements(
 pub enum SqlDialect {
     MySql,
     PostgreSql,
+    Sqlite,
 }
 
 /// 分析并改写 SQL：
@@ -2563,7 +2591,7 @@ fn prepare_query_sql_for_dialect(
     dialect: SqlDialect,
 ) -> Result<PreparedSql, DriverError> {
     let sanitized = match dialect {
-        SqlDialect::MySql => strip_literals_and_comments(sql),
+        SqlDialect::MySql | SqlDialect::Sqlite => strip_literals_and_comments(sql),
         SqlDialect::PostgreSql => {
             strip_literals_and_comments(&strip_postgres_dollar_quoted_literals(sql))
         }
@@ -2604,10 +2632,13 @@ fn prepare_query_sql_for_dialect(
             .any(|token| matches!(token.as_str(), "INSERT" | "UPDATE" | "DELETE" | "MERGE"));
     let is_read = !with_contains_write
         && (matches!(main_statement, "SELECT")
-            || (dialect == SqlDialect::PostgreSql && matches!(main_statement, "TABLE" | "VALUES")));
+            || (dialect == SqlDialect::PostgreSql && matches!(main_statement, "TABLE" | "VALUES"))
+            || (dialect == SqlDialect::Sqlite && main_statement == "VALUES"));
     let is_metadata = match dialect {
         SqlDialect::MySql => matches!(first, "SHOW" | "DESC" | "DESCRIBE" | "EXPLAIN"),
         SqlDialect::PostgreSql => matches!(first, "SHOW" | "EXPLAIN"),
+        // SQLite 的 EXPLAIN / EXPLAIN QUERY PLAN 不执行被分析语句；PRAGMA 只读写连接设置
+        SqlDialect::Sqlite => matches!(first, "PRAGMA" | "EXPLAIN"),
     };
 
     if is_read {
@@ -2700,6 +2731,7 @@ fn can_append_limit(sanitized_stmt: &str, dialect: SqlDialect) -> bool {
                 let dialect_blocker = match dialect {
                     SqlDialect::MySql => matches!(word.as_str(), "LOCK" | "PROCEDURE"),
                     SqlDialect::PostgreSql => matches!(word.as_str(), "OFFSET" | "FETCH"),
+                    SqlDialect::Sqlite => word.as_str() == "OFFSET",
                 };
                 if common_blocker || dialect_blocker {
                     return false;
@@ -3184,6 +3216,121 @@ mod tests {
             }
             assert_eq!(&streamed, &expected, "{sql} 逐字喂入应与整串一致");
         }
+    }
+
+    /// SQLite 方言：读语句追加 LIMIT，PRAGMA / EXPLAIN 按元数据读，其余要写确认。
+    #[test]
+    fn sqlite_dialect_classifies_statements() {
+        let options = QueryOptions {
+            row_limit: 10,
+            allow_write: false,
+        };
+
+        let read = prepare_query_sql_for_dialect("SELECT * FROM t", options, SqlDialect::Sqlite)
+            .expect("SELECT 应按读处理");
+        assert_eq!(
+            read.kind,
+            PreparedSqlKind::Read {
+                limit: 10,
+                server_capped: true
+            }
+        );
+        assert!(read.sql.ends_with("\nLIMIT 11"), "应多取 1 行探测截断");
+
+        // 已有 LIMIT 的语句不再追加
+        let capped =
+            prepare_query_sql_for_dialect("SELECT * FROM t LIMIT 3", options, SqlDialect::Sqlite)
+                .expect("带 LIMIT 的 SELECT 应按读处理");
+        assert_eq!(
+            capped.kind,
+            PreparedSqlKind::Read {
+                limit: 10,
+                server_capped: false
+            }
+        );
+
+        // SQLite 支持裸 VALUES 语句
+        assert!(matches!(
+            prepare_query_sql_for_dialect("VALUES (1), (2)", options, SqlDialect::Sqlite)
+                .expect("VALUES 应按读处理")
+                .kind,
+            PreparedSqlKind::Read { .. }
+        ));
+
+        for sql in ["PRAGMA table_info('t')", "EXPLAIN QUERY PLAN SELECT 1"] {
+            assert!(
+                matches!(
+                    prepare_query_sql_for_dialect(sql, options, SqlDialect::Sqlite)
+                        .expect("元数据语句应免写确认")
+                        .kind,
+                    PreparedSqlKind::Read {
+                        server_capped: false,
+                        ..
+                    }
+                ),
+                "{sql} 应按元数据读处理"
+            );
+        }
+
+        // MySQL 专属的 SHOW / DESCRIBE 在 SQLite 里不是读语句
+        assert!(matches!(
+            prepare_query_sql_for_dialect("SHOW TABLES", options, SqlDialect::Sqlite),
+            Err(DriverError::WriteRequiresConfirmation)
+        ));
+        assert!(matches!(
+            prepare_query_sql_for_dialect("DELETE FROM t", options, SqlDialect::Sqlite),
+            Err(DriverError::WriteRequiresConfirmation)
+        ));
+    }
+
+    /// SQLite 分句：反引号 / 双引号标识符与注释里的分号不切分，`$` 不是 dollar-quote。
+    #[test]
+    fn sqlite_dialect_splits_statements() {
+        assert_eq!(
+            split_statements("SELECT 1; SELECT 2;", SqlDialect::Sqlite).unwrap(),
+            vec!["SELECT 1".to_string(), "SELECT 2".to_string()]
+        );
+        assert_eq!(
+            split_statements(
+                "SELECT \"a;b\" FROM t; SELECT `c;d` FROM t",
+                SqlDialect::Sqlite
+            )
+            .unwrap(),
+            vec![
+                "SELECT \"a;b\" FROM t".to_string(),
+                "SELECT `c;d` FROM t".to_string()
+            ]
+        );
+        assert_eq!(
+            split_statements("SELECT ';' AS s; -- 注释;\nSELECT 2", SqlDialect::Sqlite).unwrap(),
+            vec![
+                "SELECT ';' AS s".to_string(),
+                "-- 注释;\nSELECT 2".to_string()
+            ]
+        );
+        // PG 的 dollar-quote 在 SQLite 里只是普通字符，分号照常切
+        assert_eq!(
+            split_statements("SELECT '$a$'; SELECT 2", SqlDialect::Sqlite).unwrap(),
+            vec!["SELECT '$a$'".to_string(), "SELECT 2".to_string()]
+        );
+        assert!(split_statements("SELECT 'abc", SqlDialect::Sqlite).is_err());
+    }
+
+    #[test]
+    fn sqlite_metadata_scope_has_no_schema_layer() {
+        let scope = MetadataScope::sqlite("main");
+        assert_eq!(scope.database, "main");
+        assert_eq!(scope.schema, None);
+        assert_eq!(DriverKind::Sqlite.as_str(), "sqlite");
+        assert!(DriverKind::Sqlite.is_file_based());
+        assert!(!DriverKind::MySql.is_file_based());
+        assert!(!DriverKind::PostgreSql.is_file_based());
+    }
+
+    #[test]
+    fn sqlite_identifier_quoting_doubles_inner_quotes() {
+        assert_eq!(quote_sqlite_ident("users"), "\"users\"");
+        assert_eq!(quote_sqlite_ident("a\"b"), "\"a\"\"b\"");
     }
 
     /// 流式分句器：EOF 未闭合拒绝；空白脚本产出空。

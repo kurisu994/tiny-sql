@@ -245,6 +245,8 @@ fn dump_tool_name(kind: DriverKind) -> &'static str {
     match kind {
         DriverKind::MySql => "mysqldump",
         DriverKind::PostgreSql => "pg_dump",
+        // SQLite 导出与导入都用官方 sqlite3 shell
+        DriverKind::Sqlite => "sqlite3",
     }
 }
 
@@ -252,6 +254,7 @@ fn client_tool_name(kind: DriverKind) -> &'static str {
     match kind {
         DriverKind::MySql => "mysql",
         DriverKind::PostgreSql => "pg_restore",
+        DriverKind::Sqlite => "sqlite3",
     }
 }
 
@@ -432,6 +435,23 @@ fn pg_dump_args(
     args
 }
 
+/// `sqlite3 <file> ".dump"`：整库或单表导出为 SQL 文本，由调用方重定向 stdout。
+///
+/// 表名进的是 sqlite3 shell 的点命令参数，用双引号包裹并双写内部双引号，
+/// 避免带空格 / 特殊字符的表名把点命令切碎。
+fn sqlite_dump_args(db_path: &str, table: Option<&str>) -> Vec<String> {
+    let command = match table.filter(|s| !s.trim().is_empty()) {
+        Some(table) => format!(".dump \"{}\"", table.trim().replace('"', "\"\"")),
+        None => ".dump".to_string(),
+    };
+    vec![db_path.to_string(), command]
+}
+
+/// `sqlite3 <file>`：SQL 文本从 stdin 灌入。
+fn sqlite_restore_args(db_path: &str) -> Vec<String> {
+    vec![db_path.to_string()]
+}
+
 fn pg_restore_args(host: &str, port: u16, user: &str, database: &str, file: &str) -> Vec<String> {
     vec![
         format!("--host={host}"),
@@ -460,12 +480,14 @@ pub async fn backup_probe_tools(
         DriverKind::PostgreSql => {
             "pg_dump --format=custom --host=<endpoint> --username=<user> --dbname=<database> --file=<path>".into()
         }
+        DriverKind::Sqlite => "sqlite3 <file> \".dump\" > <path>".into(),
     };
     let restore_preview = match kind {
         DriverKind::MySql => "mysql --defaults-extra-file=<secret> <database>".into(),
         DriverKind::PostgreSql => {
             "pg_restore --host=<endpoint> --username=<user> --dbname=<database> --clean --if-exists <path>".into()
         }
+        DriverKind::Sqlite => "sqlite3 <file> < <path>".into(),
     };
     Ok(BackupProbeResult {
         dump: dump.map(|path| BackupToolInfo {
@@ -556,6 +578,21 @@ pub async fn db_backup_export(
                 })
                 .await
             }
+            // SQLite 的目标是文件本身：database 字段存的就是路径，无凭据文件
+            DriverKind::Sqlite => {
+                let args = sqlite_dump_args(stored.database.trim(), table.as_deref());
+                run_process(ProcessIo {
+                    program: &dump,
+                    args: &args,
+                    envs: &[],
+                    stdout_path: Some(Path::new(&input.path)),
+                    stdin_path: None,
+                    token: token.clone(),
+                    app: &app,
+                    query_id: &query_id,
+                })
+                .await
+            }
         }
     }
     .await;
@@ -637,6 +674,20 @@ pub async fn db_backup_restore(
                     envs: &envs,
                     stdout_path: None,
                     stdin_path: None,
+                    token: token.clone(),
+                    app: &app,
+                    query_id: &query_id,
+                })
+                .await
+            }
+            DriverKind::Sqlite => {
+                let args = sqlite_restore_args(stored.database.trim());
+                run_process(ProcessIo {
+                    program: &client,
+                    args: &args,
+                    envs: &[],
+                    stdout_path: None,
+                    stdin_path: Some(Path::new(&input.path)),
                     token: token.clone(),
                     app: &app,
                     query_id: &query_id,

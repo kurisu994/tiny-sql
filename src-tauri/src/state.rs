@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use db_driver::{
     ColumnMeta, ConstraintMeta, DatabaseMeta, Driver, DriverCloseFuture, DriverFuture, DriverKind,
     DriverSession, IndexMeta, MetadataScope, MySqlDriver, PostgresDriver, QueryOptions, RowSet,
-    SchemaMeta, TableBrowseQuery, TableBrowseResult, TableMeta,
+    SchemaMeta, SqliteDriver, TableBrowseQuery, TableBrowseResult, TableMeta,
 };
 use ssh_multihop::SshTunnel;
 use tokio::sync::Mutex as AsyncMutex;
@@ -22,12 +22,14 @@ use crate::tofu::SshTofuManager;
 
 /// 活跃连接持有的具体数据库 driver。
 ///
-/// 使用显式 enum 保留 MySQL 方言专属能力（如 CREATE DATABASE），同时为通用
-/// metadata/query 路径实现对象安全 [`Driver`] 契约。
+/// 使用显式 enum 保留方言专属能力（如 MySQL 的 CREATE DATABASE），同时为通用
+/// metadata/query 路径实现对象安全 [`Driver`] 契约 —— 通用方法统一委托给
+/// [`ActiveDriver::inner`]，新增 driver 只需在 `inner` 里加一条分支。
 #[derive(Clone)]
 pub enum ActiveDriver {
     MySql(MySqlDriver),
     PostgreSql(PostgresDriver),
+    Sqlite(SqliteDriver),
 }
 
 impl ActiveDriver {
@@ -35,45 +37,39 @@ impl ActiveDriver {
     pub fn as_mysql(&self) -> Option<&MySqlDriver> {
         match self {
             Self::MySql(driver) => Some(driver),
-            Self::PostgreSql(_) => None,
+            Self::PostgreSql(_) | Self::Sqlite(_) => None,
+        }
+    }
+
+    /// 通用 [`Driver`] 契约的委托目标。
+    fn inner(&self) -> &dyn Driver {
+        match self {
+            Self::MySql(driver) => driver,
+            Self::PostgreSql(driver) => driver,
+            Self::Sqlite(driver) => driver,
         }
     }
 }
 
 impl Driver for ActiveDriver {
     fn kind(&self) -> DriverKind {
-        match self {
-            Self::MySql(driver) => Driver::kind(driver),
-            Self::PostgreSql(driver) => Driver::kind(driver),
-        }
+        self.inner().kind()
     }
 
     fn ping(&self) -> DriverFuture<'_, i64> {
-        match self {
-            Self::MySql(driver) => Driver::ping(driver),
-            Self::PostgreSql(driver) => Driver::ping(driver),
-        }
+        self.inner().ping()
     }
 
     fn list_databases(&self) -> DriverFuture<'_, Vec<DatabaseMeta>> {
-        match self {
-            Self::MySql(driver) => Driver::list_databases(driver),
-            Self::PostgreSql(driver) => Driver::list_databases(driver),
-        }
+        self.inner().list_databases()
     }
 
     fn list_schemas<'a>(&'a self, database: &'a str) -> DriverFuture<'a, Vec<SchemaMeta>> {
-        match self {
-            Self::MySql(driver) => Driver::list_schemas(driver, database),
-            Self::PostgreSql(driver) => Driver::list_schemas(driver, database),
-        }
+        self.inner().list_schemas(database)
     }
 
     fn list_tables<'a>(&'a self, scope: &'a MetadataScope) -> DriverFuture<'a, Vec<TableMeta>> {
-        match self {
-            Self::MySql(driver) => Driver::list_tables(driver, scope),
-            Self::PostgreSql(driver) => Driver::list_tables(driver, scope),
-        }
+        self.inner().list_tables(scope)
     }
 
     fn list_columns<'a>(
@@ -81,10 +77,7 @@ impl Driver for ActiveDriver {
         scope: &'a MetadataScope,
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ColumnMeta>> {
-        match self {
-            Self::MySql(driver) => Driver::list_columns(driver, scope, table),
-            Self::PostgreSql(driver) => Driver::list_columns(driver, scope, table),
-        }
+        self.inner().list_columns(scope, table)
     }
 
     fn list_indexes<'a>(
@@ -92,10 +85,7 @@ impl Driver for ActiveDriver {
         scope: &'a MetadataScope,
         table: &'a str,
     ) -> DriverFuture<'a, Vec<IndexMeta>> {
-        match self {
-            Self::MySql(driver) => Driver::list_indexes(driver, scope, table),
-            Self::PostgreSql(driver) => Driver::list_indexes(driver, scope, table),
-        }
+        self.inner().list_indexes(scope, table)
     }
 
     fn list_constraints<'a>(
@@ -103,10 +93,7 @@ impl Driver for ActiveDriver {
         scope: &'a MetadataScope,
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ConstraintMeta>> {
-        match self {
-            Self::MySql(driver) => Driver::list_constraints(driver, scope, table),
-            Self::PostgreSql(driver) => Driver::list_constraints(driver, scope, table),
-        }
+        self.inner().list_constraints(scope, table)
     }
 
     fn query<'a>(
@@ -115,17 +102,11 @@ impl Driver for ActiveDriver {
         options: QueryOptions,
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, RowSet> {
-        match self {
-            Self::MySql(driver) => Driver::query(driver, sql, options, cancel_token),
-            Self::PostgreSql(driver) => Driver::query(driver, sql, options, cancel_token),
-        }
+        self.inner().query(sql, options, cancel_token)
     }
 
     fn begin_session(&self) -> DriverFuture<'_, Box<dyn DriverSession>> {
-        match self {
-            Self::MySql(driver) => Driver::begin_session(driver),
-            Self::PostgreSql(driver) => Driver::begin_session(driver),
-        }
+        self.inner().begin_session()
     }
 
     fn browse_table<'a>(
@@ -135,12 +116,7 @@ impl Driver for ActiveDriver {
         query: &'a TableBrowseQuery,
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, TableBrowseResult> {
-        match self {
-            Self::MySql(driver) => Driver::browse_table(driver, scope, table, query, cancel_token),
-            Self::PostgreSql(driver) => {
-                Driver::browse_table(driver, scope, table, query, cancel_token)
-            }
-        }
+        self.inner().browse_table(scope, table, query, cancel_token)
     }
 
     fn query_many<'a>(
@@ -149,10 +125,7 @@ impl Driver for ActiveDriver {
         options: QueryOptions,
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, db_driver::MultiQueryResult> {
-        match self {
-            Self::MySql(driver) => Driver::query_many(driver, sql, options, cancel_token),
-            Self::PostgreSql(driver) => Driver::query_many(driver, sql, options, cancel_token),
-        }
+        self.inner().query_many(sql, options, cancel_token)
     }
 
     fn apply_table_edits<'a>(
@@ -163,14 +136,8 @@ impl Driver for ActiveDriver {
         edits: &'a [db_driver::TableEdit],
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, db_driver::ApplyEditsResult> {
-        match self {
-            Self::MySql(driver) => {
-                Driver::apply_table_edits(driver, scope, table, pk_columns, edits, cancel_token)
-            }
-            Self::PostgreSql(driver) => {
-                Driver::apply_table_edits(driver, scope, table, pk_columns, edits, cancel_token)
-            }
-        }
+        self.inner()
+            .apply_table_edits(scope, table, pk_columns, edits, cancel_token)
     }
 
     fn bulk_insert_rows<'a>(
@@ -182,33 +149,12 @@ impl Driver for ActiveDriver {
         transactional: bool,
         cancel_token: CancellationToken,
     ) -> DriverFuture<'a, db_driver::BulkInsertResult> {
-        match self {
-            Self::MySql(driver) => Driver::bulk_insert_rows(
-                driver,
-                scope,
-                table,
-                columns,
-                rows,
-                transactional,
-                cancel_token,
-            ),
-            Self::PostgreSql(driver) => Driver::bulk_insert_rows(
-                driver,
-                scope,
-                table,
-                columns,
-                rows,
-                transactional,
-                cancel_token,
-            ),
-        }
+        self.inner()
+            .bulk_insert_rows(scope, table, columns, rows, transactional, cancel_token)
     }
 
     fn close(&self) -> DriverCloseFuture<'_> {
-        match self {
-            Self::MySql(driver) => Driver::close(driver),
-            Self::PostgreSql(driver) => Driver::close(driver),
-        }
+        self.inner().close()
     }
 }
 

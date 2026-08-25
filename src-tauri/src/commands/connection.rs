@@ -5,7 +5,10 @@
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use db_driver::{Driver, DriverKind, MySqlConnectSettings, MySqlTlsMode, PostgresConnectSettings};
+use db_driver::{
+    Driver, DriverKind, MySqlConnectSettings, MySqlTlsMode, PostgresConnectSettings,
+    SqliteConnectSettings,
+};
 use serde::{Deserialize, Serialize};
 use ssh_multihop::{
     HopRttCallback, HopRttEvent, HopRttSample, HopStatusCallback, HopStatusEvent, HostKeyDecision,
@@ -111,7 +114,8 @@ pub async fn connection_test(
     input: ConnectionInput,
     passphrase: Option<String>,
 ) -> Result<(), String> {
-    let hops: Vec<SshHop> = if input.ssh.enabled {
+    // SQLite 等文件型 driver 连的是本地文件，隧道配置一律忽略
+    let hops: Vec<SshHop> = if input.ssh.enabled && !input.driver.is_file_based() {
         build_runtime_hops(&input.ssh, passphrase.as_deref())?
     } else {
         Vec::new()
@@ -146,6 +150,7 @@ pub async fn connection_test(
         database: &input.database,
         ssl: &input.ssl,
         advanced: &input.advanced,
+        read_only: input.read_only,
     })
     .await?;
     let result = Driver::ping(&driver).await;
@@ -207,6 +212,15 @@ fn build_postgres_settings(advanced: &AdvancedConfig) -> PostgresConnectSettings
     }
 }
 
+/// SQLite 连接参数。客户端不做隐式建库：路径不存在直接报连接失败。
+fn build_sqlite_settings(advanced: &AdvancedConfig, read_only: bool) -> SqliteConnectSettings {
+    SqliteConnectSettings {
+        create_if_missing: false,
+        read_only,
+        connect_timeout: build_connect_timeout(advanced),
+    }
+}
+
 fn build_connect_timeout(advanced: &AdvancedConfig) -> Option<Duration> {
     advanced
         .connect_timeout_enabled
@@ -233,9 +247,12 @@ struct RuntimeDatabaseTarget<'a> {
     port: u16,
     user: &'a str,
     password: &'a str,
+    /// 网络型 driver 是库名；SQLite 等文件型 driver 是数据库文件路径。
     database: &'a str,
     ssl: &'a SslConfig,
     advanced: &'a AdvancedConfig,
+    /// 只读连接：SQLite 直接以只读模式打开文件，比应用层 guard 更硬。
+    read_only: bool,
 }
 
 async fn connect_database_driver(
@@ -266,6 +283,14 @@ async fn connect_database_driver(
         )
         .await
         .map(ActiveDriver::PostgreSql)
+        .map_err(|error| error.i18n_key().to_string()),
+        // SQLite 用 database 字段承载文件路径，host/port/账号一律不参与
+        DriverKind::Sqlite => db_driver::SqliteDriver::connect_with_settings(
+            target.database,
+            build_sqlite_settings(target.advanced, target.read_only),
+        )
+        .await
+        .map(ActiveDriver::Sqlite)
         .map_err(|error| error.i18n_key().to_string()),
     }
 }
@@ -406,7 +431,7 @@ async fn open_connection_locked(
         .or_else(|| state.security.secret_for(id));
 
     // 直连用真实 host:port；走隧道时换隧道的本地端口
-    let (host, port, tunnel) = if conn.ssh.enabled {
+    let (host, port, tunnel) = if conn.ssh.enabled && !conn.driver.is_file_based() {
         let hops = build_runtime_hops(&conn.ssh, effective_passphrase.as_deref())?;
         for hop_index in 0..hops.len() {
             emit_hop_status(app, id, &session_id, hop_index, "pending", None);
@@ -450,11 +475,12 @@ async fn open_connection_locked(
         (conn.host.clone(), conn.port, None)
     };
 
-    // session 级 database 覆盖（PG 一键切库）优先于持久化配置，空串视为未覆盖
+    // session 级 database 覆盖（PG 一键切库）优先于持久化配置，空串视为未覆盖；
+    // 文件型 driver 的 database 是文件路径，覆盖会把路径换成 ATTACH 名，直接忽略
     let database = database_override
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.is_empty() && !conn.driver.is_file_based())
         .unwrap_or(&conn.database);
 
     let driver = connect_database_driver(RuntimeDatabaseTarget {
@@ -466,6 +492,7 @@ async fn open_connection_locked(
         database,
         ssl: &conn.ssl,
         advanced: &conn.advanced,
+        read_only: conn.read_only,
     })
     .await?;
     // 立即 ping 确认握手成功（隧道桥接 + 数据库认证）

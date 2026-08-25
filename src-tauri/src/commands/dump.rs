@@ -63,19 +63,21 @@ pub struct ImportDumpResult {
     pub failed_preview: Option<String>,
 }
 
-/// SQL 字符串字面量转义（按方言）：单引号双方言双写；
-/// 反斜杠仅 MySQL 转义（PG 默认 standard_conforming_strings=on，反斜杠是普通字符）。
+/// SQL 字符串字面量转义（按方言）：单引号各方言都双写；
+/// 反斜杠仅 MySQL 转义（PG / SQLite 里反斜杠是普通字符）。
 fn quote_literal(kind: DriverKind, value: &str) -> String {
     match kind {
         DriverKind::MySql => format!("'{}'", value.replace('\\', "\\\\").replace('\'', "''")),
-        DriverKind::PostgreSql => format!("'{}'", value.replace('\'', "''")),
+        DriverKind::PostgreSql | DriverKind::Sqlite => format!("'{}'", value.replace('\'', "''")),
     }
 }
 
 fn quote_ident(kind: DriverKind, name: &str) -> String {
     match kind {
         DriverKind::MySql => format!("`{}`", name.replace('`', "``")),
-        DriverKind::PostgreSql => format!("\"{}\"", name.replace('"', "\"\"")),
+        DriverKind::PostgreSql | DriverKind::Sqlite => {
+            format!("\"{}\"", name.replace('"', "\"\""))
+        }
     }
 }
 
@@ -158,6 +160,7 @@ pub async fn db_export_dump(
                 .map_err(QueryCommandError::from)?;
             MetadataScope::postgresql(&database, schema)
         }
+        DriverKind::Sqlite => MetadataScope::sqlite(&database),
     };
     let result = run_export(&driver, kind, &scope, table.as_deref(), &path, token).await;
     result
@@ -250,6 +253,29 @@ async fn run_export(
                     &columns,
                     &pk_columns,
                 )
+            }
+            // SQLite 在 sqlite_master 里存了建表语句原文，直接取回最忠实
+            DriverKind::Sqlite => {
+                let row_set = Driver::query(
+                    driver,
+                    &format!(
+                        "SELECT sql FROM {}.sqlite_master WHERE type = 'table' AND name = {}",
+                        quote_ident(kind, &scope.database),
+                        quote_literal(kind, table_name)
+                    ),
+                    db_driver::QueryOptions {
+                        row_limit: 1,
+                        allow_write: false,
+                    },
+                    token.clone(),
+                )
+                .await
+                .map_err(QueryCommandError::from)?;
+                row_set
+                    .rows
+                    .first()
+                    .and_then(|row| row.first().cloned().flatten())
+                    .ok_or_else(|| QueryCommandError::from_key("error.export.io"))?
             }
         };
 
@@ -397,6 +423,7 @@ async fn run_import_dump(
     let dialect = match Driver::kind(driver) {
         DriverKind::MySql => db_driver::SqlDialect::MySql,
         DriverKind::PostgreSql => db_driver::SqlDialect::PostgreSql,
+        DriverKind::Sqlite => db_driver::SqlDialect::Sqlite,
     };
     let mut splitter = db_driver::StatementSplitter::new(dialect);
     let mut executed = 0usize;

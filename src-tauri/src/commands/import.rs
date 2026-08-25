@@ -331,6 +331,7 @@ async fn run_import(
                 .map_err(QueryCommandError::from)?;
             MetadataScope::postgresql(database, schema)
         }
+        DriverKind::Sqlite => MetadataScope::sqlite(database),
     };
 
     let file =

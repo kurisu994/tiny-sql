@@ -116,6 +116,8 @@ fn metadata_scope(
             .filter(|value| !value.trim().is_empty())
             .map(|schema| MetadataScope::postgresql(database, schema))
             .ok_or_else(|| "error.driver.schema_required".to_string()),
+        // SQLite 没有 schema 层级，database 即 ATTACH 名（主库 main）
+        DriverKind::Sqlite => Ok(MetadataScope::sqlite(database)),
     }
 }
 

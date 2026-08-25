@@ -36,7 +36,7 @@ fn err(key: &str) -> QueryCommandError {
     QueryCommandError::from_key(key)
 }
 
-/// 列出账号。MySQL 来自 mysql.user（仅 User/Host）；PG 来自 pg_roles 只读。
+/// 列出账号。MySQL 来自 mysql.user（仅 User/Host）；PG 来自 pg_roles 只读；SQLite 无账号体系。
 #[tauri::command]
 pub async fn db_list_accounts(
     state: State<'_, AppState>,
@@ -111,6 +111,8 @@ pub async fn db_list_accounts(
                 read_only: true,
             })
         }
+        // SQLite 是单文件库，没有账号与权限系统，访问控制靠文件系统权限
+        DriverKind::Sqlite => Err(err("error.privilege.unsupported")),
     }
 }
 
