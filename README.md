@@ -1,6 +1,6 @@
 # tiny-sql
 
-> 多级跳板机友好的 MySQL / PostgreSQL 桌面客户端 —— 把 SSH 跳板从「雾中一根管子」变成「可观测的路由器」。
+> 多级跳板机友好的 MySQL / PostgreSQL / SQLite 桌面客户端 —— 把 SSH 跳板从「雾中一根管子」变成「可观测的路由器」。
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
@@ -28,7 +28,8 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 
 **数据库**
 
-- 双 driver：MySQL（5.7 / 8.0 / 8.4）与 PostgreSQL，编辑器按连接切换方言。
+- 三 driver：MySQL（5.7 / 8.0 / 8.4）、PostgreSQL、SQLite，编辑器按连接切换方言。
+- SQLite 直接打开本地 `.db` 文件：不需要主机 / 账号，也不经过 SSH 隧道。
 - 元数据树：database / schema / table / column / index / constraint 按需展开 + 对象搜索。
 - 数据浏览：服务端筛选 / 排序 / 分页（不整拉全表），结果上限 10 万行。
 
@@ -61,7 +62,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 | 前端 | Next.js 16 (Turbopack) + React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |
 | 后端 | Rust (Edition 2021, MSRV 1.77.2) + Tokio |
 | SSH 隧道 | russh 0.54（N 跳，纯 Rust 异步） |
-| 数据库 | sqlx 0.8（MySQL + PostgreSQL 双 driver） |
+| 数据库 | sqlx 0.8（MySQL + PostgreSQL + SQLite 三 driver，SQLite 静态内建） |
 
 完整变更历史见 [CHANGELOG.md](./CHANGELOG.md)。
 
@@ -106,7 +107,7 @@ just build-web    # 仅构建前端（静态导出到 out/）
 | `just fmt` | 格式化 Rust 代码 |
 | `just fmt-check` | 仅检查格式不修改（CI 用） |
 | `just test` | Rust workspace + 前端 Vitest 单元测试 |
-| `just test-integration` | integration 测试（连本地 MySQL / PostgreSQL，需 `.env` 设 `TINY_SQL_TEST_MYSQL_URL` 与 `TINY_SQL_TEST_POSTGRES_URL`，见 `.env.example`） |
+| `just test-integration` | integration 测试（连本地 MySQL / PostgreSQL，需 `.env` 设 `TINY_SQL_TEST_MYSQL_URL` 与 `TINY_SQL_TEST_POSTGRES_URL`，见 `.env.example`；SQLite 用临时文件库，已并入 `just test`） |
 | `just version <ver>` | 同步更新各配置版本号（如 `just version 0.4.0`） |
 | `just release <tag>` | 🚀 一键发布：更新版本号 + Commit + 打 Tag + 推送触发云端构建（如 `just release v0.4.0`） |
 | `just clean` | 清理构建产物 |
@@ -116,7 +117,7 @@ just build-web    # 仅构建前端（静态导出到 out/）
 ```
 crates/                     # Rust workspace 成员（与 Tauri 解耦，未来可独立 publish）
 ├── ssh-multihop/           # N 跳 SSH 隧道（russh，Tauri-free）
-└── db-driver/              # 数据库 driver（对象安全 Driver 契约 + MySQL/PostgreSQL 双实现）
+└── db-driver/              # 数据库 driver（对象安全 Driver 契约 + MySQL/PostgreSQL/SQLite 三实现）
 
 src-tauri/                  # Tauri 壳
 ├── src/

@@ -37,8 +37,10 @@ tiny-sql/
 │       ├── Cargo.toml
 │       ├── src/lib.rs             # 公共契约 + MySqlDriver + SQL guard + 多语句拆分器
 │       ├── src/postgres.rs        # PostgresDriver metadata/query/cancel/browse/session
+│       ├── src/sqlite.rs          # SqliteDriver（本地文件库，progress handler 取消）
 │       ├── src/session.rs         # DriverSession 独占 session 契约（FR-244）
 │       └── tests/                 # MySQL/PostgreSQL 本地 integration（#[ignore]）
+│                                  # + SQLite integration（临时文件库，默认运行）
 ├── src-tauri/                     # Tauri 壳（Cargo.toml 是 workspace 成员）
 │   ├── Cargo.toml                 # 依赖 ssh-multihop + db-driver
 │   ├── tauri.conf.json
@@ -122,8 +124,14 @@ tiny-sql/
 **分工原则**：
 
 - `ssh-multihop` **完全不知道 MySQL 存在**。它只知道"在本地监听一个端口，把流量转发到远端 host:port"。这是它未来能独立 publish 的前提。
-- `db-driver` **完全不知道 SSH 存在**。已从 MySQL 真实调用面提取对象安全的最小 `Driver` 契约，`MySqlDriver` 与 `PostgresDriver` 双实现落地；连接创建和方言专属配置仍由具体 driver/factory 负责。
-- `src-tauri` 是组装层：走 SSH 时先打开隧道拿本地端口，再按配置创建 `MySqlDriver` 或 `PostgresDriver` 连 `127.0.0.1:port`，并在 `OpenConnection` 里绑定 driver 与 tunnel 生命周期。
+- `db-driver` **完全不知道 SSH 存在**。已从 MySQL 真实调用面提取对象安全的最小 `Driver` 契约，`MySqlDriver` / `PostgresDriver` / `SqliteDriver` 三实现落地；连接创建和方言专属配置仍由具体 driver/factory 负责。
+- `src-tauri` 是组装层：走 SSH 时先打开隧道拿本地端口，再按配置创建 `MySqlDriver` 或 `PostgresDriver` 连 `127.0.0.1:port`，并在 `OpenConnection` 里绑定 driver 与 tunnel 生命周期。`ActiveDriver` 的通用 `Driver` 方法统一委托 `inner() -> &dyn Driver`，新增 driver 只加一条分支。
+
+**SQLite 的三处不同**（其余链路与网络型 driver 共用）：
+
+- **连接目标是文件路径**：`StoredConnection.database` 承载 `.db` 路径，host / port / 账号与 SSH / SSL 全部不参与；`DriverKind::is_file_based()` 是唯一判据。文件不存在直接报连接失败，客户端不隐式建库。
+- **取消没有服务端可依赖**：不发 `KILL QUERY` / `pg_cancel_backend`，而是给连接装 SQLite 原生 progress handler，回调返回 `false` 即中断当前语句。handler 绑定 cancel token，**语句结束必须摘除**，否则连接回池后会被旧 token 误伤。
+- **没有 schema 层级**：`MetadataScope.database` 是 ATTACH 名（主库 `main`），`schema` 恒为 `None`，`list_schemas` 返回空列表。前端凡是 `driver === "postgresql" ? 有 schema : 无 schema` 的分支，SQLite 天然走后者。元数据来自 `sqlite_master` 与 `pragma_*` 表值函数（可参数化绑定）。
 
 ### 1.3 Tauri + workspace 摩擦兜底
 

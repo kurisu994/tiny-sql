@@ -457,7 +457,7 @@ v0.1 **不做**的事情，全部有明确理由：
 
 ### 5.1 数据库范围之外
 
-- **PostgreSQL / SQLite / Oracle / SQL Server / MongoDB / Redis**：v0.1 不实现；v0.2 增加 PostgreSQL，其他数据库仍不进入当前范围（NFR-042）。理由：v0.1 dogfooding 场景 100% MySQL。
+- **PostgreSQL / SQLite / Oracle / SQL Server / MongoDB / Redis**：v0.1 不实现；v0.2 增加 PostgreSQL，v0.8 增加 SQLite（本地文件库，不走 SSH 隧道），其余数据库仍不进入当前范围（NFR-042）。理由：v0.1 dogfooding 场景 100% MySQL。
 - **MySQL 写操作的图形化编辑器**（点表格 cell 改值后写回）：FR-024 的 SQL 编辑器是 v0.1 写操作上限。理由：图形化编辑器需要 2-3 周额外工作量，60-75h 预算装不下。
 
 ### 5.2 平台范围之外

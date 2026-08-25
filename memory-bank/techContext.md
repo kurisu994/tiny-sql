@@ -31,7 +31,7 @@
 |---|---|---|
 | tokio | 1（features = full） | 异步运行时 |
 | russh | 0.54 | 纯 Rust 异步 SSH，多跳隧道 |
-| sqlx | 0.8.6（default-features=false, `mysql` + `postgres` + `runtime-tokio-rustls` + `chrono` + `bigdecimal` + `json`） | MySQL/PostgreSQL driver 与动态结果解码；`sqlx-postgres` 为 MIT OR Apache-2.0 |
+| sqlx | 0.8.6（default-features=false, `mysql` + `postgres` + `sqlite` + `runtime-tokio-rustls` + `chrono` + `bigdecimal` + `json`） | MySQL/PostgreSQL/SQLite driver 与动态结果解码；`sqlx-postgres` 为 MIT OR Apache-2.0；`sqlite` feature 走 `sqlx-sqlite/bundled`，SQLite 静态内建，无系统 libsqlite3 依赖 |
 | tokio-util | 0.7 | `CancellationToken` 查询取消 |
 | thiserror | 2 | 错误派生 |
 | serde | 1（derive） | 序列化 |
@@ -73,7 +73,7 @@
 | `just fmt` / `fmt-check` | 格式化 / 仅检查 |
 | `just test` / `test-rust` | Rust workspace + 前端 Vitest / 仅 Rust workspace |
 | `just test-mysql-integration` / `test-postgres-integration` | 分别连接本地 MySQL / PostgreSQL；任一显式门禁缺 URL 时明确失败 |
-| `just test-integration` | 顺序执行两个 driver 的真实 integration |
+| `just test-integration` | 顺序执行 MySQL / PostgreSQL 两个 driver 的真实 integration（SQLite 不需要外部服务，用临时文件库并入 `just test`） |
 | `just version <ver>` | 同步 package.json / Cargo.toml / tauri.conf.json 版本号 |
 | `just release <tag>` | 更新版本 + CHANGELOG + commit + tag + push 触发云端构建 |
 
@@ -96,7 +96,7 @@
 | pnpm build script 批准 | `pnpm-workspace.yaml` 的 `allowBuilds: sharp: true`（否则 pnpm 11 的 verify-deps-before-run 会 exit 1） |
 | 集成测试 env | `TINY_SQL_TEST_MYSQL_URL` / `TINY_SQL_TEST_POSTGRES_URL`（见 `.env.example`，`.env` 已忽略） |
 | 加密 store 路径 | `~/Library/Application Support/tiny-sql/{connections.enc, master.key, security.json, secrets.enc, history.enc}`（AES-GCM / Argon2id，整体加密） |
-| 连接 driver 持久化值 | `mysql` / `postgresql`；旧记录缺字段默认 `mysql`，兼容读取不主动重写密文 |
+| 连接 driver 持久化值 | `mysql` / `postgresql` / `sqlite`；旧记录缺字段默认 `mysql`，兼容读取不主动重写密文。SQLite 复用 `database` 字段存数据库文件路径，`host` / `port` / `user` / `password` / `ssh` / `ssl` 均不参与 |
 | 连接只读 / 环境 | `readOnly` 缺省 false；`env` 为 `none` / `prod` / `staging` / `dev`（FR-270 / FR-271） |
 | known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
 

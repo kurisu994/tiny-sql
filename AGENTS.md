@@ -1,11 +1,11 @@
 # Repository Guidelines
 
-tiny-sql 是一个多级跳板机友好的 MySQL / PostgreSQL 桌面客户端，技术栈为 Tauri 2 + Next.js 16 + Rust。本文件供贡献者（含 AI 协作）快速对齐协作约定。
+tiny-sql 是一个多级跳板机友好的 MySQL / PostgreSQL / SQLite 桌面客户端，技术栈为 Tauri 2 + Next.js 16 + Rust。本文件供贡献者（含 AI 协作）快速对齐协作约定。
 
 ## 项目结构与模块组织
 
 - `crates/ssh-multihop/`：N 跳 SSH 隧道，基于 russh，**不依赖 Tauri**，未来可独立 publish。
-- `crates/db-driver/`：MySQL / PostgreSQL driver，基于 sqlx 与对象安全 `Driver` 契约。
+- `crates/db-driver/`：MySQL / PostgreSQL / SQLite driver，基于 sqlx 与对象安全 `Driver` 契约。
 - `src-tauri/`：Tauri 壳，`src/lib.rs` 放入口与 `#[tauri::command]`，配置见 `tauri.conf.json`。
 - `src/app/`：前端源码（Next.js App Router），静态导出到 `out/`。
 - `docs/`：需求 / 计划 / 架构 / 路线图，改动方案前先读。
@@ -25,6 +25,7 @@ tiny-sql 是一个多级跳板机友好的 MySQL / PostgreSQL 桌面客户端，
 
 - Rust 单元测试用 `#[test]`，与被测代码同文件的 `#[cfg(test)] mod tests` 内；`just test`（= `cargo test --workspace`）运行。
 - 连真实数据库的集成测试标 `#[ignore]`，用 `just test-integration` 跑；需在 `.env` 配 `TINY_SQL_TEST_MYSQL_URL` 与 `TINY_SQL_TEST_POSTGRES_URL`（见 `.env.example`），**不使用 Docker**。
+- SQLite 例外：它不需要外部服务，`crates/db-driver/tests/sqlite_integration.rs` 用临时文件库、**不标 `#[ignore]`**，`just test` 直接跑。
 - 提 PR 前本地必须通过 `just check`；CI 仅在 macOS arm64 上跑，warning 即失败。
 
 ## 提交与 Pull Request 规范

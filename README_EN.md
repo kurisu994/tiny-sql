@@ -2,7 +2,7 @@
 
 [简体中文](./README.md) · English
 
-> A bastion-host-friendly MySQL / PostgreSQL desktop client — turning the SSH jump chain from "a pipe in the fog" into an observable router.
+> A bastion-host-friendly MySQL / PostgreSQL / SQLite desktop client — turning the SSH jump chain from "a pipe in the fog" into an observable router.
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
@@ -30,7 +30,8 @@ Built for personal use, usable by colleagues, and open source. Free of charge, n
 
 **Database**
 
-- Dual drivers: MySQL (5.7 / 8.0 / 8.4) and PostgreSQL, with per-connection dialect switching in the editor.
+- Three drivers: MySQL (5.7 / 8.0 / 8.4), PostgreSQL and SQLite, with per-connection dialect switching in the editor.
+- SQLite opens a local `.db` file directly: no host, no account, and no SSH tunnel involved.
 - Metadata tree: databases / schemas / tables / columns / indexes / constraints loaded on demand, plus object search.
 - Data browsing: server-side filtering / sorting / pagination (no full-table pulls), capped at 100,000 rows.
 
@@ -63,7 +64,7 @@ Built for personal use, usable by colleagues, and open source. Free of charge, n
 | Frontend | Next.js 16 (Turbopack) + React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |
 | Backend | Rust (Edition 2021, MSRV 1.77.2) + Tokio |
 | SSH tunneling | russh 0.54 (N hops, pure Rust async) |
-| Database | sqlx 0.8 (MySQL + PostgreSQL dual drivers) |
+| Database | sqlx 0.8 (MySQL + PostgreSQL + SQLite, SQLite statically bundled) |
 
 See [CHANGELOG.md](./CHANGELOG.md) for the full change history.
 
@@ -108,7 +109,7 @@ just build-web    # build only the frontend (static export to out/)
 | `just fmt` | Format Rust code |
 | `just fmt-check` | Check formatting without modifying files (used by CI) |
 | `just test` | Rust workspace + frontend Vitest unit tests |
-| `just test-integration` | Integration tests (against a local MySQL / PostgreSQL; requires `TINY_SQL_TEST_MYSQL_URL` and `TINY_SQL_TEST_POSTGRES_URL` in `.env`, see `.env.example`) |
+| `just test-integration` | Integration tests (against a local MySQL / PostgreSQL; requires `TINY_SQL_TEST_MYSQL_URL` and `TINY_SQL_TEST_POSTGRES_URL` in `.env`, see `.env.example`). SQLite runs on throwaway temp files and is already part of `just test`. |
 | `just version <ver>` | Sync the version number across config files (e.g. `just version 0.4.0`) |
 | `just release <tag>` | 🚀 One-command release: bump version + commit + tag + push to trigger the cloud build (e.g. `just release v0.4.0`) |
 | `just clean` | Clean build artifacts |

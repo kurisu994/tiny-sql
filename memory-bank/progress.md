@@ -14,9 +14,21 @@
 | v0.5 | ✅ 随 v0.7.0 正式发布 | FR-253 / FR-260 / FR-221 |
 | v0.6 | ✅ 随 v0.7.0 正式发布 | FR-220 / FR-261 / FR-263 |
 | v0.7 | ✅ 正式版已发布 | 2026-08-24 `just release v0.7.0`（发布提交 `d2d3f5c`，tag `v0.7.0`）。范围含 v0.4–v0.7 全部已编码功能 |
-| v0.8 | 🚧 编码完成 | 2026-08-24 完成 FR-270–275 与 `just check`（vitest 168 / app_lib 67）；待 GUI/RC。应用版本号仍为 0.7.0。双向同步 / BI / AI 挂 v0.9+ |
+| v0.8 | 🚧 编码完成 | 2026-08-24 完成 FR-270–275 与 `just check`（vitest 168 / app_lib 67）；2026-08-25 追加 SQLite driver（见下）后 `just check` 复跑全绿（vitest 179 / db-driver 单测 47 + SQLite integration 23）。待 GUI/RC。应用版本号仍为 0.7.0。双向同步 / BI / AI 挂 v0.9+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
+
+## 架构变更：新增 SQLite driver（2026-08-25）
+
+第三个 `Driver` 实现落地，`db-driver` 从「双 driver」变成「三 driver」。这是第一个**非网络型** driver，因此动了三处一直只为网络型数据库准备的假设：
+
+1. **连接模型多了一类**：`DriverKind::is_file_based()` 成为新判据。SQLite 用 `StoredConnection.database` 承载 `.db` 文件路径，host / port / 账号与 SSH 隧道、SSL 全部旁路 —— `connection.rs` 在「建隧道」与「session 级 database_override」两处按它短路。选这个映射而不是加字段，是为了不动已加密落盘的连接记录结构。
+2. **取消机制多了一类**：MySQL 发 `KILL QUERY`、PostgreSQL 调 `pg_cancel_backend`，都要另开一条 control 连接；SQLite 没有服务端，改用连接内的 SQLite 原生 progress handler（回调返 false 即 SQLITE_INTERRUPT），因此 SqliteDriver **不需要 control pool**。代价是 handler 会跟着连接回池，语句结束必须摘除，否则旧 cancel token 会误伤后续查询。
+3. **元数据层级少了一层**：SQLite 没有 schema，`MetadataScope.schema` 恒为 None、`list_schemas` 返回空。前端原本 `driver === "postgresql" ? 有 schema : 无 schema` 的分支天然适配，只有两处写死 `=== "mysql"` 的（schema-browser 表树、session-store 元数据加载）需要放宽成 `!== "postgresql"`。
+
+顺带把 `ActiveDriver` 的通用 `Driver` 方法从「每个方法三份 match」收敛成 `inner() -> &dyn Driver` 委托；`as_mysql()` 与 enum 保留，方言专属能力（CREATE DATABASE、权限）仍按 enum 分流。
+
+**踩到的坑**：SQLite 是动态类型，`SqliteColumn::type_info()` 给的是**列声明类型**，表达式列（`COUNT(*)`、`a + b`）根本没有声明类型 → 按它分派会把非空值一律解码成 NULL。改为按 `ValueRef` 的**取值真实类型**（INTEGER / REAL / TEXT / BLOB / NULL）分派。这个 bug 是 SQLite integration 测试抓出来的 —— 也正因为 SQLite 不需要外部服务，这套测试用临时文件库、不标 `#[ignore]`，进了默认 `just test`。
 
 ## v0.8 已交付周计划（归档）
 

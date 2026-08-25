@@ -2,13 +2,27 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-24
+**最后更新**：2026-08-25
 
 ## 当前状态
 
-**本轮：PLAN 归档 v0.8 + 文档按代码对齐（2026-08-24）**——PLAN 只留用户验收。版本号 `0.7.0`；command 仍 54；v0.8 功能在 main。
+**本轮：新增 SQLite driver（2026-08-25）**——db-driver 增加第三个实现 `SqliteDriver`（`crates/db-driver/src/sqlite.rs`），覆盖完整 `Driver` 契约 + `DriverSession`。关键设计三点：
+
+1. **连接目标是文件路径**：`DriverKind::Sqlite` + `DriverKind::is_file_based()`；`StoredConnection.database` 复用为 `.db` 路径，host/port/账号与 SSH/SSL 全部旁路（`connection.rs` 在建隧道与 `database_override` 两处按 `is_file_based()` 短路）。文件不存在直接报连接失败，不隐式建库；连接的「应用只读」映射为 SQLite 只读打开。
+2. **取消用 progress handler**：无服务端可发取消指令，改用 `LockedSqliteHandle::set_progress_handler`（回调返回 false → SQLITE_INTERRUPT）。**handler 必须在语句结束时摘除**，否则连接回池后被旧 token 误伤；pool 路径取消后直接 `close_on_drop`，session 路径摘 handler 后保留连接。
+3. **无 schema 层级**：`MetadataScope::sqlite(db)`（database = ATTACH 名，schema 恒 None），`list_schemas` 返回空。前端凡 `driver === "postgresql" ? 有 schema : 无 schema` 的分支天然适配；把两处写死 `=== "mysql"` 的分支（schema-browser 表树、session-store 元数据加载）改成 `!== "postgresql"`。
+
+`ActiveDriver` 的通用方法从三份 match 收敛为 `inner() -> &dyn Driver` 委托（`as_mysql` 保留，方言专属能力仍走 enum）。测试踩到一个真 bug：SQLite 的**列声明类型**对表达式列（`COUNT(*)`）为 NULL，按声明类型分派会把非空值判成 NULL —— 改为按 `ValueRef` 的**取值真实类型**分派。
+
+**前一轮：PLAN 归档 v0.8 + 文档按代码对齐（2026-08-24）**——PLAN 只留用户验收。版本号 `0.7.0`；command 仍 54；v0.8 功能在 main。
 
 **前一轮：v0.8 功能开发完成（2026-08-24）**——FR-270–275 已编码。待用户 GUI/RC。
+
+### SQLite 待办 / 阻塞
+
+- **待用户 GUI 实测**：新建 SQLite 连接 → 选文件 → 库树 / 结构 / 浏览编辑 / SQL 编辑器 / CSV 导入 / dump 导出导入 全链路。自动化门禁（`just check` + 23 条 SQLite integration）已全绿，但没跑过真实 GUI。
+- **有意不做**：SQLite 无账号体系，`db_list_accounts` 返回 `error.privilege.unsupported`；`ALTER TABLE` 改类型 / 空性 / 默认值在 `validateAlterTable` 阶段拒绝（SQLite 要重建表）；结构页不列 CHECK 约束（只有 `sqlite_master.sql` 原文有，不做 DDL 解析）；复制表不带索引（索引名库级唯一会撞名）。
+- **备份 / 恢复**依赖用户机器上有 `sqlite3` 命令行（导出 `sqlite3 <file> ".dump"`，恢复 stdin 灌入），与 mysqldump / pg_dump 同一套外部工具链路。
 
 **前一轮：PLAN 归档 v0.7 + 文档按代码对齐（2026-08-24）**——PLAN 只留 v0.4–v0.7 用户验收。版本号 `0.4.0-rc1`；command 前后端 54/54。
 
