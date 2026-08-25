@@ -20,6 +20,27 @@ describe("explainSql", () => {
   });
 });
 
+describe("buildExplainTree · SQLite", () => {
+  it("用 detail 做 label 并按 id/parent 建层级", () => {
+    const { nodes } = buildExplainTree("sqlite", {
+      columns: ["id", "parent", "notused", "detail"],
+      rows: [
+        ["2", "0", "0", "SCAN users"],
+        ["4", "2", "0", "SEARCH orders USING INDEX idx_orders_user (user_id=?)"],
+        ["7", "0", "0", "USE TEMP B-TREE FOR ORDER BY"],
+      ],
+      truncated: false,
+    });
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0].label).toBe("SCAN users");
+    expect(nodes[0].hint).toBe("全表扫描");
+    expect(nodes[0].children[0].label).toContain("USING INDEX");
+    // 走了索引不算全表扫描
+    expect(nodes[0].children[0].hint).toBeUndefined();
+    expect(nodes[1].label).toContain("TEMP B-TREE");
+  });
+});
+
 describe("buildExplainTree", () => {
   it("MySQL 行转一层树", () => {
     const { nodes } = buildExplainTree("mysql", {

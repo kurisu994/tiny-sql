@@ -701,6 +701,16 @@ describe("ddl · SQLite", () => {
         constraintType: "FOREIGN KEY",
       }),
     ).toContain("SQLite 不支持删除");
+    // 表定义里的 UNIQUE 背后是 sqlite_autoindex_*，SQLite 拒绝 DROP INDEX
+    expect(
+      buildDropConstraintSql({
+        driver: "sqlite",
+        database: "main",
+        table,
+        name: "sqlite_autoindex_users_1",
+        constraintType: "UNIQUE",
+      }),
+    ).toContain("SQLite 不支持删除");
   });
 
   it("建表预览把 `目标表(列)` 外键还原成 REFERENCES 子句", () => {

@@ -14,6 +14,16 @@ function quoteIdent(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+/**
+ * 是否为 SQLite 自动创建的隐式索引。
+ *
+ * 表定义里的 UNIQUE / PRIMARY KEY 约束会生成 `sqlite_autoindex_<表>_<n>`，
+ * 这类索引不能单独 DROP，只能重建表。命名规则由 SQLite 保证。
+ */
+export function isSqliteImplicitIndex(name: string): boolean {
+  return name.trim().toLowerCase().startsWith("sqlite_autoindex_");
+}
+
 /** SQLite 的库名即 ATTACH 名，未指定时是主库 main */
 function sqliteDatabase(database: string | null | undefined): string {
   return database?.trim() || "main";
@@ -640,8 +650,13 @@ export function buildDropConstraintSql(
 ): string {
   const table = qualifiedTable(input);
   if (input.driver === "sqlite") {
-    // SQLite 的 UNIQUE 约束背后就是索引，可以直接删；主键 / 外键 / CHECK 只能重建表
-    if (input.constraintType.toUpperCase() === "UNIQUE") {
+    // 只有 CREATE UNIQUE INDEX 建出来的索引能删；表定义里 `c INT UNIQUE` 背后是
+    // sqlite_autoindex_*，SQLite 明确拒绝 DROP（"index associated with UNIQUE or
+    // PRIMARY KEY constraint cannot be dropped"），只能重建表。
+    if (
+      input.constraintType.toUpperCase() === "UNIQUE" &&
+      !isSqliteImplicitIndex(input.name)
+    ) {
       return buildDropIndexSql(input);
     }
     return `-- SQLite 不支持删除 ${input.constraintType} 约束，需要重建表`;

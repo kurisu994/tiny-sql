@@ -108,7 +108,7 @@ export function CreateTableDialog({
   const [table, setTable] = useState("");
   const [comment, setComment] = useState("");
   const [columns, setColumns] = useState<CreateTableColumnInput[]>([
-    { ...emptyColumn(), name: "id", dataType: defaultIdType(driver), nullable: false, primaryKey: true, autoIncrement: driver !== "postgresql" },
+    { ...emptyColumn(), name: "id", dataType: defaultIdType(driver), nullable: false, primaryKey: true, autoIncrement: driver === "mysql" },
   ]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,7 +177,7 @@ export function CreateTableDialog({
       setTable("");
       setComment("");
       setColumns([
-        { ...emptyColumn(), name: "id", dataType: defaultIdType(driver), nullable: false, primaryKey: true, autoIncrement: driver !== "postgresql" },
+        { ...emptyColumn(), name: "id", dataType: defaultIdType(driver), nullable: false, primaryKey: true, autoIncrement: driver === "mysql" },
       ]);
     } catch (err) {
       setError(translateError(err));
@@ -238,7 +238,7 @@ export function CreateTableDialog({
                         <th className="px-2 py-1.5 font-medium">可空</th>
                         <th className="px-2 py-1.5 font-medium">默认值</th>
                         <th className="px-2 py-1.5 font-medium">主键</th>
-                        {driver === "mysql" && (
+                        {driver !== "postgresql" && (
                           <th className="px-2 py-1.5 font-medium">自增</th>
                         )}
                         <th className="w-8" />
@@ -312,7 +312,7 @@ export function CreateTableDialog({
                               }
                             />
                           </td>
-                          {driver === "mysql" && (
+                          {driver !== "postgresql" && (
                             <td className="px-1.5 py-1 text-center">
                               <input
                                 type="checkbox"

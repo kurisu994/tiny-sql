@@ -94,7 +94,7 @@ export function BackupDialog({
     const ext = driver === "postgresql" ? "dump" : "sql";
     const path = await save({
       title: "官方备份导出",
-      defaultPath: `${scopeTable && table ? table : database}.${ext}`,
+      defaultPath: `${scopeTable && table && driver !== "sqlite" ? table : database}.${ext}`,
       filters: [{ name: "官方备份", extensions: [ext] }],
     });
     if (typeof path !== "string") return;
@@ -115,7 +115,7 @@ export function BackupDialog({
       const result = await dbApi.backupExport(connectionId, {
         database,
         schema,
-        table: scopeTable ? table : null,
+        table: scopeTable && driver !== "sqlite" ? table : null,
         path,
         dumpPath: dumpPath || null,
         queryId: id,
@@ -207,11 +207,16 @@ export function BackupDialog({
             <label className="flex items-center gap-2 text-xs">
               <input
                 type="checkbox"
-                checked={scopeTable}
-                disabled={!table || running}
+                checked={scopeTable && driver !== "sqlite"}
+                disabled={!table || running || driver === "sqlite"}
                 onChange={(e) => setScopeTable(e.target.checked)}
               />
-              仅当前表{table ? `（${table}）` : "（请先打开一张表）"}
+              仅当前表
+              {driver === "sqlite"
+                ? "（SQLite 官方备份只能整库，单表请用内置 dump 导出）"
+                : table
+                  ? `（${table}）`
+                  : "（请先打开一张表）"}
             </label>
             <label className="flex flex-col gap-1 text-xs">
               备份工具路径（可空，默认 PATH）

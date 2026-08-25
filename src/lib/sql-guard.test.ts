@@ -84,6 +84,12 @@ describe("needsWriteConfirmation · SQLite", () => {
     expect(needsWriteConfirmation("SELECT * FROM users", "sqlite")).toBe(false);
     expect(needsWriteConfirmation("VALUES (1), (2)", "sqlite")).toBe(false);
     expect(needsWriteConfirmation("PRAGMA table_info('users')", "sqlite")).toBe(false);
+    expect(needsWriteConfirmation("PRAGMA main.index_list('users')", "sqlite")).toBe(false);
+    // 无参数的查询形式安全；赋值形式会改写数据库文件，两种写法都要确认
+    expect(needsWriteConfirmation("PRAGMA journal_mode", "sqlite")).toBe(false);
+    expect(needsWriteConfirmation("PRAGMA journal_mode = WAL", "sqlite")).toBe(true);
+    expect(needsWriteConfirmation("PRAGMA journal_mode(WAL)", "sqlite")).toBe(true);
+    expect(needsWriteConfirmation("PRAGMA user_version = 42", "sqlite")).toBe(true);
     expect(needsWriteConfirmation("EXPLAIN QUERY PLAN SELECT 1", "sqlite")).toBe(false);
     expect(needsWriteConfirmation("DELETE FROM users", "sqlite")).toBe(true);
     // MySQL 专属语句在 SQLite 里不算安全前缀

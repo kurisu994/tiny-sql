@@ -36,6 +36,11 @@ export function needsWriteConfirmation(
         ? ["SELECT", "VALUES", "PRAGMA", "EXPLAIN"]
         : ["SELECT", "SHOW", "EXPLAIN", "DESC", "DESCRIBE"];
   if (!safePrefixes.includes(first)) return true;
+  // PRAGMA 的赋值形式（`= 值` 或 `(值)`）会改写数据库文件本身，必须确认；
+  // 判定规则与后端 db-driver 的 sqlite_pragma_is_read 保持一致
+  if (driver === "sqlite" && first === "PRAGMA") {
+    return !sqlitePragmaIsRead(sql, tokens);
+  }
   // EXPLAIN ANALYZE 会真正执行被分析的语句：分析写语句时仍需确认
   if (first === "EXPLAIN" && tokens[1] === "ANALYZE") {
     const analyzed =
@@ -43,6 +48,39 @@ export function needsWriteConfirmation(
     return !["SELECT", "WITH", "TABLE"].includes(analyzed);
   }
   return false;
+}
+
+/** 带参数时仍确定只读的 SQLite PRAGMA（内省类）；与后端白名单保持一致。 */
+const SQLITE_READONLY_PRAGMAS = new Set([
+  "COLLATION_LIST",
+  "COMPILE_OPTIONS",
+  "DATABASE_LIST",
+  "FOREIGN_KEY_CHECK",
+  "FOREIGN_KEY_LIST",
+  "FUNCTION_LIST",
+  "INDEX_INFO",
+  "INDEX_LIST",
+  "INDEX_XINFO",
+  "INTEGRITY_CHECK",
+  "MODULE_LIST",
+  "PRAGMA_LIST",
+  "QUICK_CHECK",
+  "TABLE_INFO",
+  "TABLE_LIST",
+  "TABLE_XINFO",
+]);
+
+/**
+ * SQLite 的 PRAGMA 是否确定只读。
+ *
+ * 赋值有 `= 值` 和 `(值)` 两种写法，所以「有没有参数」才是可靠分界：
+ * 完全不带参数的 `PRAGMA x` 一定是查询形式；带参数时只认内省类白名单。
+ */
+function sqlitePragmaIsRead(sql: string, tokens: string[]): boolean {
+  const sanitized = stripLiteralsAndComments(sql);
+  if (!sanitized.includes("=") && !sanitized.includes("(")) return true;
+  // `PRAGMA name(...)` 与 `PRAGMA schema.name(...)` 都要覆盖
+  return tokens.slice(1, 3).some((token) => SQLITE_READONLY_PRAGMAS.has(token));
 }
 
 /** 成功执行后需要失效 schema metadata cache 的 DDL 首 token。 */

@@ -113,7 +113,7 @@ export function TableStructureView({
           const name = `'${table.replace(/'/g, "''")}'`;
           const result = await dbApi.query(
             connectionId,
-            `SELECT sql FROM ${db}.sqlite_master WHERE type = 'table' AND name = ${name}`,
+            `SELECT sql FROM ${db}.sqlite_master WHERE type IN ('table', 'view') AND name = ${name}`,
           );
           ddl = result.rows[0]?.[0] ?? "";
         } else {

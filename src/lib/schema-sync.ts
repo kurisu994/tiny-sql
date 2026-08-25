@@ -34,6 +34,10 @@ function qualifiedTable(
   if (driver === "mysql") {
     return `${quoteIdent(driver, database)}.${quoteIdent(driver, table)}`;
   }
+  // SQLite 没有 schema 层级，限定的是 ATTACH 名（主库 main），不是 public
+  if (driver === "sqlite") {
+    return `${quoteIdent(driver, database || "main")}.${quoteIdent(driver, table)}`;
+  }
   return `${quoteIdent(driver, schema || "public")}.${quoteIdent(driver, table)}`;
 }
 

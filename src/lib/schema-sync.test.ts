@@ -94,3 +94,29 @@ describe("buildSyncStatements", () => {
     ]);
   });
 });
+
+describe("buildSyncStatements · SQLite", () => {
+  function sqliteSnap(tables: TableSnapshot[], id: string): SchemaSnapshot {
+    return {
+      driver: "sqlite",
+      connectionId: id,
+      connectionName: id,
+      database: "main",
+      // SQLite 没有 schema 层级，compare-view 一律传 null
+      schema: null,
+      capturedAt: "2026-08-25T00:00:00.000Z",
+      tables,
+    };
+  }
+
+  it("表名限定用 ATTACH 名而不是 public", () => {
+    const left = sqliteSnap([table("users"), table("orders")], "l");
+    const right = sqliteSnap([table("users")], "r");
+    const result = buildSyncStatements(diffSchemas(left, right), "toRight");
+
+    expect(result.error).toBeNull();
+    const sql = result.statements.map((item) => item.sql).join("\n");
+    expect(sql).toContain('"main"."orders"');
+    expect(sql).not.toContain("public");
+  });
+});

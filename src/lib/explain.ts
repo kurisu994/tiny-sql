@@ -15,6 +15,8 @@ export function explainHint(label: string): string | undefined {
   if (upper.includes("FILESORT")) return "额外排序";
   if (upper.includes("TEMPORARY")) return "临时表";
   if (upper.includes("SEQ SCAN")) return "顺序扫描";
+  // SQLite：`SCAN t` 是全表扫描，`SCAN t USING ... INDEX ...` 是索引扫描
+  if (upper.startsWith("SCAN ") && !upper.includes(" USING ")) return "全表扫描";
   return undefined;
 }
 
@@ -88,12 +90,49 @@ function pgTree(rowSet: RowSet): ExplainNode[] {
   }
 }
 
+/**
+ * SQLite `EXPLAIN QUERY PLAN` 结果转树。
+ *
+ * 列是 `id / parent / notused / detail`：detail 才是人读的那行
+ *（`SCAN foo`、`SEARCH foo USING INDEX ...`），层级由 id/parent 组成。
+ */
+function sqliteTree(rowSet: RowSet): ExplainNode[] {
+  const byId = new Map<string, ExplainNode>();
+  const roots: ExplainNode[] = [];
+  const parents: [string, ExplainNode][] = [];
+
+  for (const row of rowSet.rows.slice(0, MAX_NODES)) {
+    const id = col(row, rowSet.columns, "id");
+    const parent = col(row, rowSet.columns, "parent");
+    const detail = col(row, rowSet.columns, "detail");
+    const label = detail || `step ${byId.size + 1}`;
+    const node: ExplainNode = { label, children: [], hint: explainHint(label) };
+    byId.set(id, node);
+    parents.push([parent, node]);
+  }
+  for (const [parent, node] of parents) {
+    // parent 为 0 / 空表示顶层；父节点缺失时（截断）也挂到顶层，避免整枝丢失
+    const target = parent && parent !== "0" ? byId.get(parent) : undefined;
+    if (target) {
+      target.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}
+
 /** 把 EXPLAIN 结果集转成树。超大计划截断。 */
 export function buildExplainTree(driver: DriverKind, rowSet: RowSet): {
   nodes: ExplainNode[];
   truncated: boolean;
 } {
-  const nodes = driver === "postgresql" ? pgTree(rowSet) : mysqlTree(rowSet);
+  const nodes =
+    driver === "postgresql"
+      ? pgTree(rowSet)
+      : driver === "sqlite"
+        ? sqliteTree(rowSet)
+        : mysqlTree(rowSet);
   return { nodes, truncated: rowSet.rows.length > MAX_NODES };
 }
 
