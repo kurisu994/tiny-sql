@@ -435,16 +435,13 @@ fn pg_dump_args(
     args
 }
 
-/// `sqlite3 <file> ".dump"`：整库或单表导出为 SQL 文本，由调用方重定向 stdout。
+/// `sqlite3 <file> ".dump"`：**整库**导出为 SQL 文本，由调用方重定向 stdout。
 ///
-/// 表名进的是 sqlite3 shell 的点命令参数，用双引号包裹并双写内部双引号，
-/// 避免带空格 / 特殊字符的表名把点命令切碎。
-fn sqlite_dump_args(db_path: &str, table: Option<&str>) -> Vec<String> {
-    let command = match table.filter(|s| !s.trim().is_empty()) {
-        Some(table) => format!(".dump \"{}\"", table.trim().replace('"', "\"\"")),
-        None => ".dump".to_string(),
-    };
-    vec![db_path.to_string(), command]
+/// 不支持限定单表：`.dump` 的参数是 LIKE 模式而非表名，`_` / `%` 都是通配符
+/// （`.dump "user_data"` 会连 `userXdata` 一起带出），而 `.dump` 没有 ESCAPE 可用。
+/// 单表导出请走内置 dump 导出（`commands::dump`），那条路是按表名精确取的。
+fn sqlite_dump_args(db_path: &str) -> Vec<String> {
+    vec![db_path.to_string(), ".dump".to_string()]
 }
 
 /// `sqlite3 <file>`：SQL 文本从 stdin 灌入。
@@ -480,7 +477,7 @@ pub async fn backup_probe_tools(
         DriverKind::PostgreSql => {
             "pg_dump --format=custom --host=<endpoint> --username=<user> --dbname=<database> --file=<path>".into()
         }
-        DriverKind::Sqlite => "sqlite3 <file> \".dump\" > <path>".into(),
+        DriverKind::Sqlite => "sqlite3 <file> \".dump\" > <path>（仅整库）".into(),
     };
     let restore_preview = match kind {
         DriverKind::MySql => "mysql --defaults-extra-file=<secret> <database>".into(),
@@ -526,6 +523,11 @@ pub async fn db_backup_export(
     );
     let database = input.database.trim().to_string();
     let table = input.table.filter(|s| !s.trim().is_empty());
+    // SQLite 的 .dump 只能整库：宁可明确拒绝，也不能悄悄导出一个「超集」备份
+    if kind == DriverKind::Sqlite && table.is_some() {
+        state.queries.lock().await.remove(&query_id);
+        return Err(err("error.backup.table_scope_unsupported"));
+    }
     let result = async {
         match kind {
             DriverKind::MySql => {
@@ -580,7 +582,7 @@ pub async fn db_backup_export(
             }
             // SQLite 的目标是文件本身：database 字段存的就是路径，无凭据文件
             DriverKind::Sqlite => {
-                let args = sqlite_dump_args(stored.database.trim(), table.as_deref());
+                let args = sqlite_dump_args(stored.database.trim());
                 run_process(ProcessIo {
                     program: &dump,
                     args: &args,
@@ -709,6 +711,30 @@ pub async fn db_backup_restore(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SQLite 的 `.dump` 参数是 LIKE 模式不是表名，没有 ESCAPE 可用，
+    /// 所以这里只能整库导出；单表由 `commands::dump` 的内置导出负责。
+    #[test]
+    fn sqlite_dump_args_are_whole_database_only() {
+        assert_eq!(
+            sqlite_dump_args("/tmp/app.db"),
+            vec!["/tmp/app.db".to_string(), ".dump".to_string()]
+        );
+    }
+
+    #[test]
+    fn sqlite_restore_args_take_only_the_database_file() {
+        assert_eq!(
+            sqlite_restore_args("/tmp/app.db"),
+            vec!["/tmp/app.db".to_string()]
+        );
+    }
+
+    #[test]
+    fn sqlite_uses_official_sqlite3_shell_for_both_directions() {
+        assert_eq!(dump_tool_name(DriverKind::Sqlite), "sqlite3");
+        assert_eq!(client_tool_name(DriverKind::Sqlite), "sqlite3");
+    }
 
     #[test]
     fn mysql_defaults_quotes_password_and_keeps_password_out_of_argv() {

@@ -2637,12 +2637,21 @@ fn prepare_query_sql_for_dialect(
     let is_metadata = match dialect {
         SqlDialect::MySql => matches!(first, "SHOW" | "DESC" | "DESCRIBE" | "EXPLAIN"),
         SqlDialect::PostgreSql => matches!(first, "SHOW" | "EXPLAIN"),
-        // SQLite 的 EXPLAIN / EXPLAIN QUERY PLAN 不执行被分析语句；PRAGMA 只读写连接设置
-        SqlDialect::Sqlite => matches!(first, "PRAGMA" | "EXPLAIN"),
+        // SQLite 的 EXPLAIN / EXPLAIN QUERY PLAN 不执行被分析语句；
+        // PRAGMA 只有查询形式算读，赋值形式会改库（见 sqlite_pragma_is_read）
+        SqlDialect::Sqlite => {
+            first == "EXPLAIN"
+                || (first == "PRAGMA" && sqlite_pragma_is_read(&sanitized_stmt, &tokens))
+        }
     };
 
+    // SQLite 的裸 VALUES 不接受 LIMIT 后缀（`VALUES (1) LIMIT 1` 是语法错误），
+    // 只能靠客户端截断兜底；PostgreSQL 的 VALUES 则允许 LIMIT
+    let server_cappable = can_append_limit(&sanitized_stmt, dialect)
+        && !(dialect == SqlDialect::Sqlite && main_statement == "VALUES");
+
     if is_read {
-        if can_append_limit(&sanitized_stmt, dialect) {
+        if server_cappable {
             // 多取 1 行仅用于精确判断是否截断；返回给前端时会丢掉第 limit+1 行。
             let fetch_limit = limit.saturating_add(1);
             Ok(PreparedSql {
@@ -2695,6 +2704,45 @@ fn prepare_query_sql_for_dialect(
             row_limit: limit,
         })
     }
+}
+
+/// 带参数时仍确定只读的 SQLite PRAGMA（内省类）。名字为大写，与 [`sql_tokens`] 一致。
+const SQLITE_READONLY_PRAGMAS: &[&str] = &[
+    "COLLATION_LIST",
+    "COMPILE_OPTIONS",
+    "DATABASE_LIST",
+    "FOREIGN_KEY_CHECK",
+    "FOREIGN_KEY_LIST",
+    "FUNCTION_LIST",
+    "INDEX_INFO",
+    "INDEX_LIST",
+    "INDEX_XINFO",
+    "INTEGRITY_CHECK",
+    "MODULE_LIST",
+    "PRAGMA_LIST",
+    "QUICK_CHECK",
+    "TABLE_INFO",
+    "TABLE_LIST",
+    "TABLE_XINFO",
+];
+
+/// SQLite 的 PRAGMA 是否确定只读。
+///
+/// **不能一律当元数据读放行**：`PRAGMA journal_mode = WAL`、`PRAGMA user_version = 42`
+/// 都会改写数据库文件本身。SQLite 的赋值形式有两种写法（`= 值` 与 `(值)`），所以
+/// 「有没有参数」才是可靠的分界：完全不带参数的 `PRAGMA x;` 一定是查询形式；
+/// 带参数时只认内省类白名单，其余按写语句要二次确认。
+fn sqlite_pragma_is_read(sanitized_stmt: &str, tokens: &[String]) -> bool {
+    if !sanitized_stmt.contains('=') && !sanitized_stmt.contains('(') {
+        return true;
+    }
+    // `PRAGMA name(...)` 与 `PRAGMA schema.name(...)` 都要覆盖：sql_tokens 会丢掉 `.`，
+    // 因此 PRAGMA 后面的头两个 token 命中白名单即可
+    tokens
+        .iter()
+        .skip(1)
+        .take(2)
+        .any(|name| SQLITE_READONLY_PRAGMAS.contains(&name.as_str()))
 }
 
 /// EXPLAIN ANALYZE 是否在分析写语句（ANALYZE 变体会真正执行被分析的语句）。
@@ -3249,13 +3297,17 @@ mod tests {
             }
         );
 
-        // SQLite 支持裸 VALUES 语句
-        assert!(matches!(
-            prepare_query_sql_for_dialect("VALUES (1), (2)", options, SqlDialect::Sqlite)
-                .expect("VALUES 应按读处理")
-                .kind,
-            PreparedSqlKind::Read { .. }
-        ));
+        // SQLite 的裸 VALUES 不能追加 LIMIT（语法错误），只能客户端截断
+        let values = prepare_query_sql_for_dialect("VALUES (1), (2)", options, SqlDialect::Sqlite)
+            .expect("VALUES 应按读处理");
+        assert_eq!(
+            values.kind,
+            PreparedSqlKind::Read {
+                limit: 10,
+                server_capped: false
+            }
+        );
+        assert!(!values.sql.contains("LIMIT"), "VALUES 不该被追加 LIMIT");
 
         for sql in ["PRAGMA table_info('t')", "EXPLAIN QUERY PLAN SELECT 1"] {
             assert!(
@@ -3269,6 +3321,40 @@ mod tests {
                     }
                 ),
                 "{sql} 应按元数据读处理"
+            );
+        }
+
+        // 无参数的 PRAGMA 是查询形式，一定只读
+        for sql in ["PRAGMA journal_mode", "PRAGMA user_version"] {
+            assert!(
+                prepare_query_sql_for_dialect(sql, options, SqlDialect::Sqlite).is_ok(),
+                "{sql} 是查询形式应放行"
+            );
+        }
+        // 赋值形式会改写数据库文件，必须走写确认；两种写法都要拦
+        for sql in [
+            "PRAGMA journal_mode = WAL",
+            "PRAGMA journal_mode(WAL)",
+            "PRAGMA user_version = 42",
+            "PRAGMA writable_schema = ON",
+        ] {
+            assert!(
+                matches!(
+                    prepare_query_sql_for_dialect(sql, options, SqlDialect::Sqlite),
+                    Err(DriverError::WriteRequiresConfirmation)
+                ),
+                "{sql} 会改库，应要求写确认"
+            );
+        }
+        // 白名单内省 pragma 带参数也放行，含 schema 限定写法
+        for sql in [
+            "PRAGMA table_info('t')",
+            "PRAGMA main.table_info('t')",
+            "PRAGMA index_list('t')",
+        ] {
+            assert!(
+                prepare_query_sql_for_dialect(sql, options, SqlDialect::Sqlite).is_ok(),
+                "{sql} 是内省 pragma 应放行"
             );
         }
 

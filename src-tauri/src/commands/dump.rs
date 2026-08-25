@@ -259,7 +259,9 @@ async fn run_export(
                 let row_set = Driver::query(
                     driver,
                     &format!(
-                        "SELECT sql FROM {}.sqlite_master WHERE type = 'table' AND name = {}",
+                        // 视图也要能导出 DDL：list_tables 会把视图一并返回
+                        "SELECT sql FROM {}.sqlite_master \
+                         WHERE type IN ('table', 'view') AND name = {}",
                         quote_ident(kind, &scope.database),
                         quote_literal(kind, table_name)
                     ),

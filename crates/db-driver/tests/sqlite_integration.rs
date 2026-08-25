@@ -330,6 +330,56 @@ async fn sqlite_write_requires_confirmation_and_pragma_reads_freely() {
     driver.close().await;
 }
 
+/// 回归：裸 VALUES 曾被追加 `LIMIT n`，而 SQLite 不接受该后缀，执行必报语法错误。
+#[tokio::test]
+async fn sqlite_bare_values_statement_executes() {
+    let db = TempDb::new("values");
+    let driver = open(&db).await;
+
+    let row_set = driver
+        .query_with_options(
+            "VALUES (1), (2), (3)",
+            QueryOptions {
+                row_limit: 2,
+                allow_write: false,
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .expect("裸 VALUES 应能执行");
+    // 服务端不能封顶，靠客户端截断
+    assert_eq!(row_set.rows.len(), 2);
+    assert!(row_set.truncated);
+
+    driver.close().await;
+}
+
+/// 回归：PRAGMA 曾被一律当元数据读放行，赋值形式会绕过写确认改写数据库文件。
+#[tokio::test]
+async fn sqlite_pragma_assignment_requires_write_confirmation() {
+    let db = TempDb::new("pragma");
+    let driver = open(&db).await;
+
+    for sql in ["PRAGMA user_version = 42", "PRAGMA journal_mode = WAL"] {
+        let error = driver
+            .query_with_options(sql, QueryOptions::default(), CancellationToken::new())
+            .await
+            .expect_err("赋值形式的 PRAGMA 应要求写确认");
+        assert!(
+            matches!(error, DriverError::WriteRequiresConfirmation),
+            "{sql}"
+        );
+    }
+    // 未确认就被拦下，库没被改动
+    let row_set = driver
+        .query("PRAGMA user_version")
+        .await
+        .expect("查询形式的 PRAGMA 应直接放行");
+    assert_eq!(row_set.rows[0][0].as_deref(), Some("0"));
+
+    driver.close().await;
+}
+
 #[tokio::test]
 async fn sqlite_transaction_control_requires_session() {
     let db = TempDb::new("txguard");
