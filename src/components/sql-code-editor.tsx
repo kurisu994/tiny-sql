@@ -98,7 +98,7 @@ const editorTheme = EditorView.theme({
   },
 });
 
-/** CodeMirror 6 SQL 编辑器：双 driver 方言、schema-aware 补全和错误 gutter。 */
+/** CodeMirror 6 SQL 编辑器：按三种 driver 选择方言，提供 schema-aware 补全和错误 gutter。 */
 export function SqlCodeEditor({
   value,
   onChange,

@@ -4,7 +4,8 @@
 //! - 导出：表级（或当前 scope 全表）DDL + 分批 INSERT，后端流式写文件，
 //!   不经过前端序列化；MySQL DDL 用 `SHOW CREATE TABLE` 原文，PostgreSQL
 //!   由元数据简化重建（列 / NOT NULL / 默认值 / 主键，不含索引与外键——
-//!   完整结构以结构视图 DDL 预览为准，本文件面向数据迁移场景）；
+//!   完整结构以结构视图 DDL 预览为准，本文件面向数据迁移场景），SQLite 取
+//!   `sqlite_master.sql` 原文；
 //! - 数据按 `browse_table` 分页循环（每页 10000），多行 VALUES 批量 INSERT
 //!   （每语句 ≤ 500 行）；字符串单引号双写转义，NULL 写无引号 NULL；
 //! - 导入：大文件流式读取 + 方言分号状态机增量分句（复用 FR-243 状态机），
@@ -213,7 +214,7 @@ async fn run_export(
             .map_err(QueryCommandError::from)?;
         let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
 
-        // DDL：MySQL 用 SHOW CREATE TABLE 原文；PG 元数据简化重建
+        // DDL：MySQL 用 SHOW CREATE TABLE 原文；PG 元数据简化重建；SQLite 取 sqlite_master 原文
         let ddl = match kind {
             DriverKind::MySql => {
                 let qualified = format!(

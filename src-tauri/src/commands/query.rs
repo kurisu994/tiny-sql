@@ -154,7 +154,7 @@ pub async fn db_create_database(
         .map_err(|e| e.i18n_key().to_string())
 }
 
-/// 列出指定 database 下的 schema。MySQL 返回同名 schema，PostgreSQL 返回独立层级。
+/// 列出指定 database 下的 schema。MySQL 返回同名 schema，PostgreSQL 返回独立层级，SQLite 返回空。
 #[tauri::command]
 pub async fn db_list_schemas(
     state: State<'_, AppState>,

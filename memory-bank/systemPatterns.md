@@ -18,7 +18,7 @@
                ▼                         ▼
 ┌──────────────────────────┐  ┌──────────────────────────────┐
 │  crates/db-driver        │  │  crates/ssh-multihop          │
-│  Driver + MySQL/Postgres │  │  open() → N 跳隧道 + 本地端口  │
+│  Driver + MySQL/PG/SQLite │  │  open() → N 跳隧道 + 本地端口  │
 │  不知道 SSH 存在          │  │  完全不知道 MySQL 存在         │
 └──────────────────────────┘  └──────────────────────────────┘
 ```
@@ -46,7 +46,7 @@ tiny-sql/
 ├── Cargo.toml                  # workspace 根，members + workspace.dependencies
 ├── crates/
 │   ├── ssh-multihop/src/lib.rs # N 跳隧道 + keepalive + 错误模型 + TunnelHandler/HostKeyVerifier
-│   └── db-driver/src/          # lib.rs: 公共契约/MySQL；postgres.rs: PostgreSQL
+│   └── db-driver/src/          # lib.rs: 公共契约/MySQL；postgres.rs: PostgreSQL；sqlite.rs: SQLite
 ├── src-tauri/
 │   ├── src/lib.rs · main.rs    # setup 装配 store/known_hosts + 注册 command
 │   ├── src/state.rs · tofu.rs  # AppState(注册表/passphrase 缓存) + SshTofuManager
@@ -61,7 +61,7 @@ tiny-sql/
 
 ### 与 ARCHITECTURE 的偏差（实施期决定）
 
-- **db-driver 已按 driver 实现边界拆分**：`lib.rs` 保留公共契约、MySQL 与共享 SQL guard，`postgres.rs` 放 PostgreSQL metadata/query/cancel；隧道仍在 src-tauri 的 `OpenConnection` 里与 pool 绑定生命周期，不进入 db-driver。
+- **db-driver 已按 driver 实现边界拆分**：`lib.rs` 保留公共契约、MySQL 与共享 SQL guard，`postgres.rs` 放 PostgreSQL metadata/query/cancel，`sqlite.rs` 放 SQLite（文件型连接 + progress handler 取消，无 control pool）；隧道仍在 src-tauri 的 `OpenConnection` 里与 pool 绑定生命周期，不进入 db-driver。
 - **ssh-multihop 不引 `tauri::AppHandle`**：原 `SshTunnelContext{app_handle}` 改为 `TunnelContext` 注入回调闭包，保「可独立 publish」不变量。**写代码前确认是「实际」还是「规划」。**
 
 ## 设计模式
@@ -73,7 +73,7 @@ tiny-sql/
 - metadata 通过 `MetadataScope { database, schema }` 显式表达层级；MySQL schema 与 database 同义，PostgreSQL schema 是独立层级且不能在同一连接上跨 database 查询。
 - `DriverError` 的 `Display` 只输出稳定 i18n key；sqlx 原始错误只保留在后端结构化字段，Tauri command 不得返回 `to_string()` 原文。
 - 查询 / dump / 备份 / 分享等 command 对外错误用 `{ key, line?, editIndex? }`，只允许稳定 i18n key 与安全序号，禁止把 sqlx/数据库原文或 SQL 片段放入 IPC。
-- 连接配置的 `driver` 使用稳定值 `mysql` / `postgresql`；旧密文缺字段时只做内存默认迁移，不在启动读取时重写文件，显式保存才升级格式。迁移失败必须保持原密文不变。
+- 连接配置的 `driver` 使用稳定值 `mysql` / `postgresql` / `sqlite`（SQLite 复用 `database` 存 `.db` 路径，host/port/账号与 SSH/SSL 不参与）；旧密文缺字段时只做内存默认迁移，不在启动读取时重写文件，显式保存才升级格式。迁移失败必须保持原密文不变。
 - `connection_test` 的 passphrase 是独立瞬时参数，只用于本次 SSH 私钥握手；不得写入 `ConnectionInput`、持久化配置或正式连接的会话缓存。
 - 与具体跳相关的 `SshTunnelError` 变体带 `hop_index: usize`；`NoHops` / `LocalListenFailed` 返回 `None`。Tauri command 用 `hop_index()` emit 拓扑状态，错误返回值只暴露稳定 i18n key。
 - 公共类型/函数加中文 doc comment。
@@ -89,7 +89,7 @@ tiny-sql/
 - schema metadata cache 只能是进程内 LRU，key 必须包含 connection/driver/database/schema/resource/table 完整边界；重连、建库、成功 DDL 和手动刷新必须失效，异步旧响应不得覆盖当前命名空间。
 - 同一 connection_id 的 open/close/reconnect 与 query 注册必须共用生命周期锁；不同连接使用独立锁。重连前按 connection_id 取消查询并先关 pool 后关 tunnel，每次打开生成 session_id，旧 query_id 结果和旧 session 事件不得写回。
 - metadata 异步返回除核对 connection/database/schema/table 外必须核对单调 request epoch；仅比较当前名称无法防住 A→B→A 的 ABA 覆盖。
-- CodeMirror 必须按连接 driver 使用 MySQL/PostgreSQL dialect；column/alias 复用原生 schema completion，JOIN 候选只基于已加载实际列的保守命名启发式，不得伪造 FOREIGN KEY 关系。
+- CodeMirror 必须按连接 driver 使用 MySQL/PostgreSQL/SQLite 方言；column/alias 复用原生 schema completion，JOIN 候选只基于已加载实际列的保守命名启发式，不得伪造 FOREIGN KEY 关系。
 - UI 组件库用 **shadcn/ui**（radix base，组件源码落 `src/components/ui/`，用 `cn()` 合并 className）：新建/编辑表单用 `Dialog`、右键菜单用 `ContextMenu`、二次确认用 `AlertDialog`；确认统一走全局命令式 `confirm-store`（`await confirm({...})`）替代 `window.confirm`。
 
 **数据库（被连接的 MySQL）**
@@ -104,6 +104,12 @@ tiny-sql/
 - database 与 schema 分层；`list_schemas/list_tables/list_columns` 只允许当前 database，跨 database 返回 `error.driver.database_switch_required`。UI 对该 key 给「一键切换」引导：`connection_reconnect` 带 session 级 `databaseOverride` 重建连接（不落盘），不做隐式重连。
 - 取消用独立 control pool 调 `pg_cancel_backend`；取消或无服务端 LIMIT 的客户端截断后关闭该执行连接，避免未消费协议消息回池。
 - PostgreSQL guard 独立处理 `TABLE` / `VALUES`、`OFFSET` / `FETCH`、dollar-quoted body 与数据修改 CTE；DML `RETURNING` 需写确认并返回结果行。
+
+**数据库（被连接的 SQLite）**
+
+- 无 schema 层级：`MetadataScope.schema` 恒为 None、`list_schemas` 返回空；前端凡是 `driver === "postgresql" ? 有 schema : 无 schema` 的分支天然适配，禁止再写死 `=== "mysql"` 的特判。
+- 取消不用 control pool：无服务端可发指令，用连接内 SQLite 原生 progress handler（回调返 false 即 SQLITE_INTERRUPT），**语句结束必须摘除**，否则连接回池后旧 cancel token 会误伤后续查询。
+- 动态类型按取值真实类型解码：`SqliteColumn::type_info()` 给的是列声明类型，表达式列（`COUNT(*)`）无声明类型，必须按 `ValueRef` 取值真实类型（INTEGER/REAL/TEXT/BLOB/NULL）分派。
 
 ## 负向约束（❌ 不要做）
 

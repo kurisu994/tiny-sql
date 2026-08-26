@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：稳定 Release 为 v0.7.0。** main 另含 v0.8 功能编码（待 GUI/RC 与 `v0.8.0` 切版）。GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：稳定 Release 为 v0.7.0；main 已切 `v0.8.0-rc1`（含 SQLite driver），待 GUI/RC 验收后正式发布。** GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -35,7 +35,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 
 **SQL 编辑器**
 
-- CodeMirror 双方言高亮、schema-aware 补全、多语句执行与格式化；写操作二次确认；独立 control pool 取消。
+- CodeMirror 三方言高亮（MySQL / PostgreSQL / SQLite）、schema-aware 补全、多语句执行与格式化；写操作二次确认；网络型独立 control pool 取消（SQLite 走原生 progress handler）。
 - 可靠事务：独占 session 上 `BEGIN` / `COMMIT` / `ROLLBACK`。
 - SQL 文件打开 / 保存 / 最近文件；SQL 历史（最近 100 条加密落盘）。
 
@@ -44,7 +44,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 - 查询结果导出 CSV / Excel（后端流式写文件，区分 SQL NULL 与空字符串）。
 - 表格安全编辑：仅带主键单表，dirty 暂存 + 单事务批量提交。
 - 结构查看 / DDL 预览 / 新建表 / 修改表与索引。
-- CSV 导入 + SQL dump 导入导出；官方 mysqldump/pg_dump 备份恢复（需本机工具）。
+- CSV 导入 + SQL dump 导入导出；官方 mysqldump/pg_dump/sqlite3 备份恢复（需本机工具）。
 - 加密分享连接（独立口令）；双连接结构对比与可审阅同步 SQL；只读 ER 关系图。
 - 同方言表数据拷贝（追加或先清空再插入，须手输目标表）；MySQL 权限预览（PG 角色只读）；EXPLAIN 计划树（ANALYZE 需确认）。
 - 连接可设应用只读与生产/预发/开发标签；同库复制为新表；结果格检查器与外键跳转；非主键列可预览重命名。
@@ -148,6 +148,8 @@ justfile                    # 项目命令入口
 > 从 [v0.7.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.7.0) 下载当前稳定版（云端打包完成后资产才会齐）。
 
 v0.7.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
+
+`v0.8.0-rc1` 已发布为 prerelease（含 SQLite 支持），正式版发布前需手动下载验证。
 
 正式版会在 GitHub Release 中附带 `latest.json` 与签名更新包，应用内自动更新只跟随 GitHub 的 latest 正式版。`v*-rc*`、beta、alpha 预发布版本仍需手动下载验证。
 

@@ -1,7 +1,7 @@
-//! MySQL / PostgreSQL database drivers
+//! MySQL / PostgreSQL / SQLite database drivers
 //!
-//! v0.2 已从现有 MySQL 调用面提取对象安全的最小 [`Driver`] 契约；连接创建仍由
-//! 具体 driver 负责，避免把方言专属配置和后续对象编辑能力塞进通用接口。
+//! 从现有 MySQL 调用面演进出对象安全的 [`Driver`] 契约；连接创建仍由具体
+//! driver 负责，方言专属配置与对象操作留在实现或应用组装层。
 //!
 //! 与隧道的桥接方式：sqlx 不吃自定义 `TcpStream`，所以走"本地 listener 端口 →
 //! `mysql://127.0.0.1:port` URL"。ssh-multihop 暴露本地端口，这里用 host=127.0.0.1
@@ -10,7 +10,8 @@
 //! Week 2 范围：connect / ping / list_databases / list_tables / list_columns / query。
 //! query 的防 OOM 由「顶层安全时追加 LIMIT + 客户端 10w 行截断」组成；
 //! 取消走独立 control pool：MySQL 发 `KILL QUERY`，PostgreSQL 调
-//! `pg_cancel_backend`。
+//! `pg_cancel_backend`（SQLite 例外：无服务端，用连接内原生 progress
+//! handler 中断，见 sqlite.rs）。
 
 use std::future::Future;
 use std::pin::Pin;
@@ -693,12 +694,11 @@ fn quote_sqlite_ident(name: &str) -> String {
     quote_pg_ident(name)
 }
 
-/// MySQL / PostgreSQL 共用的最小数据库 Driver 契约。
+/// MySQL / PostgreSQL / SQLite 共用的对象安全数据库 Driver 契约。
 ///
-/// 仅覆盖 v0.2 多 driver 主链路需要的 ping、metadata、query、cancel 与 close。
+/// 覆盖 ping、metadata、query/cancel、分页浏览、独占 session、批量编辑与关闭。
 /// 连接创建由各 driver factory 负责；取消通过传入 [`CancellationToken`] 实现，
-/// 由具体 driver 映射为数据库原生取消机制。创建/编辑数据库对象等方言专属能力
-/// 不进入本契约。
+/// 由具体 driver 映射为原生机制。创建数据库、权限等方言专属能力不进入本契约。
 pub trait Driver: Send + Sync {
     /// 返回 driver 的稳定类型。
     fn kind(&self) -> DriverKind;

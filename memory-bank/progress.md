@@ -14,7 +14,7 @@
 | v0.5 | ✅ 随 v0.7.0 正式发布 | FR-253 / FR-260 / FR-221 |
 | v0.6 | ✅ 随 v0.7.0 正式发布 | FR-220 / FR-261 / FR-263 |
 | v0.7 | ✅ 正式版已发布 | 2026-08-24 `just release v0.7.0`（发布提交 `d2d3f5c`，tag `v0.7.0`）。范围含 v0.4–v0.7 全部已编码功能 |
-| v0.8 | 🚧 编码完成 | 2026-08-24 完成 FR-270–275 与 `just check`（vitest 168 / app_lib 67）；2026-08-25 追加 SQLite driver（见下）后 `just check` 复跑全绿（vitest 179 / db-driver 单测 47 + SQLite integration 23）。待 GUI/RC。应用版本号仍为 0.7.0。双向同步 / BI / AI 挂 v0.9+ |
+| v0.8 | 🚧 rc1 已发布 | 2026-08-24 完成 FR-270–275 与 `just check`（vitest 168 / app_lib 67）；2026-08-25 追加 SQLite driver（见下）后 `just check` 复跑全绿（vitest 179 / db-driver 单测 47 + SQLite integration 23）；2026-08-26 发布 `v0.8.0-rc1`（prerelease，四平台构建成功，无 `latest.json`）。待 GUI 实测与正式切版。双向同步 / BI / AI 挂 v0.9+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 
@@ -178,6 +178,7 @@ V7-CP0 启动准入按用户要求跳过。
 
 ## 重大决策与架构变更记录
 
+- **2026-08-26 发布 v0.8.0-rc1 并按代码再对齐文档**：四文件版本号切到 `0.8.0-rc1`（发布提交 `754f033`）；SQLite driver 随 rc1 进入 main，前后端 command 仍各 54 个（SQLite 未新增 command）。文档同步：README/README_EN/CONTRIBUTING 更新三 driver 与 rc1 状态；ARCHITECTURE 补 SQLite 取消机制（progress handler 无 control pool）、§7.5 schema 三 driver、§10 测试策略；REQUIREMENTS 实现快照与 NFR-042 更新三实现；ROADMAP/PLAN/RELEASE_CHECKLIST v0.8 段记录 rc1 事实；memory-bank 同步版本号与 driver 稳定值（`mysql` / `postgresql` / `sqlite`）。稳定 Release 仍为 v0.7.0。
 - **2026-08-24 PLAN 归档 v0.8 并再对齐文档**：已完成周计划移入本文件；PLAN 只留用户验收。代码事实为应用版本号 `0.7.0`、command 仍 54 个、v0.8 功能在 main 未切版。
 - **2026-08-24 发布 v0.7.0**：作者确认不连发 0.4/0.5/0.6 正式版，将已编码功能一次切 `v0.7.0`（`d2d3f5c`）。`0.4.0-rc1` 仍为预发布、不进 latest 更新源。
 - **2026-08-24 立项 v0.8 草案**：主题收成「防连错与查询补齐」。唯一不降级 P0 为连接只读开关；环境色 / 复制新表 / 单元格与 FK / RENAME / EXPLAIN 提示按降级链可砍。双向同步 / BI / AI 从 v0.8+ 挪到 v0.9+。

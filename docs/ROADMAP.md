@@ -2,7 +2,7 @@
 title: tiny-sql 路线图
 version: 0.8.0
 status: awaiting-acceptance
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 ---
 
 # tiny-sql 路线图
@@ -24,7 +24,7 @@ v0.3  ✅ 已发布（2026-08-22）── 查询工作台 + 元数据检索 + �
 v0.4–v0.7  ✅ 已打进 v0.7.0（2026-08-24）── 表格编辑 / 结构变更 / 官方备份 / 对比拷贝 / 权限 / EXPLAIN
    │
    ▼
-v0.8  🚧 编码完成，待 GUI/RC 验收 ── 连接只读 + 环境色 + 复制新表 / 单元格与 FK / RENAME / EXPLAIN 提示
+v0.8  🚧 rc1 已发布（2026-08-26），待 GUI/RC 验收与正式切版 ── 连接只读 + 环境色 + 复制新表 / 单元格与 FK / RENAME / EXPLAIN 提示 + SQLite driver
    │
    ▼
 v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
@@ -129,7 +129,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 详细任务历史见 [progress.md v0.5 归档](../memory-bank/progress.md#v05-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
-**当前进度**：2026-08-24 三项 FR 编码与 `just check` 完成；待 V5-T8.1 / T8.2。
+**当前进度**：2026-08-24 三项 FR 编码与 `just check` 完成；随 `v0.7.0` 正式发布（GUI/RC 验收并入 v0.7 发布流程）。
 
 | ID | 功能 | 优先级 | 范围边界 |
 |---|---|---|---|
@@ -141,7 +141,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 详细任务历史见 [progress.md v0.6 归档](../memory-bank/progress.md#v06-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
-**当前进度**：2026-08-24 三项 FR 编码与单测完成；待 V6-T8.1 / T8.2。
+**当前进度**：2026-08-24 三项 FR 编码与单测完成；随 `v0.7.0` 正式发布（GUI/RC 验收并入 v0.7 发布流程）。
 
 | ID | 功能 | 优先级 | 范围边界 |
 |---|---|---|---|
@@ -161,11 +161,11 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 | FR-262 | MySQL 用户与权限 | P1 | 只管理数据库权限；密码哈希不进前端；PG 变更可降级 |
 | FR-222 | EXPLAIN 可读化 | P1 | 查询 tab 解释计划；ANALYZE 单独确认；不做监控采集 |
 
-### v0.8 — 防连错与查询补齐（编码完成，待验收）
+### v0.8 — 防连错与查询补齐（rc1 已发布，待验收）
 
 详细任务历史见 [progress.md v0.8 归档](../memory-bank/progress.md#v08-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
-**当前进度**：2026-08-24 六项 FR 编码完成；待 GUI/RC。
+**当前进度**：2026-08-24 六项 FR 编码完成；2026-08-25 追加 SQLite driver（三实现落地，`just check` 全绿：vitest 179 / db-driver 单测 47 + SQLite integration 23）；`v0.8.0-rc1` 已于 2026-08-26 发布（prerelease，四平台构建成功，无 `latest.json`）。待 GUI 实测与正式切版。
 
 | ID | 功能 | 优先级 | 范围边界 |
 |---|---|---|---|
@@ -199,7 +199,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 | ID | 功能 | 备注 |
 |---|---|---|
 | FR-210 | `ssh-multihop` 独立 publish 到 crates.io | 需要：API 文档、example、CI 覆盖率、CHANGELOG |
-| FR-211 | `db-driver` 独立 publish | 需要：≥ 2 个 driver impl（MySQL + PG） |
+| FR-211 | `db-driver` 独立 publish | 已满足前置（MySQL + PG + SQLite 三实现） |
 
 ### 跨版本：既有高级功能
 

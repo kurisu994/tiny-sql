@@ -2,18 +2,18 @@
 title: tiny-sql 需求文档
 version: 0.8.0
 status: awaiting-acceptance
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 ---
 
 # tiny-sql 需求文档
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-24）**：稳定 Release 与应用版本号均为 `v0.7.0`。main 另含 v0.8 功能编码（仍 54 个 command，未切 `v0.8.0`）。v0.8 范围见 §3.8。
+> **实现快照（2026-08-26）**：四文件版本号已切到 `v0.8.0-rc1`（tag `v0.8.0-rc1`）；GitHub 稳定 Release 仍为 `v0.7.0`。main 含 v0.8 全部功能编码与 SQLite driver（前后端仍各 54 个 command，v0.8 与 SQLite 均未新增 command）。v0.8 范围见 §3.8，SQLite 见 §5.1。
 
 ## 1. 项目愿景
 
-tiny-sql 是一款**多级跳板机友好的 MySQL 桌面客户端**。
+tiny-sql 是一款**多级跳板机友好的 MySQL / PostgreSQL / SQLite 桌面客户端**。
 
 主流 SQL 客户端（DBeaver、TablePlus、Navicat、DataGrip、Sequel Ace、Beekeeper Studio）把 SSH 隧道当作"雾中一根管子"——单跳、黑盒、出错无法定位哪一跳挂了。DBeaver 名义上支持 OpenSSH ProxyJump 多跳，但 UI 完全不暴露这层逻辑，调试体验等同于裸 `ssh -L`。
 
@@ -328,7 +328,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.4 归档](../memory-bank/progress.md#v04-已交付周计划归档)。
 
-> **实现状态（2026-08-22）**：三项 FR 代码与自动化门禁已全部完成，integration 双 driver 全绿（编辑批 7 项 + bulk_insert 3 项 + dump 往返 2 项）；`v0.4.0-rc1` 已发布（prerelease，四平台构建成功）；待 V4-T8.1 真实环境回归、V4-T8.2 一周试用与正式发布。
+> **实现状态（2026-08-22，已随 v0.7.0 发布）**：三项 FR 代码与自动化门禁已全部完成，integration 双 driver 全绿（编辑批 7 项 + bulk_insert 3 项 + dump 往返 2 项）；`v0.4.0-rc1` 已发布（prerelease，四平台构建成功）；2026-08-24 随 `v0.7.0` 正式发布，验收并入 v0.7 发布流程。
 
 - **FR-250** 仅带主键单表的安全表格编辑（P0）：在浏览 tab（FR-242）上进入编辑模式，新增 / 修改 / 删除先以 dirty state 暂存前端；「提交」时在独占 session（FR-244）上以单事务批量执行参数化 DML，「放弃」整体丢弃；编辑期不持有事务，避免长事务占用连接。仅显式主键表可编辑（复合主键支持），无主键表与 JOIN / 聚合结果禁止写回；提交前展示变更摘要并二次确认；MySQL / PostgreSQL 双方言。
 - **FR-251** 结构查看、DDL 预览与新建表（P1）：v0.4 范围为完整结构查看（列定义 + 已有索引 / 约束）、建表 DDL 预览（MySQL `SHOW CREATE TABLE`，PostgreSQL 由元数据拼装）与「新建表」结构化表单（生成 SQL 预览 → 二次确认后执行）；修改表与索引 / 约束设计器按反馈顺延，不在 v0.4 承诺。执行任何 DDL 必须先展示 SQL 预览并二次确认。
@@ -342,7 +342,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.5 归档](../memory-bank/progress.md#v05-已交付周计划归档)。
 
-> **实现状态（2026-08-24）**：三项 FR 编码与自动化单测已完成；GUI 真实回归与 RC 试用由用户验收（V5-T8.1 / T8.2）。
+> **实现状态（2026-08-24，已随 v0.7.0 发布）**：三项 FR 编码与自动化单测已完成；2026-08-24 随 `v0.7.0` 正式发布，验收并入 v0.7 发布流程。
 
 - **FR-253** 修改表、索引 / 约束设计器与 View 结构（P0）：在 v0.4 结构查看与新建表（FR-251）之上提供列级 ALTER（ADD / DROP / MODIFY，双方言）以及索引增删；所有语句先生成 SQL 预览再二次确认后执行。v0.5 不承诺图形化换主键、不承诺 `RENAME COLUMN` 向导。View 仅只读展示列。FOREIGN KEY / CHECK 新建向导可降级。
 - **FR-260** 官方工具备份与恢复（P1）：编排本机 `mysqldump` / `mysql`（PG 的 `pg_dump` / `pg_restore` 争取同版本交付），经已建立隧道的本地端口读写文件，提供进度、取消、日志与失败中止。不自行发明备份格式，也不把 FR-252 SQL dump 冒充备份。恢复必须手输目标库名。范围是当前库 / schema 或单表，不做全实例。
@@ -356,7 +356,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.6 归档](../memory-bank/progress.md#v06-已交付周计划归档)。
 
-> **实现状态（2026-08-24）**：三项 FR 编码与单测已完成；GUI/RC 由用户验收（V6-T8.1 / T8.2）。
+> **实现状态（2026-08-24，已随 v0.7.0 发布）**：三项 FR 编码与单测已完成；2026-08-24 随 `v0.7.0` 正式发布，验收并入 v0.7 发布流程。
 
 - **FR-220** 双连接结构 diff（P0）：对两条**已打开**连接的指定 database/schema 对比表 / 列 / 索引 / 约束。同方言可进入后续同步；跨 driver 只展示。不隐式打开连接。
 - **FR-261** 结构同步脚本（P1）：由 diff 按用户选定方向生成可审阅 SQL（CREATE/DROP/ALTER/索引/约束），确认后才在目标连接执行。v0.6 **不做数据拷贝 / 行级同步**。跨 driver 禁止生成执行脚本。
@@ -370,7 +370,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.7 归档](../memory-bank/progress.md#v07-已交付周计划归档)。
 
-> **实现状态（2026-08-24）**：三项 FR 编码与单测已完成；GUI/RC 由用户验收。
+> **实现状态（2026-08-24，已随 v0.7.0 发布）**：三项 FR 编码与单测已完成；`v0.7.0` 已于同日正式发布。
 
 - **FR-266** 双连接表级数据拷贝（P0）：两条已打开、同方言连接之间按表拷贝行。源侧分页读取，目标侧参数化批量插入（复用 `bulk_insert_rows`）。默认追加；若先清空目标必须手输目标表名并预览语句。跨 driver / 未打开连接拒绝。不做双向同步或冲突合并。
 - **FR-262** MySQL 用户与权限（P1）：列出账号与授权摘要（不含密码哈希），变更生成 GRANT/REVOKE/CREATE USER SQL 并二次确认。不引入 tiny-sql 应用账号。PG 角色变更可降级为只读。
@@ -384,7 +384,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.8 归档](../memory-bank/progress.md#v08-已交付周计划归档)。
 
-> **实现状态（2026-08-24）**：六项 FR 编码与单测已完成；GUI/RC 由用户验收。
+> **实现状态（2026-08-26）**：六项 FR 编码与单测已完成；2026-08-25 追加 SQLite driver（`just check` 全绿：vitest 179 / db-driver 单测 47 + SQLite integration 23）；`v0.8.0-rc1` 已于 2026-08-26 发布（prerelease）。GUI/RC 正式切版由用户验收。
 
 - **FR-270** 连接只读开关（P0）：连接配置增加应用层 `readOnly`。打开后前端禁用写入口，后端所有写 command（含导入、恢复、拷贝目标、权限变更、ANALYZE、结构同步目标）返回 `error.connection.read_only`。不替代数据库账号权限。浏览、导出、备份导出、以只读连接为对比源仍可用。
 - **FR-271** 连接环境色 / 标签（P1）：`none | prod | staging | dev` 展示在列表、标题、tab 与破坏性确认框。不做自定义调色板，不按环境自动只读。
@@ -447,7 +447,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **NFR-041 SshTunnelError 稳定 i18n key**：每个错误变体的 i18n key 是公开 API 的一部分；后续版本只能加新 key、不能改已有 key（前端翻译表向后兼容）。
 
-**NFR-042 Driver 契约与多数据库扩展**：v0.2 已从真实 commands 调用面提取对象安全的最小 `Driver` 契约，覆盖 kind、ping、metadata（显式 database/schema scope）、query/取消与 close；`MySqlDriver` 与 `PostgresDriver` 均实现该契约。连接创建与方言专属操作（如 MySQL `CREATE DATABASE`）留在具体实现，保持契约紧凑。
+**NFR-042 Driver 契约与多数据库扩展**：v0.2 已从真实 commands 调用面提取对象安全的最小 `Driver` 契约，覆盖 kind、ping、metadata（显式 database/schema scope）、query/取消与 close；`MySqlDriver`、`PostgresDriver` 与 `SqliteDriver` 均实现该契约（v0.8 起三实现）。连接创建与方言专属操作（如 MySQL `CREATE DATABASE`）留在具体实现，保持契约紧凑。
 
 ---
 
@@ -457,7 +457,7 @@ v0.1 **不做**的事情，全部有明确理由：
 
 ### 5.1 数据库范围之外
 
-- **PostgreSQL / SQLite / Oracle / SQL Server / MongoDB / Redis**：v0.1 不实现；v0.2 增加 PostgreSQL，v0.8 增加 SQLite（本地文件库，不走 SSH 隧道），其余数据库仍不进入当前范围（NFR-042）。理由：v0.1 dogfooding 场景 100% MySQL。
+- **PostgreSQL / SQLite / Oracle / SQL Server / MongoDB / Redis**：v0.1 不实现；v0.2 增加 PostgreSQL，v0.8 已增加 SQLite（本地文件库，不走 SSH 隧道，`DriverKind::Sqlite` 文件型短路），其余数据库仍不进入当前范围（NFR-042）。理由：v0.1 dogfooding 场景 100% MySQL。
 - **MySQL 写操作的图形化编辑器**（点表格 cell 改值后写回）：FR-024 的 SQL 编辑器是 v0.1 写操作上限。理由：图形化编辑器需要 2-3 周额外工作量，60-75h 预算装不下。
 
 ### 5.2 平台范围之外
@@ -536,7 +536,7 @@ v0.1 **不做**的事情，全部有明确理由：
 | **TunnelLost** | SshTunnelError mid-session 变体，已建立的隧道因 keepalive 连续 3 次失败而断开（FR-014） |
 | **ChannelDropped** | SshTunnelError mid-session 变体，某跳 channel 被对端主动关闭（可能跳板重启），需人工重连 |
 | **AcceptLoopDied** | SshTunnelError mid-session 变体，某跳 accept loop panic（代码 bug），需上报 |
-| **control pool** | SQL 取消用的独立 MySQL 连接池（max=1，主 pool 之外、同一连接参数），专发 KILL QUERY |
+| **control pool** | SQL 取消用的独立连接池（max=1，主 pool 之外、同一连接参数），MySQL 发 KILL QUERY / PostgreSQL 调 pg_cancel_backend；SQLite 无服务端，改用连接内 progress handler 中断，无 control pool |
 | **direct-tcpip** | SSH 协议的 channel 类型，用于把 SSH session 内的一个 channel 转发到任意 TCP 地址 |
 | **dogfooding** | 作者自己 + 同事用自己的产品验证可用性 |
 | **caching_sha2_password** | MySQL 8.0 默认认证插件，sqlx 0.8 默认支持 |

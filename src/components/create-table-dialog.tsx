@@ -27,7 +27,7 @@ import { dbApi, translateError, type DriverKind } from "@/lib/tauri-api";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useSessionStore } from "@/stores/session-store";
 
-/** 双方言常用类型清单（下拉预选；也可自由输入，由白名单格式校验兜底） */
+/** 三种 driver 的常用类型清单（下拉预选；也可自由输入，由白名单格式校验兜底） */
 const MYSQL_TYPES = [
   "int",
   "bigint",
@@ -93,7 +93,7 @@ function emptyColumn(): CreateTableColumnInput {
 }
 
 /**
- * 新建表对话框（FR-251）：结构化列编辑 → 双方言 SQL 预览 → 二次确认后执行。
+ * 新建表对话框（FR-251）：结构化列编辑 → 按 driver 生成 SQL 预览 → 二次确认后执行。
  * 执行成功刷新 schema 树（metadata cache 失效由 refreshMetadata 处理）。
  */
 export function CreateTableDialog({

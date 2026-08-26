@@ -1,6 +1,6 @@
 //! tiny-sql Tauri 壳
 //!
-//! 组装层：把前端 IPC 转给 config（加密 store）/ db-driver（MySQL）/ ssh-multihop（隧道）。
+//! 组装层：把前端 IPC 转给 config（加密 store）/ db-driver（三数据库 Driver）/ ssh-multihop（隧道）。
 //! command 实现见 [`commands`]，全局状态见 [`state`]。
 
 #[cfg(desktop)]

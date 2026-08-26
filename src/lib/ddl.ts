@@ -108,7 +108,7 @@ function quoteLiteral(value: string): string {
 }
 
 /**
- * 生成双方言 CREATE TABLE SQL（FR-251）。
+ * 按 MySQL / PostgreSQL / SQLite 生成 CREATE TABLE SQL（FR-251）。
  * 调用前必须先过 [`validateCreateTable`]；默认值表达式原样拼入（SQL 预览给用户确认）。
  */
 export function buildCreateTableSql(input: CreateTableInput): string {
@@ -407,7 +407,7 @@ function mysqlColumnDef(
 }
 
 /**
- * 生成双方言列级 ALTER 语句序列（FR-253）。
+ * 按 MySQL / PostgreSQL / SQLite 生成列级 ALTER 语句序列（FR-253）。
  * 每条危险语义独立成句，不与 ADD COLUMN 合并。调用前须先过 [`validateAlterTable`]。
  */
 export function buildAlterTableStatements(input: AlterTableInput): AlterStatement[] {
@@ -611,7 +611,7 @@ export function validateCreateIndex(input: CreateIndexInput): string | null {
   return null;
 }
 
-/** 双方言 CREATE INDEX / MySQL ALTER TABLE ADD INDEX */
+/** 按 driver 生成 CREATE INDEX / MySQL ALTER TABLE ADD INDEX */
 export function buildCreateIndexSql(input: CreateIndexInput): string {
   const name = input.name.trim();
   if (input.driver === "mysql") {
@@ -629,7 +629,7 @@ export function buildCreateIndexSql(input: CreateIndexInput): string {
   return `CREATE ${unique}INDEX ${quoteIdent(name)} ON ${qualifiedTable(input)} (${cols});`;
 }
 
-/** 双方言 DROP INDEX（禁止用于主键） */
+/** 按 driver 生成 DROP INDEX（禁止用于主键） */
 export function buildDropIndexSql(input: DropObjectInput): string {
   if (input.driver === "mysql") {
     return `ALTER TABLE ${qualifiedTable(input)} DROP INDEX ${quoteMysqlIdent(input.name.trim())};`;

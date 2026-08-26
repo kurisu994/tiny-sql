@@ -2,9 +2,11 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-25
+**最后更新**：2026-08-26
 
 ## 当前状态
+
+**本轮：SQLite driver 随 v0.8.0-rc1 发布 + 文档按代码对齐（2026-08-26）**——`v0.8.0-rc1` 已发布（发布提交 `754f033`，prerelease 无 `latest.json`，不影响 v0.7.0 稳定版用户）；四文件版本号切到 `0.8.0-rc1`。按代码为准再对齐全部文档：三 driver（MySQL/PostgreSQL/SQLite）口径、SQLite 取消机制（progress handler，无 control pool）、command 仍各 54 个、测试快照（vitest 179 / db-driver 单测 47 + SQLite integration 23）、rc1 状态；稳定 Release 仍为 v0.7.0。
 
 **本轮：新增 SQLite driver（2026-08-25）**——db-driver 增加第三个实现 `SqliteDriver`（`crates/db-driver/src/sqlite.rs`），覆盖完整 `Driver` 契约 + `DriverSession`。关键设计三点：
 
@@ -114,7 +116,7 @@
 ## 活跃文件
 
 - `docs/PLAN.md`：只留 v0.4–v0.7 用户验收。
-- `docs/{ARCHITECTURE,REQUIREMENTS,ROADMAP}.md`、`README.md` / `README_EN.md`、`CHANGELOG.md`、`memory-bank/*`：以代码为准对齐 54 个 command 与 v0.7 已落地能力。
+- `docs/{ARCHITECTURE,REQUIREMENTS,ROADMAP}.md`、`README.md` / `README_EN.md`、`CHANGELOG.md`、`memory-bank/*`：以代码为准对齐 54 个 command、三 driver 与 v0.8/SQLite 已落地能力。
 - `crates/db-driver/src/lib.rs`：`MySqlDriver::list_constraints` 改为两条 information_schema 等值查询，避免结构页卡死。
 - `crates/db-driver/tests/integration.rs`：结构页 MySQL 元数据 3s 超时回归。
 - `src-tauri/src/security.rs`：主密码状态机、v1↔v2 迁移回滚、secrets map（FR-102）。
@@ -190,7 +192,7 @@
 
 ## 下一步（按优先级）
 
-1. GUI 验收 v0.8（只读 / 环境色 / 复制表 / 检查器 / RENAME / EXPLAIN 提示）。
+1. GUI 验收 v0.8（只读 / 环境色 / 复制表 / 检查器 / RENAME / EXPLAIN 提示）+ SQLite 全链路实测。
 2. 正式切 `v0.8.0` 仍由用户发。
 
 ## 阻塞 / 风险

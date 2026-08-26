@@ -4,9 +4,11 @@
 
 ## v0.8 发布检查清单
 
+> **v0.8.0-rc1 发布结果（2026-08-26）**：发布提交 `754f033`、tag `v0.8.0-rc1`；prerelease（非草稿，无 `latest.json`），不影响 v0.7.0 稳定版用户。四平台构建以 GitHub Actions 为准。
+
 ### v0.8 RC 前本地检查
 
-- `just check` 全绿。
+- `just check` 全绿（含 SQLite integration：临时文件库 23 条已并入默认测试）。
 - 只读连接的写 command 均返回 `error.connection.read_only`。
 - 旧连接缺 `readOnly` / `env` 字段仍能打开。
 
@@ -16,10 +18,12 @@
 - prod 标签出现在列表、标题与破坏性确认框。
 - 同库能预览并创建新表（若未降级）。
 - 单元格能看完整值；单列 FK 能跳转或已降级为只检查器。
+- SQLite 全链路：新建连接选文件 → 库树 / 结构 / 浏览编辑 / SQL 编辑器（SQLite 方言）/ CSV 导入 / dump 导出导入；`sqlite3` 官方备份（仅整库）与恢复；无账号权限视图（`error.privilege.unsupported`）。
 
 ### v0.8 正式发布追加条件
 
 - V8-T8.1 / T8.2 由作者验收。
+- rc1 已发布；GUI 实测通过后执行 `just release v0.8.0`。
 
 ## v0.7 发布检查清单
 

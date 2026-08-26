@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你对 tiny-sql 感兴趣！tiny-sql 是一个多级跳板机友好的 MySQL / PostgreSQL 桌面客户端，技术栈为 **Tauri 2 + Next.js 16 + Rust workspace**。本文档帮助你快速搭建环境并对齐协作约定。
+感谢你对 tiny-sql 感兴趣！tiny-sql 是一个多级跳板机友好的 MySQL / PostgreSQL / SQLite 桌面客户端，技术栈为 **Tauri 2 + Next.js 16 + Rust workspace**。本文档帮助你快速搭建环境并对齐协作约定。
 
 ## 环境准备
 
@@ -42,12 +42,14 @@ TINY_SQL_TEST_POSTGRES_URL=postgresql://postgres:password@127.0.0.1:5432/postgre
 
 然后运行 `just test-integration`（也可用 `just test-mysql-integration` / `just test-postgres-integration` 单独回归某一种数据库）。
 
+SQLite 不需要外部服务：`crates/db-driver/tests/sqlite_integration.rs` 用临时文件库，**不标 `#[ignore]`**，已并入默认 `just test`。
+
 ## 项目结构导读
 
 ```
 crates/
 ├── ssh-multihop/    # N 跳 SSH 隧道（russh），不依赖 Tauri，未来可独立 publish
-└── db-driver/       # MySQL / PostgreSQL driver（基于 sqlx）
+└── db-driver/       # MySQL / PostgreSQL / SQLite driver（基于 sqlx）
 
 src-tauri/           # Tauri 壳：src/lib.rs 为入口与 #[tauri::command]，tauri.conf.json 为配置
 src/                 # 前端源码（Next.js App Router），静态导出到 out/

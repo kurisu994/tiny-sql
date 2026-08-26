@@ -178,7 +178,7 @@ export const ERROR_ZH: Record<string, string> = {
   "error.share.invalid": "分享文件无效或已被篡改",
   "error.share.wrong_password": "分享口令错误",
   "error.share.io": "分享文件读写失败，请检查路径与权限",
-  "error.copy.cross_driver": "不能跨 MySQL / PostgreSQL 拷贝数据",
+  "error.copy.cross_driver": "不能跨数据库类型拷贝数据",
   "error.copy.no_mapped_columns": "没有同名列可以拷贝",
   "error.copy.target_mismatch": "手输的目标表名与实际目标不一致，已拒绝",
   "error.copy.cancelled": "数据拷贝已取消",
@@ -377,7 +377,7 @@ export interface DatabaseMeta {
   isCurrent: boolean;
 }
 
-/** schema 元信息；MySQL 返回与 database 同名项，PostgreSQL 为独立层级 */
+/** schema 元信息；MySQL 返回与 database 同名项，PostgreSQL 为独立层级，SQLite 返回空 */
 export interface SchemaMeta {
   name: string;
   isDefault: boolean;
@@ -416,7 +416,7 @@ export interface ConstraintMeta {
   /** "PRIMARY KEY" / "FOREIGN KEY" / "UNIQUE" / "CHECK" */
   constraintType: string;
   columns: string[];
-  /** 外键引用目标（MySQL）或约束定义文本（PostgreSQL） */
+  /** 外键引用目标或约束定义文本；具体格式由 driver 归一化 */
   reference: string | null;
 }
 

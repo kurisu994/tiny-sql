@@ -1,5 +1,5 @@
 # tiny-sql workspace 根
-# v0.1 三个成员：ssh-multihop（隧道）/ db-driver（MySQL）/ src-tauri（壳）
+# 三个成员：ssh-multihop（隧道）/ db-driver（三数据库 Driver）/ src-tauri（壳）
 [workspace]
 resolver = "2"
 members = ["crates/ssh-multihop", "crates/db-driver", "src-tauri"]

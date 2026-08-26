@@ -104,7 +104,7 @@ interface AlterTableDialogProps {
 }
 
 /**
- * 修改表对话框（FR-253）：回填现有列 → 双方言 ALTER 预览 → 二次确认后逐条执行。
+ * 修改表对话框（FR-253）：回填现有列 → 按 driver 生成 ALTER 预览 → 二次确认后逐条执行。
  * 不改主键；非主键列可 RENAME COLUMN。失败保留表单。
  */
 export function AlterTableDialog({

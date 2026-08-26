@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**Status: the latest stable GitHub Release is v0.7.0.** `main` also contains the v0.8 feature code (GUI/RC and the `v0.8.0` cut still pending). GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Status: the latest stable GitHub Release is v0.7.0; `main` has cut `v0.8.0-rc1` (incl. the SQLite driver), pending GUI/RC acceptance before the stable cut.** GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Why another SQL client
 
@@ -37,7 +37,7 @@ Built for personal use, usable by colleagues, and open source. Free of charge, n
 
 **SQL editor**
 
-- CodeMirror with dual-dialect highlighting, schema-aware completion, multi-statement execution and formatting; write-operation confirmation; cancellation via an independent control pool.
+- CodeMirror with per-driver dialect highlighting (MySQL / PostgreSQL / SQLite), schema-aware completion, multi-statement execution and formatting; write-operation confirmation; cancellation via an independent control pool for network drivers (SQLite uses its native progress handler).
 - Reliable transactions: `BEGIN` / `COMMIT` / `ROLLBACK` on an exclusive session.
 - SQL file open / save / recent files; SQL history (last 100 entries, encrypted at rest).
 
@@ -46,7 +46,7 @@ Built for personal use, usable by colleagues, and open source. Free of charge, n
 - Query result export to CSV / Excel (streamed server-side, distinguishing SQL NULL from empty strings).
 - Safe table editing: primary-key single tables only, dirty staging + single-transaction batch commit.
 - Structure view / DDL preview / create and alter table / index designer.
-- CSV import + SQL dump import/export; official mysqldump/pg_dump backup (local tools required).
+- CSV import + SQL dump import/export; official mysqldump/pg_dump/sqlite3 backup (local tools required).
 - Encrypted connection sharing; two-connection schema diff and reviewable sync SQL; read-only ER diagram.
 - Same-dialect table copy (append or truncate-then-insert; target name must be typed); MySQL privilege preview (PostgreSQL roles are read-only); EXPLAIN plan tree (ANALYZE requires confirmation).
 - Per-connection app-level read-only switch and env tags; clone table in the same database; cell inspector with FK jump; previewable RENAME COLUMN for non-PK columns.
@@ -119,7 +119,7 @@ just build-web    # build only the frontend (static export to out/)
 ```
 crates/                     # Rust workspace members (decoupled from Tauri, publishable independently in the future)
 ├── ssh-multihop/           # N-hop SSH tunneling (russh, Tauri-free)
-└── db-driver/              # database driver (object-safe Driver contract + MySQL/PostgreSQL impls)
+└── db-driver/              # database driver (object-safe Driver contract + MySQL/PostgreSQL/SQLite impls)
 
 src-tauri/                  # Tauri shell
 ├── src/
@@ -150,6 +150,8 @@ justfile                    # project command entry point
 > Download the current stable release from [v0.7.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.7.0) (assets appear after the cloud build finishes).
 
 v0.7.0 provides `.dmg` for **macOS (Apple Silicon + Intel)**, `.exe` for **Windows x64**, and `.AppImage` for **Linux x64**.
+
+`v0.8.0-rc1` has been published as a prerelease (incl. SQLite support); it requires manual download until the stable cut.
 
 Stable releases ship with `latest.json` and signed update packages on GitHub Releases; in-app auto-update only follows the latest stable release on GitHub. `v*-rc*`, beta, and alpha pre-releases still require manual download and verification.
 

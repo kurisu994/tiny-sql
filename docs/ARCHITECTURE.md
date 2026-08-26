@@ -2,7 +2,7 @@
 title: tiny-sql 架构设计
 version: 0.8.0
 status: awaiting-acceptance
-last_updated: 2026-08-24
+last_updated: 2026-08-26
 ---
 
 # tiny-sql 架构设计
@@ -293,7 +293,7 @@ src-tauri/src/
 | `react` 19.2.x | UI |
 | `@tauri-apps/api` 2.10.x | IPC + event |
 | `@tauri-apps/plugin-{process,dialog,updater}` 2.x | 重启应用 + 文件选择器 + 自动更新 |
-| `codemirror` + `@codemirror/lang-sql` / `lint` / `state` / `view` | SQL 编辑器、双方言高亮、schema/table 补全和错误 gutter |
+| `codemirror` + `@codemirror/lang-sql` / `lint` / `state` / `view` | SQL 编辑器、三种方言高亮（MySQL / PostgreSQL / SQLite）、schema/table 补全和错误 gutter |
 | `sql-formatter` ^15 | SQL 格式化（按连接方言） |
 | `react-virtuoso` ^4.18 | 1000 行/10w 行虚拟滚动 |
 | `zustand` ^5 | 全局状态 |
@@ -312,7 +312,7 @@ src-tauri/src/
 
 ### 2.5 Schema-aware SQL completion（v0.2）
 
-`src/lib/sql-completion.ts` 是 React/CodeMirror 组件之外的纯 metadata 适配层。编辑器按连接 driver 选择 `MySQL` 或 `PostgreSQL` dialect；MySQL 以 database、PostgreSQL 以 schema 作为 CodeMirror `defaultSchema`。用户在对象树展开过的列会按 table 累积在当前 session，CodeMirror 原生 schema completion 据此提供 column 与 alias 补全，列候选附带类型、nullable、key 和 comment。
+`src/lib/sql-completion.ts` 是 React/CodeMirror 组件之外的纯 metadata 适配层。编辑器按连接 driver 选择 `MySQL` / `PostgreSQL` / `SQLite` 方言；MySQL 以 database、PostgreSQL 以 schema 作为 CodeMirror `defaultSchema`（SQLite 无 schema 层级）。用户在对象树展开过的列会按 table 累积在当前 session，CodeMirror 原生 schema completion 据此提供 column 与 alias 补全，列候选附带类型、nullable、key 和 comment。
 
 JOIN 候选不读取或假造 FOREIGN KEY：只使用实际加载的列元数据，按 `target_id → target.id`、反向关系或同名 key/id 列做保守启发式。输入 `JOIN <prefix>` 时，自定义 completion source 返回 `target ON source.column = target.column` 片段；目标列元数据未加载或关系不明确时不提供候选。解析器跳过字符串/注释并支持 MySQL 反引号、PostgreSQL 双引号及 schema-qualified table。
 
@@ -645,7 +645,7 @@ pub enum DriverError {
 
 **PostgresDriver 实现**：位于独立 `src/postgres.rs`。显式连接使用 `PgConnectOptions::new_without_pgpass()`，不会在密码为空时静默读取用户 `~/.pgpass`；metadata 分别查询 `pg_database`、`pg_namespace`、`pg_class` 与 `pg_attribute`，保留 database/schema 两层语义。query 支持 PostgreSQL `TABLE` / `VALUES`、dollar-quoted body、数据修改 CTE 与 DML `RETURNING`；结果覆盖 NULL、日期时间、整数/浮点/NUMERIC、JSON/JSONB、文本与 BYTEA。后端契约与 AppState/Tauri/UI 已接线；真实 Tauri 直连和 1 跳 SSH 验收已通过（V2-T3.4）。
 
-**取消的独立 control pool**：两个 driver 都在主 pool 外持有 max=1 的 control pool。MySQL 记录 `CONNECTION_ID()` 后发 `KILL QUERY <id>`；PostgreSQL 记录 `pg_backend_pid()` 后由同账号调用 `pg_cancel_backend($1)`。取消或客户端无服务端 LIMIT 截断后，PostgreSQL 将执行连接标为 `close_on_drop`，避免未消费协议消息污染 pool。control pool 与主 pool 使用同一连接参数/隧道本地端口，但状态解耦，主 pool 满时仍能取消。
+**取消的独立 control pool（网络型 driver）**：MySQL 与 PostgreSQL 在主 pool 外各持有 max=1 的 control pool。MySQL 记录 `CONNECTION_ID()` 后发 `KILL QUERY <id>`；PostgreSQL 记录 `pg_backend_pid()` 后由同账号调用 `pg_cancel_backend($1)`。SQLite 没有服务端可发取消指令，改用连接内原生 progress handler（回调返回 `false` 即 `SQLITE_INTERRUPT`），**不持有 control pool**（见 §1.1）。取消或客户端无服务端 LIMIT 截断后，PostgreSQL 将执行连接标为 `close_on_drop`，避免未消费协议消息污染 pool。control pool 与主 pool 使用同一连接参数/隧道本地端口，但状态解耦，主 pool 满时仍能取消。
 
 **结果集防 OOM 三道闸**（FR-021/022）：(1) 拒多语句；读查询在方言允许时追加 `LIMIT <row_limit + 1>`。MySQL 遇到顶层 `LIMIT/FOR/LOCK/INTO/PROCEDURE` 不追加；PostgreSQL 遇到 `LIMIT/FOR/INTO/OFFSET/FETCH` 不追加，`TABLE`/`VALUES` 也按读查询处理。两边都不做 derived table 包装。(2) 后端用 sqlx stream 逐行取，不用 `fetch_all` 缓冲；(3) row_limit clamp 到 1..=100000，超出后返回 truncated，未服务端限流时通过原生 cancel 止损。SQL guard 会识别数据修改 CTE，不能用外层 SELECT 绕过写确认；PostgreSQL dollar-quoted body 内分号不误判为多语句。
 
@@ -676,7 +676,7 @@ impl OpenConnection {
    ssh_multihop::open(&hops, database_host, database_port, ctx)
    → 拿到 tunnel.local_addr()，运行时 host/port 改为 127.0.0.1:local_port
 2. 若直连：直接使用连接配置里的 host/port
-3. 按 DriverKind 创建 MySqlDriver 或 PostgresDriver，包装为 ActiveDriver
+3. 按 DriverKind 创建 MySqlDriver / PostgresDriver / SqliteDriver（文件型短路 host/port/SSH/SSL），包装为 ActiveDriver
 4. driver.ping().await? 确认隧道桥接 + 数据库认证成功
 5. 生成新的 session_id，AppState.connections.insert(id, OpenConnection { driver, tunnel, session_id })
 ```
@@ -1010,7 +1010,7 @@ v2 envelope（自描述 JSON）：{ "v": 2, "nonce": "<base64 12B>", "data": "<b
 ]
 ```
 
-`driver` 的稳定值为 `mysql` / `postgresql`。v0.1 旧记录缺少该字段时，反序列化只在内存中补为 `mysql`，启动读取不会重写 `connections.enc`；用户后续显式保存连接时才落成新格式。解密、JSON 或 driver 枚举迁移失败时直接返回错误，不覆盖原密文。
+`driver` 的稳定值为 `mysql` / `postgresql` / `sqlite`（SQLite 复用 `database` 字段存 `.db` 文件路径，host / port / 账号与 SSH / SSL 不参与）。v0.1 旧记录缺少该字段时，反序列化只在内存中补为 `mysql`，启动读取不会重写 `connections.enc`；用户后续显式保存连接时才落成新格式。解密、JSON 或 driver 枚举迁移失败时直接返回错误，不覆盖原密文。
 
 **读写与锁定语义**：读取按文件实际格式自动嗅探（`{` 开头且含 `"v":2` → v2），v1 文件在解锁后仍可读；写入跟随当前模式（v1 模式写 v1，v2 解锁写 v2）。Locked 状态下一切加密文件读写返回稳定 key `error.security.locked`。
 
@@ -1204,7 +1204,7 @@ interface SshHopRttPayload {
 interface StoredConnection {
   id: string;            // uuid
   name: string;
-  driver: "mysql" | "postgresql";
+  driver: "mysql" | "postgresql" | "sqlite";  // SQLite 时 database 存 .db 文件路径，host/port/账号与 ssh/ssl 不参与
   host: string;
   port: number;
   user: string;
@@ -1327,7 +1327,7 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 | crate | 重点 |
 |---|---|
 | `ssh-multihop` | SshTunnelError i18n key 稳定性 / hop_index 归因 / expand_home_path |
-| `db-driver` | 双 Driver 对象安全契约 / database-schema scope / 方言化 LIMIT 与写确认 / CTE、dollar quote、多语句 guard / 10w 行截断 / 双 control pool 原生取消 / JSON 等动态类型解码 / CREATE DATABASE 标识符校验 |
+| `db-driver` | 三 Driver 对象安全契约（MySQL / PostgreSQL / SQLite）/ database-schema scope / 方言化 LIMIT 与写确认 / CTE、dollar quote、多语句 guard / 10w 行截断 / 网络型 control pool 原生取消 + SQLite progress handler 中断 / JSON 等动态类型解码 / CREATE DATABASE 标识符校验 |
 | `src-tauri` | 加密 store round-trip / known_hosts.json 读写 / TOFU manager 超时清理 |
 
 ### 10.2 集成测试（不用 Docker，连用户本地数据库）
@@ -1337,10 +1337,11 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
   just test-mysql-integration
   just test-postgres-integration
   ```
-  - `just test-integration` 顺序执行两个 driver；任一 URL 缺失都明确失败，避免假绿。
+  - `just test-integration` 顺序执行两个网络型 driver；任一 URL 缺失都明确失败，避免假绿。
+  - SQLite 不需要外部服务：`crates/db-driver/tests/sqlite_integration.rs` 用临时文件库、**不标 `#[ignore]`**，已并入默认 `just test`。
 - 当前真实 MySQL 20 项用例覆盖 ping、四层 metadata（含结构页元数据快速回归）、NULL/日期/数值/JSON、写确认、`SELECT SLEEP(10)` 经独立 control pool 取消，以及 v0.4 编辑批量 DML（5）、bulk 导入（2）、dump 风格 SQL 往返（1）。
 - 当前真实 PostgreSQL 13 项用例覆盖 ping、四层 metadata、NULL/日期/数值/JSON、行数截断、写确认、`pg_sleep(10)` 原生取消及取消后 pool 恢复，以及 v0.4 编辑批量 DML（2）、bulk 导入（1）、dump 往返（1）。
-- **CI 不跑 integration**（无外部数据库服务器）；正式版前保留人工双 driver 回归。3 跳真实故障 / 断链 / 重连回归已在 v0.2/v0.3 dogfooding 中覆盖。
+- **CI 不跑 integration**（无外部数据库服务器）；正式版前保留人工双 driver 回归。SQLite integration 走临时文件库已并入默认测试。3 跳真实故障 / 断链 / 重连回归已在 v0.2/v0.3 dogfooding 中覆盖。
 
 ### 10.3 端到端测试
 
@@ -1374,7 +1375,7 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 ### 11.2 与 redis-desktop-client 的不同
 
 - tiny-sql 是 workspace；redis-desktop-client 是单 crate
-- tiny-sql 用对象安全 `Driver` 契约承载 `MySqlDriver` / `PostgresDriver`；redis-desktop-client 直接用 `redis` crate
+- tiny-sql 用对象安全 `Driver` 契约承载 `MySqlDriver` / `PostgresDriver` / `SqliteDriver`；redis-desktop-client 直接用 `redis` crate
 - tiny-sql 用纯 CSS 线性拓扑图展示本机、SSH hop 与 MySQL 状态；redis-desktop-client 无此组件
 - tiny-sql 加 SSH keepalive 60s + 3 次阈值（FR-014）；redis-desktop-client 仅靠 russh 3600s inactivity timeout
 
