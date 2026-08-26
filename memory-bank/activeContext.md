@@ -6,6 +6,8 @@
 
 ## 当前状态
 
+**本轮：feat/sqlite-driver 已并入 main（2026-08-26）**——SQLite driver（8 个提交：`cf456a5`~`1a1274e` + 文档对齐 `ddd3151`）fast-forward 合入 main（`754f033`→`ddd3151`）并推送；`origin/main` 与本地 main 同步，分支已与 main 内容一致。main 现为发布线：v0.8.0-rc1 + SQLite 三 driver。
+
 **本轮：SQLite driver 随 v0.8.0-rc1 发布 + 文档按代码对齐（2026-08-26）**——`v0.8.0-rc1` 已发布（发布提交 `754f033`，prerelease 无 `latest.json`，不影响 v0.7.0 稳定版用户）；四文件版本号切到 `0.8.0-rc1`。按代码为准再对齐全部文档：三 driver（MySQL/PostgreSQL/SQLite）口径、SQLite 取消机制（progress handler，无 control pool）、command 仍各 54 个、测试快照（vitest 179 / db-driver 单测 47 + SQLite integration 23）、rc1 状态；稳定 Release 仍为 v0.7.0。
 
 **本轮：新增 SQLite driver（2026-08-25）**——db-driver 增加第三个实现 `SqliteDriver`（`crates/db-driver/src/sqlite.rs`），覆盖完整 `Driver` 契约 + `DriverSession`。关键设计三点：
