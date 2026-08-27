@@ -10,7 +10,7 @@
 |---|---|---|
 | next | 16.1.6 | App Router + 静态导出（`output: export` → `out/`） |
 | react / react-dom | 19.2.3 | UI |
-| @tauri-apps/api | ^2.10.1 | IPC + event |
+| @tauri-apps/api | ^2.11.1 | IPC + event |
 | @tauri-apps/cli | ^2.10.0 (dev) | tauri 命令 |
 | tailwindcss + @tailwindcss/postcss | ^4 (dev) | 样式 |
 | typescript | ^5 (dev) | 类型 |

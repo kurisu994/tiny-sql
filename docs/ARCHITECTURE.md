@@ -291,7 +291,7 @@ src-tauri/src/
 |---|---|
 | `next` 16.1.6 | App Router |
 | `react` 19.2.x | UI |
-| `@tauri-apps/api` 2.10.x | IPC + event |
+| `@tauri-apps/api` 2.11.x | IPC + event |
 | `@tauri-apps/plugin-{process,dialog,updater}` 2.x | 重启应用 + 文件选择器 + 自动更新 |
 | `codemirror` + `@codemirror/lang-sql` / `lint` / `state` / `view` | SQL 编辑器、三种方言高亮（MySQL / PostgreSQL / SQLite）、schema/table 补全和错误 gutter |
 | `sql-formatter` ^15 | SQL 格式化（按连接方言） |
@@ -711,7 +711,7 @@ impl OpenConnection {
 | `db_import_dump` | `(id, database, schema?, path)` | `ImportDumpResult` | SQL dump 导入：流式分句逐条执行（FR-252）；失败返回语句序号 + 截断预览 |
 | `backup_probe_tools` | `(id, dump_path?, client_path?)` | `BackupProbeResult` | 探测官方备份/恢复工具（FR-260） |
 | `db_backup_export` | `(id, database, schema?, table?, path, dump_path?, query_id?)` | `BackupJobResult` | 官方工具导出备份，进度事件 `backup:progress` |
-| `db_backup_restore` | `(id, database, confirm_database, path, client_path?, query_id?)` | `BackupJobResult` | 官方工具恢复；库名不一致拒绝 |
+| `db_backup_restore` | `(id, database, confirm_database, schema?, path, client_path?, query_id?)` | `BackupJobResult` | 官方工具恢复；库名不一致拒绝 |
 | `connection_share_export` | `(ids, password, path, include_private_keys)` | `()` | 独立口令导出连接分享文件（FR-221） |
 | `connection_share_preview` | `(path, password)` | `SharePreviewResult` | 预览分享文件（无 secret） |
 | `connection_share_import` | `(path, password)` | `usize` | 导入分享连接，生成新 id |

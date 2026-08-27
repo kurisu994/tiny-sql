@@ -2,9 +2,11 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-26
+**最后更新**：2026-08-26（文档校准）
 
 ## 当前状态
+
+**本轮：文档与代码一致性复查（2026-08-26）**——按「以代码为准」复查全部文档与代码：54/54 command 前后端完全对应、Driver/DriverSession 契约、DriverError/SshTunnelError 变体、AppState 字段、事件契约（ssh:tofu-request / ssh:hop-status / ssh:hop-rtt / backup:progress / copy:progress / app:check-update）、keepalive 默认 60s/3 次、SQLite progress handler 取消、metadata cache 128 项/5min TTL、history 100 条/4000 字符、recent files 20 条、row_limit 10w、版本号 0.8.0-rc1 全部一致。仅发现两处文档过时并已修正：① `docs/ARCHITECTURE.md` §3.3 `db_backup_restore` 表格补 `schema` 参数（代码 `BackupRestoreInput` 实际含该字段，前端 backupRestore 也传）；② `docs/ARCHITECTURE.md` §2.3 与 `memory-bank/techContext.md` 的 `@tauri-apps/api` 版本 2.10.x → ^2.11.1（package.json 实际值）。
 
 **本轮：feat/sqlite-driver 已并入 main（2026-08-26）**——SQLite driver（8 个提交：`cf456a5`~`1a1274e` + 文档对齐 `ddd3151`）fast-forward 合入 main（`754f033`→`ddd3151`）并推送；`origin/main` 与本地 main 同步，分支已与 main 内容一致。main 现为发布线：v0.8.0-rc1 + SQLite 三 driver。
 
