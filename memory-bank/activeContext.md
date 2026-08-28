@@ -13,7 +13,7 @@
 3. **关掉写确认必须仍传 `allowWrite: true`**：`needsWriteConfirmation` 的返回值同时用于「弹确认」和「allowWrite 传后端」，若简单跳过判定会让写操作反而被后端拒。因此包装成 `confirmWriteOp`：关掉设置时直接返回 true 放行。只读连接拦截与后端 `allow_write` 护栏不受影响；导出那处的 `needsWriteConfirmation`（只读能力限制）不受设置影响。
 4. **不引入新 UI 依赖**：开关用原生 `input[type=checkbox]`、下拉用原生 `select` 配 Tailwind（与 browse-view 分页下拉一致），沿用已有 shadcn Dialog/Tabs/Button；安全 Tab 的主密码入口先关设置弹窗再开安全弹窗，避免两层 Dialog 抢焦点。
 
-5. **更新代理（追加）**：设置项 `updateProxyEnabled` + `updateProxy` 传给 `@tauri-apps/plugin-updater` 的 `check({ proxy })`。查过插件源码（`updater.rs:461` check、`:674` download、`:554` Update 继承 proxy）：**代理必须在 check 时传入**，下载复用 Update 上的同一份配置，所以 `updateApi.downloadAndInstall` 内部那次 check 也要带 proxy，否则只有检查走代理、下载走直连。非法地址不阻止保存（用户可能输一半），由 `effectiveProxy()` 在使用点兜底成直连，UI 标红说明「仍走直连」。
+5. **更新代理（追加）**：设置项 `updateProxy` 传给 `@tauri-apps/plugin-updater` 的 `check({ proxy })`。查过插件源码（`updater.rs:461` check、`:674` download、`:554` Update 继承 proxy）：**代理必须在 check 时传入**，下载复用 Update 上的同一份配置，所以 `updateApi.downloadAndInstall` 内部那次 check 也要带 proxy，否则只有检查走代理、下载走直连。代理输入框是本弹窗唯一不即时生效的控件（用户要求）：地址按草稿维护，点 ✓ 才校验并写入 store，点 ✕ 回滚到已保存值（Enter / Esc 等价）——边输边存会不断落下半截的无效地址。曾做过「启用勾选 + 禁用输入框」的版本，用户改为输入框常驻 + 内嵌 ✓/✕，故 `updateProxyEnabled` 字段已移除，空地址即直连。`effectiveProxy()` 仍在使用点对历史非法值兜底成直连。
 
 5.1 **socks5 支持靠 Cargo feature 统一打开（易被误删的隐式依赖）**：`tauri-plugin-updater 2.10.1` 的 reqwest 只启用 `json` + `stream`，插件也没暴露 socks feature。解法是 `src-tauri/Cargo.toml` 显式依赖 `reqwest = { version = "0.13", default-features = false, features = ["socks"] }`——本 crate 不调用它，纯粹为 feature 统一。**Cargo.lock 只多一行**（socks 实现内置于 reqwest 的 `connect.rs mod socks`，零新增 crate）。缺这条依赖时 reqwest **不报错**，而是把 `socks5://` 当普通 HTTP 代理发 CONNECT（`connect.rs:786` 的 socks 分派整段被 cfg 掉），用户只看到更新失败。
 
