@@ -487,16 +487,20 @@ function initialHopStatuses(
 
 function connectedHopStatuses(
   connection?: StoredConnection | null,
+  current?: Record<number, TopologyHopStatus>,
 ): Record<number, TopologyHopStatus> {
   if (!connection?.ssh.enabled) return {};
+  // 连接收尾只把跳状态置为 connected；已到达的 RTT 采样必须保留，
+  // 否则首个 ssh:hop-rtt 事件（隧道建立后 1s 发出）会被这里冲回 idle，
+  // 延迟标签要等下一个采样周期才出现。
   return Object.fromEntries(
     connection.ssh.hops.map((_, index) => [
       index,
       {
         status: "connected" as HopRuntimeStatus,
         reason: null,
-        rttState: "idle" as const,
-        rttMs: null,
+        rttState: current?.[index]?.rttState ?? ("idle" as const),
+        rttMs: current?.[index]?.rttMs ?? null,
       },
     ]),
   );
@@ -741,7 +745,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         refreshingMetadata: false,
         loadingData: false,
         ...initialTabs(),
-        hopStatuses: connectedHopStatuses(connection ?? get().activeConnection),
+        hopStatuses: connectedHopStatuses(
+          connection ?? get().activeConnection,
+          get().hopStatuses,
+        ),
       });
     } catch (e) {
       if (!isCurrentSessionRequest(requestEpoch)) return;
@@ -811,7 +818,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         runtimeSessionId: openedSessionId,
         status: "connected",
         databases,
-        hopStatuses: connectedHopStatuses(current),
+        hopStatuses: connectedHopStatuses(current, get().hopStatuses),
       });
     } catch (e) {
       if (!isCurrentSessionRequest(requestEpoch)) return;

@@ -49,7 +49,9 @@ const DEFAULT_KEEPALIVE_FAILURE_THRESHOLD: usize = 3;
 const KEEPALIVE_MONITOR_POLL: Duration = Duration::from_secs(20);
 
 /// SSH 协议 RTT 采样间隔；低频采样避免给多跳堡垒机制造额外噪声。
-const RTT_SAMPLE_INTERVAL: Duration = Duration::from_secs(10);
+/// 首个采样事件常被前端连接流程的守卫/初始化吞掉，间隔别太长，
+/// 否则延迟标签要在连接后很久才出现。
+const RTT_SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// 首次采样延迟；隧道和数据库握手完成后再开始，不进入连接关键路径。
 const RTT_INITIAL_DELAY: Duration = Duration::from_secs(1);

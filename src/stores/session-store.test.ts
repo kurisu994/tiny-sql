@@ -668,6 +668,52 @@ describe("session-store", () => {
     });
   });
 
+  it("open 收尾不冲掉连接窗口内已到达的 SSH RTT 采样", async () => {
+    const connection = sampleConnection("mysql");
+    connection.ssh = {
+      enabled: true,
+      hops: [
+        {
+          host: "hop-1",
+          port: 22,
+          username: "ops",
+          authType: "password",
+          password: "x",
+          privateKeyPath: null,
+        },
+      ],
+    };
+    const databases = deferred<unknown>();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "connection_open") return Promise.resolve("session-1");
+      if (cmd === "db_list_databases") return databases.promise;
+      return Promise.resolve(undefined);
+    });
+
+    const opening = useSessionStore.getState().open("c1", undefined, connection);
+    // 等 connection_open 返回、runtimeSessionId 设置后，
+    // 在 listDatabases 挂起期间注入首个 RTT 事件（真实场景隧道建立 1s 后发出）
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("db_list_databases", expect.anything());
+    });
+    useSessionStore.getState().markHopRtt({
+      connectionId: "c1",
+      sessionId: "session-1",
+      hopIndex: 0,
+      state: "measured",
+      rttMs: 12.6,
+    });
+    databases.resolve([{ name: "app", isCurrent: true }]);
+    await opening;
+
+    expect(useSessionStore.getState().hopStatuses[0]).toEqual({
+      status: "connected",
+      reason: null,
+      rttState: "measured",
+      rttMs: 12.6,
+    });
+  });
+
   it("重连后旧查询的迟到结果不能覆盖新会话", async () => {
     const query = deferred<unknown>();
     const connection = sampleConnection("mysql");
