@@ -2,7 +2,7 @@
 title: tiny-sql 架构设计
 version: 0.8.0
 status: awaiting-acceptance
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 ---
 
 # tiny-sql 架构设计
@@ -966,6 +966,8 @@ sqlx::MySqlPool (max_connections = 5)
 
 ## 5. 加密 store 设计
 
+> 应用纯 UI 偏好（设置弹窗：自动检查更新 / 更新代理 / 默认分页 / 编辑器字号 / 写确认开关）**不走**本加密 store——它们是前端偏好，落 localStorage 键 `tiny-sql:settings`（见 `src/stores/settings-store.ts`），不含密钥与连接信息。
+
 ### 5.1 连接配置加密
 
 **目的**：用户的 host/user/password/private_key_path/SshHop 数组不能明文落盘。
@@ -1003,7 +1005,7 @@ v2 envelope（自描述 JSON）：{ "v": 2, "nonce": "<base64 12B>", "data": "<b
     "host": "...", "port": 3306, "user": "...", "password": "...", "database": "...",
     "ssh": { "enabled": true, "hops": [ { "host": "...", "port": 22, "username": "...", "authType": "privateKey", "privateKeyPath": "~/.ssh/id_rsa", "password": "..." }, ... ] },
     "ssl": { "mode": "disabled", "caPath": "", "clientCertPath": "", "clientKeyPath": "" },
-    "advanced": { "keepAliveEnabled": false, "connectTimeoutSeconds": 30, "readTimeoutSeconds": 30, "writeTimeoutSeconds": 30, "compressionEnabled": false, "autoConnect": false, ... },
+    "advanced": { "keepAliveEnabled": true, "keepAliveIntervalSeconds": 60, "keepAliveFailureThreshold": 3, "connectTimeoutEnabled": true, "connectTimeoutSeconds": 30, "readTimeoutEnabled": false, "readTimeoutSeconds": 30, "writeTimeoutEnabled": true, "writeTimeoutSeconds": 30, "compressionEnabled": false, "autoConnect": false, ... },
     "lastUsedAt": "2026-06-20T10:00:00Z"
   },
   ...
@@ -1264,7 +1266,7 @@ interface AdvancedConfig {
 
 - tiny-sql 不上传连接配置、SQL、查询结果或错误日志。
 - 业务通信只访问用户配置的 SSH/MySQL 目标；自动更新只访问 GitHub Release 的正式版更新清单。
-- 更新可选走用户在设置里配置的代理（`check({ proxy })`，检查与下载共用），支持 http / https / socks4 / socks5 / socks5h；socks 一族依赖 `src-tauri/Cargo.toml` 显式依赖 reqwest 并启用 `socks` feature（tauri-plugin-updater 自身不开）。该代理只作用于更新链路，数据库连接与 SSH 隧道不经过它。
+- 更新可选走用户在设置里配置的代理（`check({ proxy })`，检查与下载共用），支持 http / https / socks4 / socks4a / socks5 / socks5h；socks 一族依赖 `src-tauri/Cargo.toml` 显式依赖 reqwest 并启用 `socks` feature（tauri-plugin-updater 自身不开）。该代理只作用于更新链路，数据库连接与 SSH 隧道不经过它。
 - 无遥测、无错误上报。
 - 这是开源信任的前提
 
@@ -1310,7 +1312,7 @@ FR-024 描述。实现为**首 token 白名单分类**（前后端同一套规�
 
 ## 9. 性能与扩展性预期
 
-| 维度 | 现状（v0.4） |
+| 维度 | 现状（v0.8） |
 |---|---|
 | schema 数量 | 无硬上限；128 项 LRU cache + 对象搜索（v0.2 FR-108 / v0.3 FR-241） |
 | 表数量/schema | 服务端筛选 / 排序 / 分页浏览（v0.3 FR-242） |

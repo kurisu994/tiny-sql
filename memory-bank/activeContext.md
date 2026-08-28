@@ -2,11 +2,13 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-28（新增应用设置）
+**最后更新**：2026-08-28（设置弹窗 + 全量文档按代码核对）
 
 ## 当前状态
 
-**本轮：应用菜单新增「Settings...」设置弹窗（2026-08-28）**——macOS 应用菜单在「Check for Updates...」下方插入 `Settings...`（`⌘,`，`src-tauri/src/lib.rs` 的 `setup_app_menu`，index 2），点击 emit `app:open-settings`，前端 `page.tsx` 监听后打开 `SettingsDialog`。四个决策：
+**本轮：全量文档按代码再核对（2026-08-28）**——用户要求以实际代码为准校对全部文档。核对结论：54/54 command、Driver/DriverSession 契约、DriverError/SshTunnelError 变体、AppState 字段、事件契约（含 `app:open-settings`）、keepalive 60s/3 次、metadata cache 128/5min、history 100 条/4000 字符、recent files 20 条、row_limit 10w、sqlx 0.8.6 / russh 0.54 全部一致。修正的文档偏差：① 版本号 rc1 → rc2（tag `v0.8.0-rc2` / 提交 `53c5e5a`）同步到 README/README_EN/PLAN/ROADMAP/REQUIREMENTS/RELEASE_CHECKLIST/techContext/progress；② NFR-015 写确认改为「设置可关闭（默认开）」，NFR-022 改按现状（tauri-plugin-log 仅 debug 启用、无「打开日志目录」UI），NFR-014 补更新代理引用；③ ARCHITECTURE §8.1 代理协议补 socks4a、§1.1 示例 advanced 默认值对齐代码（keepAliveEnabled=true、writeTimeoutEnabled=true 等）、§9 现状版本改 v0.8、§5 补设置偏好 localStorage 说明；④ techContext 事件补 `app:open-settings`、前端依赖版本校准（lucide-react ^1.34.0 / radix-ui ^1.6.7 / virtuoso ^4.18.12 / codemirror state ^6.7.1 / view ^6.43.9 / cli ^2.11.4）、关键配置事实补 `tiny-sql:settings`；⑤ CHANGELOG 代理协议补 socks4a；⑥ db-driver / src-tauri 的 Cargo.toml description 改三 driver 口径。
+
+**上一轮：应用菜单新增「Settings...」设置弹窗（2026-08-28）**——macOS 应用菜单在「Check for Updates...」下方插入 `Settings...`（`⌘,`，`src-tauri/src/lib.rs` 的 `setup_app_menu`，index 2），点击 emit `app:open-settings`，前端 `page.tsx` 监听后打开 `SettingsDialog`。四个决策：
 
 1. **偏好存 localStorage 而非后端加密 store**：设置项全是纯 UI 偏好（无密钥 / 连接信息），与 `column-widths` 同策略，不新增 Rust command 与磁盘格式；键名 `tiny-sql:settings`，逐字段 sanitize，损坏或越界只回落该字段。
 2. **每项都真实接线，不做摆设开关**：`autoCheckUpdate` → `use-update-checker` 的自动检查 effect；`defaultPageSize` → `session-store` 新建 browse tab 的初始 pageSize（原硬编码 1000）；`editorFontSize` → CSS 变量 `--tiny-sql-editor-font-size`（CodeMirror 主题读 `var()`，改字号不重建编辑器实例）；`confirmWrite` → `schema-browser` 的 `confirmWriteOp` 包装。

@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**Status: the latest stable GitHub Release is v0.7.0; `main` has cut `v0.8.0-rc1` (incl. the SQLite driver), pending GUI/RC acceptance before the stable cut.** GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Status: the latest stable GitHub Release is v0.7.0; `main` has cut `v0.8.0-rc2` (incl. the SQLite driver), pending GUI/RC acceptance before the stable cut.** GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Why another SQL client
 
@@ -50,6 +50,7 @@ Built for personal use, usable by colleagues, and open source. Free of charge, n
 - Encrypted connection sharing; two-connection schema diff and reviewable sync SQL; read-only ER diagram.
 - Same-dialect table copy (append or truncate-then-insert; target name must be typed); MySQL privilege preview (PostgreSQL roles are read-only); EXPLAIN plan tree (ANALYZE requires confirmation).
 - Per-connection app-level read-only switch and env tags; clone table in the same database; cell inspector with FK jump; previewable RENAME COLUMN for non-PK columns.
+- Settings dialog (macOS menu `⌘,`): auto-check for updates, update proxy, default page size for data browsing, SQL editor font size, write-confirmation toggle, and a master-password entry; changes take effect immediately.
 
 **Security & distribution**
 
@@ -151,7 +152,7 @@ justfile                    # project command entry point
 
 v0.7.0 provides `.dmg` for **macOS (Apple Silicon + Intel)**, `.exe` for **Windows x64**, and `.AppImage` for **Linux x64**.
 
-`v0.8.0-rc1` has been published as a prerelease (incl. SQLite support); it requires manual download until the stable cut.
+`v0.8.0-rc2` has been published as a prerelease (incl. SQLite support); it requires manual download until the stable cut.
 
 Stable releases ship with `latest.json` and signed update packages on GitHub Releases; in-app auto-update only follows the latest stable release on GitHub. `v*-rc*`, beta, and alpha pre-releases still require manual download and verification.
 

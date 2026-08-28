@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：稳定 Release 为 v0.7.0；main 已切 `v0.8.0-rc1`（含 SQLite driver），待 GUI/RC 验收后正式发布。** GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：稳定 Release 为 v0.7.0；main 已切 `v0.8.0-rc2`（含 SQLite driver），待 GUI/RC 验收后正式发布。** GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -48,6 +48,7 @@ tiny-sql 把每一跳都当成 UI 上的一等公民：
 - 加密分享连接（独立口令）；双连接结构对比与可审阅同步 SQL；只读 ER 关系图。
 - 同方言表数据拷贝（追加或先清空再插入，须手输目标表）；MySQL 权限预览（PG 角色只读）；EXPLAIN 计划树（ANALYZE 需确认）。
 - 连接可设应用只读与生产/预发/开发标签；同库复制为新表；结果格检查器与外键跳转；非主键列可预览重命名。
+- 应用设置弹窗（macOS 菜单 `⌘,`）：自动检查更新、更新代理、数据浏览默认每页行数、SQL 编辑器字号、写操作二次确认开关与主密码管理入口，改动即时生效。
 
 **安全与分发**
 
@@ -149,7 +150,7 @@ justfile                    # 项目命令入口
 
 v0.7.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
 
-`v0.8.0-rc1` 已发布为 prerelease（含 SQLite 支持），正式版发布前需手动下载验证。
+`v0.8.0-rc2` 已发布为 prerelease（含 SQLite 支持），正式版发布前需手动下载验证。
 
 正式版会在 GitHub Release 中附带 `latest.json` 与签名更新包，应用内自动更新只跟随 GitHub 的 latest 正式版。`v*-rc*`、beta、alpha 预发布版本仍需手动下载验证。
 

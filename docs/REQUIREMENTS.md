@@ -2,14 +2,14 @@
 title: tiny-sql 需求文档
 version: 0.8.0
 status: awaiting-acceptance
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 ---
 
 # tiny-sql 需求文档
 
 > 配套文档：[PLAN.md](./PLAN.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [ROADMAP.md](./ROADMAP.md)
 
-> **实现快照（2026-08-26）**：四文件版本号已切到 `v0.8.0-rc1`（tag `v0.8.0-rc1`）；GitHub 稳定 Release 仍为 `v0.7.0`。main 含 v0.8 全部功能编码与 SQLite driver（前后端仍各 54 个 command，v0.8 与 SQLite 均未新增 command）。v0.8 范围见 §3.8，SQLite 见 §5.1。
+> **实现快照（2026-08-28）**：四文件版本号已切到 `v0.8.0-rc2`（tag `v0.8.0-rc2`，2026-08-28）；GitHub 稳定 Release 仍为 `v0.7.0`。main 含 v0.8 全部功能编码、SQLite driver 与应用设置弹窗（前后端仍各 54 个 command，v0.8 / SQLite / 设置均未新增 command）。v0.8 范围见 §3.8，SQLite 见 §5.1。
 
 ## 1. 项目愿景
 
@@ -274,7 +274,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 - 接入 `tauri-plugin-updater`，为 macOS / Windows / Linux 构建 updater artifact 与 `.sig` 更新包。
 - tag `v0.1.0` 正式版发布时生成 GitHub Release `latest.json`；`v*-rc*` / beta / alpha 不生成 `latest.json`，不作为自动更新源。
-- 应用启动后每日检查一次正式版更新，macOS 应用菜单支持手动检查。
+- 应用启动约 5 秒后检查一次正式版更新，此后每 24 小时检查一次（v0.8 起可在设置弹窗关闭自动检查）；macOS 应用菜单与设置弹窗「立即检查」均支持手动检查。
 - 发现更新后展示版本号、release notes、下载进度；安装完成后提示重启。
 - **验收标准**：
   - 从旧正式版手动检查能发现新正式版。
@@ -384,7 +384,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.8 归档](../memory-bank/progress.md#v08-已交付周计划归档)。
 
-> **实现状态（2026-08-26）**：六项 FR 编码与单测已完成；2026-08-25 追加 SQLite driver（`just check` 全绿：vitest 179 / db-driver 单测 47 + SQLite integration 23）；`v0.8.0-rc1` 已于 2026-08-26 发布（prerelease）。GUI/RC 正式切版由用户验收。
+> **实现状态（2026-08-28）**：六项 FR 编码与单测已完成；2026-08-25 追加 SQLite driver；2026-08-26 发布 `v0.8.0-rc1`；2026-08-28 追加应用设置弹窗（localStorage 偏好，非 FR 项）并发布 `v0.8.0-rc2`（prerelease，`just check` 全绿：vitest 190 / db-driver 单测 47 + SQLite integration 23）。GUI/RC 正式切版由用户验收。
 
 - **FR-270** 连接只读开关（P0）：连接配置增加应用层 `readOnly`。打开后前端禁用写入口，后端所有写 command（含导入、恢复、拷贝目标、权限变更、ANALYZE、结构同步目标）返回 `error.connection.read_only`。不替代数据库账号权限。浏览、导出、备份导出、以只读连接为对比源仍可用。
 - **FR-271** 连接环境色 / 标签（P1）：`none | prod | staging | dev` 展示在列表、标题、tab 与破坏性确认框。不做自定义调色板，不按环境自动只读。
@@ -421,9 +421,9 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **NFR-013 host key 变更硬拒绝**：已信任主机的公钥指纹变化时硬拒绝连接（不弹"忽略"按钮），UI 显示明确的 MITM 警告（i18n key `error.ssh.host_key_mismatch`）。
 
-**NFR-014 仅本地业务通信**：tiny-sql 不上传连接配置、SQL、查询结果或错误日志；业务通信只访问用户配置的 SSH/MySQL 目标。自动更新只访问 GitHub Release 的正式版更新清单；无遥测、无错误上报。
+**NFR-014 仅本地业务通信**：tiny-sql 不上传连接配置、SQL、查询结果或错误日志；业务通信只访问用户配置的 SSH/MySQL 目标。自动更新只访问 GitHub Release 的正式版更新清单，且可经用户设置的代理（见 [ARCHITECTURE §8.1](./ARCHITECTURE.md#81-仅本地业务通信)）；无遥测、无错误上报。
 
-**NFR-015 SQL 写操作二次确认**：FR-024 描述的只读保护是默认开启的，无法在 UI 上关闭（v0.2 可加"已知风险，永久关闭"开关，但 v0.1 不留口子）。
+**NFR-015 SQL 写操作二次确认**：FR-024 描述的写操作二次确认**默认开启**；v0.8 起可在设置弹窗关闭（仅影响确认弹窗），关闭后写语句直接执行——「应用只读」连接与后端 `allow_write` 护栏不受影响。
 
 ### 4.3 可观测性
 
@@ -431,7 +431,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 **NFR-021 错误消息可读**：所有用户可见的错误用中文 + 具体上下文。禁止显示原始 Rust 错误（如 `Custom { kind: ConnectionRefused, error: ... }`）。
 
-**NFR-022 日志可导出**：`tauri-plugin-log` 写日志到本地文件，用户能从设置页"打开日志目录"。
+**NFR-022 日志可导出**：`tauri-plugin-log` 仅在 debug 构建启用（Info 级别，`src-tauri/src/lib.rs` 的 `cfg!(debug_assertions)` 分支），当前**未提供**「打开日志目录」UI 入口。
 
 ### 4.4 兼容性
 
@@ -518,7 +518,7 @@ v0.1 **不做**的事情，全部有明确理由：
 - [x] FR-001 ~ FR-042 标 P0 的需求验收完成；已知实现边界已写入 v0.1.0 Release notes 与 PLAN
 - [x] NFR-001 ~ NFR-005 性能指标实测达标
 - [x] NFR-010 ~ NFR-015 安全检查通过（含明文扫描）
-- [x] NFR-020 ~ NFR-022 可观测性达标
+- [x] NFR-020 ~ NFR-021 可观测性达标；NFR-022 已按代码现状收窄（见 §4.3，无「打开日志目录」UI）
 - [x] FR-041 dogfooding：作者 + 2 同事 × 1 周 × 0 数据丢失
 - [x] README 含中文“右键打开”说明；不要求额外录制 GIF
 - [x] CHANGELOG 0.1.0 已写

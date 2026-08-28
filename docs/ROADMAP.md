@@ -2,7 +2,7 @@
 title: tiny-sql 路线图
 version: 0.8.0
 status: awaiting-acceptance
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 ---
 
 # tiny-sql 路线图
@@ -24,7 +24,7 @@ v0.3  ✅ 已发布（2026-08-22）── 查询工作台 + 元数据检索 + �
 v0.4–v0.7  ✅ 已打进 v0.7.0（2026-08-24）── 表格编辑 / 结构变更 / 官方备份 / 对比拷贝 / 权限 / EXPLAIN
    │
    ▼
-v0.8  🚧 rc1 已发布（2026-08-26），待 GUI/RC 验收与正式切版 ── 连接只读 + 环境色 + 复制新表 / 单元格与 FK / RENAME / EXPLAIN 提示 + SQLite driver
+v0.8  🚧 rc2 已发布（2026-08-28），待 GUI/RC 验收与正式切版 ── 连接只读 + 环境色 + 复制新表 / 单元格与 FK / RENAME / EXPLAIN 提示 + SQLite driver + 应用设置弹窗
    │
    ▼
 v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
@@ -161,11 +161,11 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 | FR-262 | MySQL 用户与权限 | P1 | 只管理数据库权限；密码哈希不进前端；PG 变更可降级 |
 | FR-222 | EXPLAIN 可读化 | P1 | 查询 tab 解释计划；ANALYZE 单独确认；不做监控采集 |
 
-### v0.8 — 防连错与查询补齐（rc1 已发布，待验收）
+### v0.8 — 防连错与查询补齐（rc2 已发布，待验收）
 
 详细任务历史见 [progress.md v0.8 归档](../memory-bank/progress.md#v08-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
-**当前进度**：2026-08-24 六项 FR 编码完成；2026-08-25 追加 SQLite driver（三实现落地，`just check` 全绿：vitest 179 / db-driver 单测 47 + SQLite integration 23）；`v0.8.0-rc1` 已于 2026-08-26 发布（prerelease，四平台构建成功，无 `latest.json`）。待 GUI 实测与正式切版。
+**当前进度**：2026-08-24 六项 FR 编码完成；2026-08-25 追加 SQLite driver（三实现落地）；2026-08-26 发布 `v0.8.0-rc1`；2026-08-28 新增应用设置弹窗（`src/stores/settings-store.ts` + `src/components/settings-dialog.tsx`，localStorage 偏好，无新 Rust command）并发布 `v0.8.0-rc2`（prerelease，四平台构建成功，无 `latest.json`）。`just check` 全绿：vitest 190 / db-driver 单测 47 + SQLite integration 23。待 GUI 实测与正式切版。
 
 | ID | 功能 | 优先级 | 范围边界 |
 |---|---|---|---|

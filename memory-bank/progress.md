@@ -14,7 +14,7 @@
 | v0.5 | ✅ 随 v0.7.0 正式发布 | FR-253 / FR-260 / FR-221 |
 | v0.6 | ✅ 随 v0.7.0 正式发布 | FR-220 / FR-261 / FR-263 |
 | v0.7 | ✅ 正式版已发布 | 2026-08-24 `just release v0.7.0`（发布提交 `d2d3f5c`，tag `v0.7.0`）。范围含 v0.4–v0.7 全部已编码功能 |
-| v0.8 | 🚧 rc1 已发布 | 2026-08-24 完成 FR-270–275 与 `just check`（vitest 168 / app_lib 67）；2026-08-25 追加 SQLite driver（见下）后 `just check` 复跑全绿（vitest 179 / db-driver 单测 47 + SQLite integration 23）；2026-08-26 发布 `v0.8.0-rc1`（prerelease，四平台构建成功，无 `latest.json`）。待 GUI 实测与正式切版。双向同步 / BI / AI 挂 v0.9+ |
+| v0.8 | 🚧 rc2 已发布 | 2026-08-24 完成 FR-270–275 与 `just check`（vitest 168 / app_lib 67）；2026-08-25 追加 SQLite driver（见下）后 `just check` 复跑全绿（vitest 179 / db-driver 单测 47 + SQLite integration 23）；2026-08-26 发布 `v0.8.0-rc1`；2026-08-28 新增应用设置弹窗并发布 `v0.8.0-rc2`（prerelease，四平台构建成功，无 `latest.json`，vitest 190）。待 GUI 实测与正式切版。双向同步 / BI / AI 挂 v0.9+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 
@@ -177,6 +177,8 @@ V7-CP0 启动准入按用户要求跳过。
 > 注：`v0.1.0` tag 固定指向 `624b108`；后续发布状态文档提交只推进 `main`，不移动已发布 tag。
 
 ## 重大决策与架构变更记录
+
+- **2026-08-28 新增应用设置弹窗并发布 v0.8.0-rc2**：macOS 菜单新增 `Settings...`（⌘,）→ `app:open-settings` → 前端 `SettingsDialog`。五个偏好项（`autoCheckUpdate` / `updateProxy` / `confirmWrite` / `defaultPageSize` / `editorFontSize`）存 localStorage `tiny-sql:settings`，不新增 Rust command 与加密盘格式；`defaultPageSize` 接 session-store 新建浏览 tab 初始分页，`confirmWrite` 接 `confirmWriteOp` 包装（关掉仍传 `allowWrite: true`，后端护栏不受影响）。更新代理支持 http / https / socks4 / socks4a / socks5 / socks5h（`src-tauri/Cargo.toml` 显式依赖 reqwest 打开 socks feature；check 与下载共用同一代理）。四文件版本号切到 `0.8.0-rc2`（发布提交 `53c5e5a`）；按代码再对齐文档：NFR-015 写确认可关闭、NFR-022 无「打开日志目录」UI、代理协议补 socks4a、事件列表补 `app:open-settings`、包描述（db-driver / src-tauri Cargo.toml）改三 driver 口径。
 
 - **2026-08-26 发布 v0.8.0-rc1 并按代码再对齐文档**：四文件版本号切到 `0.8.0-rc1`（发布提交 `754f033`）；SQLite driver 随 rc1 进入 main，前后端 command 仍各 54 个（SQLite 未新增 command）。文档同步：README/README_EN/CONTRIBUTING 更新三 driver 与 rc1 状态；ARCHITECTURE 补 SQLite 取消机制（progress handler 无 control pool）、§7.5 schema 三 driver、§10 测试策略；REQUIREMENTS 实现快照与 NFR-042 更新三实现；ROADMAP/PLAN/RELEASE_CHECKLIST v0.8 段记录 rc1 事实；memory-bank 同步版本号与 driver 稳定值（`mysql` / `postgresql` / `sqlite`）。稳定 Release 仍为 v0.7.0。
 - **2026-08-24 PLAN 归档 v0.8 并再对齐文档**：已完成周计划移入本文件；PLAN 只留用户验收。代码事实为应用版本号 `0.7.0`、command 仍 54 个、v0.8 功能在 main 未切版。

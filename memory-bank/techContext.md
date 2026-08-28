@@ -11,16 +11,16 @@
 | next | 16.1.6 | App Router + 静态导出（`output: export` → `out/`） |
 | react / react-dom | 19.2.3 | UI |
 | @tauri-apps/api | ^2.11.1 | IPC + event |
-| @tauri-apps/cli | ^2.10.0 (dev) | tauri 命令 |
-| tailwindcss + @tailwindcss/postcss | ^4 (dev) | 样式 |
-| typescript | ^5 (dev) | 类型 |
-| radix-ui | ^1.6.0 | shadcn 组件底层 primitives（统一包） |
-| lucide-react | ^1.21.0 | 图标 |
+| @tauri-apps/cli | ^2.11.4 (dev) | tauri 命令 |
+| tailwindcss + @tailwindcss/postcss | ^4.3.3 (dev) | 样式 |
+| typescript | ^5.9.3 (dev) | 类型 |
+| radix-ui | ^1.6.7 | shadcn 组件底层 primitives（统一包） |
+| lucide-react | ^1.34.0 | 图标 |
 | class-variance-authority / clsx / tailwind-merge | ^0.7 / ^2.1 / ^3.6 | shadcn 组件 variant + `cn()` className 合并 |
 | tw-animate-css | ^1.4.0 | shadcn 弹窗 / 菜单动画 |
-| react-virtuoso | ^4.18.9 | 结果表格虚拟滚动 |
+| react-virtuoso | ^4.18.12 | 结果表格虚拟滚动 |
 | @tauri-apps/plugin-dialog | ^2.7.2 | 导出路径选择与证书文件浏览系统对话框 |
-| codemirror / @codemirror/* | codemirror ^6.0.2；lang-sql ^6.10.0；lint ^6.9.7；state ^6.7.0；view ^6.43.4 | SQL 编辑器、MySQL 高亮、基础 schema/table 补全和错误 gutter |
+| codemirror / @codemirror/* | codemirror ^6.0.2；lang-sql ^6.10.0；lint ^6.9.7；state ^6.7.1；view ^6.43.9 | SQL 编辑器、MySQL 高亮、基础 schema/table 补全和错误 gutter |
 
 > **已装**：`zustand` 5（状态）、`vitest` + `@testing-library/react`（前端单测）、`react-virtuoso`（虚拟滚动）、CodeMirror 6 SQL 编辑器、shadcn/ui 体系（`shadcn` CLI + `radix-ui` + `lucide-react` + `class-variance-authority` + `clsx` + `tailwind-merge` + `tw-animate-css`）。
 > **规划未装**：`i18next`/`react-i18next`、`sonner`（toast）、`playwright`（推迟）、`@xyflow/react`（拓扑图最终用纯 CSS）。
@@ -59,7 +59,7 @@
 | MSRV | 1.77.2 | `rust-version` |
 | Node | 见 `.nvmrc` | CI 用 Node 24 |
 | pnpm | 11+ | pnpm-workspace.yaml |
-| 应用版本 | 0.8.0-rc1 | package.json / src-tauri/Cargo.toml / tauri.conf.json（稳定 Release 仍为 `v0.7.0`，rc1 为 prerelease） |
+| 应用版本 | 0.8.0-rc2 | package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock（稳定 Release 仍为 `v0.7.0`，rc2 为 prerelease） |
 
 ## 构建命令（justfile，`set dotenv-load`）
 
@@ -99,6 +99,7 @@
 | 连接 driver 持久化值 | `mysql` / `postgresql` / `sqlite`；旧记录缺字段默认 `mysql`，兼容读取不主动重写密文。SQLite 复用 `database` 字段存数据库文件路径，`host` / `port` / `user` / `password` / `ssh` / `ssl` 均不参与 |
 | 连接只读 / 环境 | `readOnly` 缺省 false；`env` 为 `none` / `prod` / `staging` / `dev`（FR-270 / FR-271） |
 | known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
+| 应用偏好设置 | localStorage 键 `tiny-sql:settings`（纯 UI 偏好：`autoCheckUpdate` / `updateProxy` / `confirmWrite` / `defaultPageSize` / `editorFontSize`），损坏或越界逐字段回落默认（v0.8 设置弹窗） |
 
 ## 当前 command（src-tauri 实际，54 个）
 
@@ -108,6 +109,6 @@
 - 导入导出与备份：`csv_import_preview`、`db_import_csv`、`db_export_dump`、`db_import_dump`、`backup_probe_tools`、`db_backup_export`、`db_backup_restore`、`db_export_query`。
 - 拷贝与权限：`db_copy_preview`、`db_copy_table_rows`、`db_list_accounts`、`db_show_grants`。
 - 事务 / SQL 文件 / 安全 / 历史 / TOFU：`transaction_*`（5）、`sql_file_*`（5）、`security_*`（6）、`history_list/clear`、`ssh_tofu_decision`。
-- 事件：`ssh:tofu-request`、`ssh:hop-status`、`ssh:hop-rtt`、`backup:progress`、`copy:progress`、`app:check-update`。
+- 事件：`ssh:tofu-request`、`ssh:hop-status`、`ssh:hop-rtt`、`backup:progress`、`copy:progress`、`app:check-update`、`app:open-settings`。
 
 相关：[[systemPatterns]] · [[progress]]
