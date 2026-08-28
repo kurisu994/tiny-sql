@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { KeyRoundIcon, RotateCcwIcon } from "lucide-react";
+import { CheckIcon, KeyRoundIcon, RotateCcwIcon, XIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -95,7 +95,6 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const {
     autoCheckUpdate,
-    updateProxyEnabled,
     updateProxy,
     confirmWrite,
     defaultPageSize,
@@ -104,13 +103,40 @@ export function SettingsDialog({
     reset,
   } = useSettingsStore();
   const [version, setVersion] = useState("");
-  const proxyValid = isValidProxyUrl(updateProxy);
+  // 代理地址是需要完整输入的文本，边输边存会不断落下半截的无效地址：
+  // 这里按草稿处理，点 ✓ 才校验并写入 store，点 ✕ 丢弃回已保存值。
+  const [proxyDraft, setProxyDraft] = useState(updateProxy);
+  const [proxyError, setProxyError] = useState<string | null>(null);
+  const proxyDirty = proxyDraft !== updateProxy;
 
   // 打开时才拉版本号：非 Tauri 环境（pnpm dev-web）回落到构建期注入的版本
   useEffect(() => {
     if (!open) return;
     void updateApi.getAppVersion().then(setVersion).catch(() => setVersion(""));
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setProxyDraft(updateProxy);
+    setProxyError(null);
+  }, [open, updateProxy]);
+
+  function commitProxy() {
+    const value = proxyDraft.trim();
+    if (!isValidProxyUrl(value)) {
+      setProxyError(
+        "地址无效：需要带 scheme 与主机的完整地址，如 socks5://127.0.0.1:7890",
+      );
+      return;
+    }
+    setProxyError(null);
+    update({ updateProxy: value });
+  }
+
+  function revertProxy() {
+    setProxyDraft(updateProxy);
+    setProxyError(null);
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -144,45 +170,69 @@ export function SettingsDialog({
             />
             {/* 代理地址比其他控件宽，单独占一行而不塞进 SettingRow 右侧 */}
             <div className="border-b border-neutral-100 py-3 dark:border-neutral-800">
-              <div className="flex items-start justify-between gap-6">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">更新代理</div>
-                  <p className="mt-0.5 text-xs text-neutral-500">
-                    检查与下载更新都经此代理，支持 http / https / socks5。
-                  </p>
-                </div>
-                <div className="shrink-0 pt-0.5">
-                  <Toggle
-                    label="启用更新代理"
-                    checked={updateProxyEnabled}
-                    onChange={(v) => update({ updateProxyEnabled: v })}
-                  />
-                </div>
-              </div>
-              <input
-                type="text"
-                inputMode="url"
-                spellCheck={false}
-                aria-label="更新代理地址"
-                aria-invalid={updateProxyEnabled && !proxyValid}
-                disabled={!updateProxyEnabled}
-                placeholder="socks5://127.0.0.1:7890"
-                value={updateProxy}
-                onChange={(e) => update({ updateProxy: e.target.value })}
-                className={cn(
-                  "mt-2 w-full rounded border px-2 py-1 text-sm",
-                  "dark:bg-neutral-900",
-                  "disabled:cursor-not-allowed disabled:opacity-50",
-                  updateProxyEnabled && !proxyValid
-                    ? "border-destructive"
-                    : "border-neutral-300 dark:border-neutral-700",
+              <div className="text-sm font-medium">更新代理</div>
+              <p className="mt-0.5 text-xs text-neutral-500">
+                检查与下载更新都经此代理，支持 http / https / socks5；留空为直连。
+                改完点 ✓ 生效，点 ✕ 放弃改动。
+              </p>
+              <div className="relative mt-2">
+                <input
+                  type="text"
+                  inputMode="url"
+                  spellCheck={false}
+                  aria-label="更新代理地址"
+                  aria-invalid={proxyError !== null}
+                  placeholder="socks5://127.0.0.1:7890"
+                  value={proxyDraft}
+                  onChange={(e) => {
+                    setProxyDraft(e.target.value);
+                    // 只在点 ✓ 时校验，输入过程中不打扰
+                    if (proxyError) setProxyError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitProxy();
+                    if (e.key === "Escape" && proxyDirty) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      revertProxy();
+                    }
+                  }}
+                  className={cn(
+                    "w-full rounded border py-1 pl-2 text-sm",
+                    "dark:bg-neutral-900",
+                    // 只有按钮出现时才给右侧让位，否则文字可用满宽
+                    proxyDirty ? "pr-16" : "pr-2",
+                    proxyError
+                      ? "border-destructive"
+                      : "border-neutral-300 dark:border-neutral-700",
+                  )}
+                />
+                {/* 内嵌在输入框尾部，仅在有未保存改动时出现 */}
+                {proxyDirty && (
+                  <div className="absolute inset-y-0 right-1 flex items-center gap-0.5">
+                    <button
+                      type="button"
+                      aria-label="保存代理地址"
+                      title="保存（Enter）"
+                      onClick={commitProxy}
+                      className="rounded p-1 text-green-600 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      <CheckIcon className="size-4" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="放弃代理地址改动"
+                      title="放弃改动（Esc）"
+                      onClick={revertProxy}
+                      className="rounded p-1 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      <XIcon className="size-4" />
+                    </button>
+                  </div>
                 )}
-              />
-              {updateProxyEnabled && !proxyValid && (
-                <p className="mt-1 text-xs text-destructive">
-                  地址无效：需要带 scheme 与主机的完整地址，如
-                  socks5://127.0.0.1:7890。修正前更新仍走直连。
-                </p>
+              </div>
+              {proxyError && (
+                <p className="mt-1 text-xs text-destructive">{proxyError}</p>
               )}
             </div>
             <SettingRow

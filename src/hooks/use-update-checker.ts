@@ -35,7 +35,6 @@ function setLastCheckAt(value: number) {
 
 export function useUpdateChecker() {
   const autoCheckUpdate = useSettingsStore((s) => s.autoCheckUpdate);
-  const updateProxyEnabled = useSettingsStore((s) => s.updateProxyEnabled);
   const updateProxy = useSettingsStore((s) => s.updateProxy);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
@@ -52,9 +51,7 @@ export function useUpdateChecker() {
     }
 
     try {
-      const update = await updateApi.check(
-        effectiveProxy(updateProxyEnabled, updateProxy),
-      );
+      const update = await updateApi.check(effectiveProxy(updateProxy));
       setLastCheckAt(Date.now());
       setUpdateInfo(update);
       if (update) {
@@ -69,7 +66,7 @@ export function useUpdateChecker() {
     } finally {
       setChecking(false);
     }
-  }, [updateProxyEnabled, updateProxy]);
+  }, [updateProxy]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;

@@ -88,22 +88,25 @@ describe("settings-store", () => {
     expect(isValidProxyUrl(`http://h/${"x".repeat(512)}`)).toBe(false);
   });
 
-  it("effectiveProxy：未启用时即便地址合法也直连", () => {
-    expect(effectiveProxy(false, "socks5://127.0.0.1:7890")).toBeUndefined();
-    expect(effectiveProxy(true, "")).toBeUndefined();
-    expect(effectiveProxy(true, "ftp://127.0.0.1:2121")).toBeUndefined();
-    expect(effectiveProxy(true, "  socks5://127.0.0.1:7890  ")).toBe(
+  it("effectiveProxy：留空或非法回落直连，合法地址去空白后生效", () => {
+    expect(effectiveProxy("")).toBeUndefined();
+    expect(effectiveProxy("   ")).toBeUndefined();
+    expect(effectiveProxy("ftp://127.0.0.1:2121")).toBeUndefined();
+    expect(effectiveProxy("  socks5://127.0.0.1:7890  ")).toBe(
       "socks5://127.0.0.1:7890",
     );
   });
 
-  it("代理地址持久化：非法值也暂存，交给 effectiveProxy 兜底", () => {
-    useSettingsStore
-      .getState()
-      .update({ updateProxyEnabled: true, updateProxy: "socks5://" });
-    expect(loadSettings().updateProxyEnabled).toBe(true);
+  it("代理地址持久化：旧版本存下的非法值由 effectiveProxy 兜底", () => {
+    useSettingsStore.getState().update({ updateProxy: "socks5://127.0.0.1:7890" });
+    expect(loadSettings().updateProxy).toBe("socks5://127.0.0.1:7890");
+
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_SETTINGS, updateProxy: "socks5://" }),
+    );
     expect(loadSettings().updateProxy).toBe("socks5://");
-    expect(effectiveProxy(true, "socks5://")).toBeUndefined();
+    expect(effectiveProxy("socks5://")).toBeUndefined();
   });
 
   it("reset 恢复默认并落盘", () => {

@@ -44,12 +44,8 @@ export function isValidProxyUrl(raw: string): boolean {
   }
 }
 
-/** 取实际生效的代理地址：未启用、留空或非法时返回 undefined（即直连） */
-export function effectiveProxy(
-  enabled: boolean,
-  raw: string,
-): string | undefined {
-  if (!enabled) return undefined;
+/** 取实际生效的代理地址：留空或非法时返回 undefined（即直连） */
+export function effectiveProxy(raw: string): string | undefined {
   const value = raw.trim();
   if (!value || !isValidProxyUrl(value)) return undefined;
   return value;
@@ -59,9 +55,7 @@ export function effectiveProxy(
 export interface Settings {
   /** 启动后与每 24 小时自动检查更新 */
   autoCheckUpdate: boolean;
-  /** 是否启用更新代理；关闭时地址保留但不生效 */
-  updateProxyEnabled: boolean;
-  /** 检查与下载更新使用的代理地址（http / https / socks5 等） */
+  /** 检查与下载更新使用的代理地址（http / https / socks5 等），空串表示直连 */
   updateProxy: string;
   /** 执行写操作（INSERT/UPDATE/DELETE/DDL 等）前弹二次确认 */
   confirmWrite: boolean;
@@ -73,7 +67,6 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   autoCheckUpdate: true,
-  updateProxyEnabled: false,
   updateProxy: "",
   confirmWrite: true,
   defaultPageSize: 1000,
@@ -95,11 +88,7 @@ function sanitize(raw: unknown): Settings {
       typeof value.autoCheckUpdate === "boolean"
         ? value.autoCheckUpdate
         : DEFAULT_SETTINGS.autoCheckUpdate,
-    updateProxyEnabled:
-      typeof value.updateProxyEnabled === "boolean"
-        ? value.updateProxyEnabled
-        : DEFAULT_SETTINGS.updateProxyEnabled,
-    // 代理地址允许暂存非法值（用户可能存了一半），由使用方 effectiveProxy 兜底
+    // 兜底非法值：旧版本存进来的内容也由 effectiveProxy 在使用点回落直连
     updateProxy:
       typeof value.updateProxy === "string" &&
       value.updateProxy.length <= PROXY_MAX_LENGTH
@@ -174,7 +163,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set(patch);
     const {
       autoCheckUpdate,
-      updateProxyEnabled,
       updateProxy,
       confirmWrite,
       defaultPageSize,
@@ -182,7 +170,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } = get();
     const next = {
       autoCheckUpdate,
-      updateProxyEnabled,
       updateProxy,
       confirmWrite,
       defaultPageSize,

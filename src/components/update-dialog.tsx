@@ -33,7 +33,6 @@ function formatBytes(value: number): string {
 }
 
 export function UpdateDialog({ updateInfo, onDismiss }: UpdateDialogProps) {
-  const updateProxyEnabled = useSettingsStore((s) => s.updateProxyEnabled);
   const updateProxy = useSettingsStore((s) => s.updateProxy);
   const [installState, setInstallState] = useState<InstallState>("idle");
   const [downloaded, setDownloaded] = useState(0);
@@ -79,7 +78,7 @@ export function UpdateDialog({ updateInfo, onDismiss }: UpdateDialogProps) {
     try {
       await updateApi.downloadAndInstall(
         handleDownloadEvent,
-        effectiveProxy(updateProxyEnabled, updateProxy),
+        effectiveProxy(updateProxy),
       );
       setInstallState("ready");
     } catch (e) {
