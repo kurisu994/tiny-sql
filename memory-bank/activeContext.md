@@ -2,11 +2,28 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-26（文档校准）
+**最后更新**：2026-08-28（新增应用设置）
 
 ## 当前状态
 
-**本轮：文档与代码一致性复查（2026-08-26）**——按「以代码为准」复查全部文档与代码：54/54 command 前后端完全对应、Driver/DriverSession 契约、DriverError/SshTunnelError 变体、AppState 字段、事件契约（ssh:tofu-request / ssh:hop-status / ssh:hop-rtt / backup:progress / copy:progress / app:check-update）、keepalive 默认 60s/3 次、SQLite progress handler 取消、metadata cache 128 项/5min TTL、history 100 条/4000 字符、recent files 20 条、row_limit 10w、版本号 0.8.0-rc1 全部一致。仅发现两处文档过时并已修正：① `docs/ARCHITECTURE.md` §3.3 `db_backup_restore` 表格补 `schema` 参数（代码 `BackupRestoreInput` 实际含该字段，前端 backupRestore 也传）；② `docs/ARCHITECTURE.md` §2.3 与 `memory-bank/techContext.md` 的 `@tauri-apps/api` 版本 2.10.x → ^2.11.1（package.json 实际值）。
+**本轮：应用菜单新增「Settings...」设置弹窗（2026-08-28）**——macOS 应用菜单在「Check for Updates...」下方插入 `Settings...`（`⌘,`，`src-tauri/src/lib.rs` 的 `setup_app_menu`，index 2），点击 emit `app:open-settings`，前端 `page.tsx` 监听后打开 `SettingsDialog`。四个决策：
+
+1. **偏好存 localStorage 而非后端加密 store**：设置项全是纯 UI 偏好（无密钥 / 连接信息），与 `column-widths` 同策略，不新增 Rust command 与磁盘格式；键名 `tiny-sql:settings`，逐字段 sanitize，损坏或越界只回落该字段。
+2. **每项都真实接线，不做摆设开关**：`autoCheckUpdate` → `use-update-checker` 的自动检查 effect；`defaultPageSize` → `session-store` 新建 browse tab 的初始 pageSize（原硬编码 1000）；`editorFontSize` → CSS 变量 `--tiny-sql-editor-font-size`（CodeMirror 主题读 `var()`，改字号不重建编辑器实例）；`confirmWrite` → `schema-browser` 的 `confirmWriteOp` 包装。
+3. **关掉写确认必须仍传 `allowWrite: true`**：`needsWriteConfirmation` 的返回值同时用于「弹确认」和「allowWrite 传后端」，若简单跳过判定会让写操作反而被后端拒。因此包装成 `confirmWriteOp`：关掉设置时直接返回 true 放行。只读连接拦截与后端 `allow_write` 护栏不受影响；导出那处的 `needsWriteConfirmation`（只读能力限制）不受设置影响。
+4. **不引入新 UI 依赖**：开关用原生 `input[type=checkbox]`、下拉用原生 `select` 配 Tailwind（与 browse-view 分页下拉一致），沿用已有 shadcn Dialog/Tabs/Button；安全 Tab 的主密码入口先关设置弹窗再开安全弹窗，避免两层 Dialog 抢焦点。
+
+5. **更新代理（追加）**：设置项 `updateProxyEnabled` + `updateProxy` 传给 `@tauri-apps/plugin-updater` 的 `check({ proxy })`。查过插件源码（`updater.rs:461` check、`:674` download、`:554` Update 继承 proxy）：**代理必须在 check 时传入**，下载复用 Update 上的同一份配置，所以 `updateApi.downloadAndInstall` 内部那次 check 也要带 proxy，否则只有检查走代理、下载走直连。非法地址不阻止保存（用户可能输一半），由 `effectiveProxy()` 在使用点兜底成直连，UI 标红说明「仍走直连」。
+
+5.1 **socks5 支持靠 Cargo feature 统一打开（易被误删的隐式依赖）**：`tauri-plugin-updater 2.10.1` 的 reqwest 只启用 `json` + `stream`，插件也没暴露 socks feature。解法是 `src-tauri/Cargo.toml` 显式依赖 `reqwest = { version = "0.13", default-features = false, features = ["socks"] }`——本 crate 不调用它，纯粹为 feature 统一。**Cargo.lock 只多一行**（socks 实现内置于 reqwest 的 `connect.rs mod socks`，零新增 crate）。缺这条依赖时 reqwest **不报错**，而是把 `socks5://` 当普通 HTTP 代理发 CONNECT（`connect.rs:786` 的 socks 分派整段被 cfg 掉），用户只看到更新失败。
+
+5.2 **测试踩坑：`Proxy::all()` 不能用来验证 socks feature**。reqwest 0.13 的 `IntoProxy` 只做 URL 解析、不校验 scheme，任何 scheme 都返回 Ok——第一版测试因此假绿（关掉 feature 仍通过）。改成起假代理看 reqwest 实际发出的首字节：socks5 握手是 `0x05`，HTTP CONNECT 是 `'C'`。另两个坑：① 构建 Client 前必须 `rustls::crypto::ring::default_provider().install_default()`（插件启用 `rustls-no-provider`，运行时自己装），为此加了 rustls **dev-dependency**（已在依赖树，零新增 crate）；② 目标 URL 必须写 IP——socks5（非 socks5h）由客户端本地解析 DNS，用 `.invalid` 域名会在连代理前就失败。已验证关掉 feature 该测试立刻 FAILED。
+
+6. **底部按钮是「关闭」不是「完成」**（用户反馈）：所有设置项 onChange 即写 store 并落盘，主按钮样式会误导成「点了才提交」，故改 outline + 「关闭」，描述补「修改即时生效」。唯一不追溯的是 `defaultPageSize`（只影响新开的浏览 tab，避免正在翻页时页码被重置）。
+
+新增文件：`src/stores/settings-store.ts`、`src/components/settings-dialog.tsx`、`src/stores/settings-store.test.ts`（9 例）。门禁：`cargo clippy --workspace --all-targets -D warnings` 通过，`tsc --noEmit` 通过，vitest 26 文件 190 例全过，`next build` 静态导出通过。**待用户 GUI 实测**：菜单项位置与 `⌘,`、五个设置项的实际生效、主密码弹窗跳转、代理下的检查与下载。
+
+**前一轮：文档与代码一致性复查（2026-08-26）**——按「以代码为准」复查全部文档与代码：54/54 command 前后端完全对应、Driver/DriverSession 契约、DriverError/SshTunnelError 变体、AppState 字段、事件契约（ssh:tofu-request / ssh:hop-status / ssh:hop-rtt / backup:progress / copy:progress / app:check-update）、keepalive 默认 60s/3 次、SQLite progress handler 取消、metadata cache 128 项/5min TTL、history 100 条/4000 字符、recent files 20 条、row_limit 10w、版本号 0.8.0-rc1 全部一致。仅发现两处文档过时并已修正：① `docs/ARCHITECTURE.md` §3.3 `db_backup_restore` 表格补 `schema` 参数（代码 `BackupRestoreInput` 实际含该字段，前端 backupRestore 也传）；② `docs/ARCHITECTURE.md` §2.3 与 `memory-bank/techContext.md` 的 `@tauri-apps/api` 版本 2.10.x → ^2.11.1（package.json 实际值）。
 
 **本轮：feat/sqlite-driver 已并入 main（2026-08-26）**——SQLite driver（8 个提交：`cf456a5`~`1a1274e` + 文档对齐 `ddd3151`）fast-forward 合入 main（`754f033`→`ddd3151`）并推送；`origin/main` 与本地 main 同步，分支已与 main 内容一致。main 现为发布线：v0.8.0-rc1 + SQLite 三 driver。
 

@@ -1148,6 +1148,7 @@ ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握�
 | `backup:progress` | `{queryId, bytes}` | 官方备份/恢复子进程写出数据 | 备份对话框进度 |
 | `copy:progress` | `{queryId, copied}` | 表拷贝每批插入后 | 对比台拷贝进度 |
 | `app:check-update` | `{}` | macOS 应用菜单「Check for Updates...」 | 触发手动检查更新 |
+| `app:open-settings` | `{}` | macOS 应用菜单「Settings...」（⌘,） | 打开设置弹窗（`SettingsDialog`） |
 
 ### 7.3 ssh:hop-status 详细 schema
 
@@ -1263,6 +1264,7 @@ interface AdvancedConfig {
 
 - tiny-sql 不上传连接配置、SQL、查询结果或错误日志。
 - 业务通信只访问用户配置的 SSH/MySQL 目标；自动更新只访问 GitHub Release 的正式版更新清单。
+- 更新可选走用户在设置里配置的代理（`check({ proxy })`，检查与下载共用），支持 http / https / socks4 / socks5 / socks5h；socks 一族依赖 `src-tauri/Cargo.toml` 显式依赖 reqwest 并启用 `socks` feature（tauri-plugin-updater 自身不开）。该代理只作用于更新链路，数据库连接与 SSH 隧道不经过它。
 - 无遥测、无错误上报。
 - 这是开源信任的前提
 
