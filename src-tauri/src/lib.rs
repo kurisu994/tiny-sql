@@ -148,3 +148,56 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt;
+    use tokio::net::TcpListener;
+
+    /// 更新代理的 socks5 支持契约。
+    ///
+    /// tauri-plugin-updater 内部的 reqwest 默认不带 socks feature，靠本 crate 在
+    /// Cargo.toml 里显式依赖 reqwest 并启用 socks 来统一打开。缺了它 reqwest 不会
+    /// 报错，而是把 socks5:// 地址当成普通 HTTP 代理发 CONNECT——用户只会看到更新
+    /// 失败，很难定位。所以这里不测「地址能否解析」（`Proxy::all` 对任何 scheme
+    /// 都返回 Ok），而是搭一个假代理看 reqwest 实际先说哪种协议：
+    /// socks5 握手首字节是 0x05，HTTP CONNECT 则是 ASCII 'C'(0x43)。
+    #[tokio::test]
+    async fn socks5_proxy_speaks_socks_handshake_not_http_connect() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // 假代理只读首字节就够判断协议，不需要真的实现 socks
+        let probe = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut first = [0u8; 1];
+            socket.read_exact(&mut first).await.ok();
+            first[0]
+        });
+
+        // 插件启用的是 rustls-no-provider：构建 Client 前必须先装 provider，
+        // 与 tauri-plugin-updater 运行时的做法一致（ring）
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        let client = reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all(format!("socks5://{addr}")).unwrap())
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        // 目标写 IP 而非域名：socks5（非 socks5h）由客户端本地解析 DNS，
+        // 用不可解析的域名会在连代理之前就失败。假代理不会回应，请求必然
+        // 超时；这里只关心它发出的第一个字节。
+        let _ = client.get("http://127.0.0.1:9/latest.json").send().await;
+
+        let first = tokio::time::timeout(Duration::from_secs(5), probe)
+            .await
+            .expect("假代理未收到连接")
+            .unwrap();
+        assert_eq!(
+            first, 0x05,
+            "reqwest 未走 socks 握手（首字节 {first:#04x}），\
+             说明 reqwest 的 socks feature 未启用，检查 Cargo.toml 的 reqwest 依赖"
+        );
+    }
+}
