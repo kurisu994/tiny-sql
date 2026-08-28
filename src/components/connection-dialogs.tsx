@@ -208,10 +208,10 @@ function PassphraseDialog({
   );
 }
 
-/** 居中模态遮罩 */
+/** 居中模态遮罩。z-[60] 压过 shadcn Dialog/AlertDialog（z-50 且 Portal 到 body 末尾），保证安全类阻塞弹窗（TOFU / passphrase / 解锁）可点击 */
 export function Overlay({ children }: { children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
       <div className="flex w-full max-w-md flex-col gap-3 rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-900">
         {children}
       </div>

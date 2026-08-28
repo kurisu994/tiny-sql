@@ -59,8 +59,8 @@ export function TopologyGraph({
   );
 
   return (
-    <div className="border-b border-neutral-200 bg-neutral-50 px-5 py-3 dark:border-neutral-800 dark:bg-neutral-950">
-      <div className="flex h-16 items-center overflow-x-auto overflow-y-hidden">
+    <div className="border-b border-neutral-200 bg-neutral-50 px-4 py-2 dark:border-neutral-800 dark:bg-neutral-950">
+      <div className="flex h-14 items-center overflow-x-auto overflow-y-hidden">
         {nodes.map((node, index) => (
           <TopologySegment
             key={node.id}
@@ -137,7 +137,7 @@ function TopologySegment({
     <>
       <TopologyCard node={node} />
       {!isLast && (
-        <div className="relative flex w-20 shrink-0 items-center px-2">
+        <div className="relative flex w-14 shrink-0 items-center px-2">
           {nextNode && <RttLabel node={nextNode} />}
           <div
             aria-hidden="true"
@@ -165,7 +165,7 @@ function RttLabel({ node }: { node: TopologyNode }) {
     <span
       title={`累计到${node.title}的 SSH 协议探测 RTT；不是 ICMP，也不是单段链路延迟`}
       className={cn(
-        "absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded px-1 text-[10px] font-medium",
+        "absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded px-1 text-[10px] font-medium",
         node.rttState === "measured"
           ? "text-emerald-700 dark:text-emerald-300"
           : "text-amber-700 dark:text-amber-300",
@@ -180,7 +180,7 @@ function TopologyCard({ node }: { node: TopologyNode }) {
   return (
     <div
       title={node.reason ? translateError(node.reason) : undefined}
-      className={`flex h-14 w-36 shrink-0 flex-col justify-between rounded-md border px-3 py-2 text-left shadow-sm ${NODE_CLASS[node.status]}`}
+      className={`flex h-11 w-auto min-w-28 max-w-72 shrink-0 flex-col justify-between rounded-md border px-2.5 py-1.5 text-left shadow-sm ${NODE_CLASS[node.status]}`}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-sm font-semibold leading-none">{node.title}</span>
@@ -188,7 +188,12 @@ function TopologyCard({ node }: { node: TopologyNode }) {
           {STATUS_LABEL[node.status]}
         </span>
       </div>
-      <div className="truncate font-mono text-[11px] leading-none opacity-80">{node.subtitle}</div>
+      <div
+        title={node.subtitle}
+        className="truncate font-mono text-[11px] leading-none opacity-80"
+      >
+        {node.subtitle}
+      </div>
     </div>
   );
 }

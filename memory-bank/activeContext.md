@@ -2,11 +2,18 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-28（设置弹窗 + 全量文档按代码核对）
+**最后更新**：2026-08-28（链路图紧凑化 + TOFU 弹窗层级修复）
 
 ## 当前状态
 
-**本轮：全量文档按代码再核对（2026-08-28）**——用户要求以实际代码为准校对全部文档。核对结论：54/54 command、Driver/DriverSession 契约、DriverError/SshTunnelError 变体、AppState 字段、事件契约（含 `app:open-settings`）、keepalive 60s/3 次、metadata cache 128/5min、history 100 条/4000 字符、recent files 20 条、row_limit 10w、sqlx 0.8.6 / russh 0.54 全部一致。修正的文档偏差：① 版本号 rc1 → rc2（tag `v0.8.0-rc2` / 提交 `53c5e5a`）同步到 README/README_EN/PLAN/ROADMAP/REQUIREMENTS/RELEASE_CHECKLIST/techContext/progress；② NFR-015 写确认改为「设置可关闭（默认开）」，NFR-022 改按现状（tauri-plugin-log 仅 debug 启用、无「打开日志目录」UI），NFR-014 补更新代理引用；③ ARCHITECTURE §8.1 代理协议补 socks4a、§1.1 示例 advanced 默认值对齐代码（keepAliveEnabled=true、writeTimeoutEnabled=true 等）、§9 现状版本改 v0.8、§5 补设置偏好 localStorage 说明；④ techContext 事件补 `app:open-settings`、前端依赖版本校准（lucide-react ^1.34.0 / radix-ui ^1.6.7 / virtuoso ^4.18.12 / codemirror state ^6.7.1 / view ^6.43.9 / cli ^2.11.4）、关键配置事实补 `tiny-sql:settings`；⑤ CHANGELOG 代理协议补 socks4a；⑥ db-driver / src-tauri 的 Cargo.toml description 改三 driver 口径。
+**本轮：连接链路图紧凑化 + TOFU 弹窗层级修复（2026-08-28）**——两个 UI 反馈：
+
+1. **拓扑条占空间偏大、节点 IP+端口被截断**（`src/components/topology-graph.tsx`）：卡片写死 `w-36`（144px），副标题 `truncate`，18 字符的 host:port 差几像素放不下。改动：① 整体缩小——容器 `px-5 py-3`→`px-4 py-2`、内层 `h-16`→`h-14`、卡片 `h-14`→`h-11`、内边距 `px-3 py-2`→`px-2.5 py-1.5`、连接线 `w-20`→`w-14`、RTT 标签 `-top-4`→`-top-3`；② 卡片宽度改自适应 `w-auto min-w-28 max-w-72`，副标题加 `title` 悬浮兜底（SQLite 文件路径等超长内容仍截断但可悬停看全文）。
+2. **新建连接弹窗里点「测试连接」，TOFU 指纹信任弹窗被压在后层点不到**（`src/components/connection-dialogs.tsx`）：根因是共享 `Overlay`（TOFU/passphrase/解锁/安全设置四个使用者）`z-50` 且内联在 `<main>` 开头，而 shadcn `Dialog` 同为 `z-50` 但 Portal 到 `<body>` 末尾，同层级后渲染者赢——调 DOM 顺序无用。修法：`Overlay` 提为 `z-[60]`，这四个本就是阻塞式安全弹窗，语义上应压过一切普通弹窗。
+
+`tsc --noEmit` 通过，待用户 GUI 实测确认观感与弹窗层级。
+
+**上一轮：全量文档按代码再核对（2026-08-28）**——用户要求以实际代码为准校对全部文档。核对结论：54/54 command、Driver/DriverSession 契约、DriverError/SshTunnelError 变体、AppState 字段、事件契约（含 `app:open-settings`）、keepalive 60s/3 次、metadata cache 128/5min、history 100 条/4000 字符、recent files 20 条、row_limit 10w、sqlx 0.8.6 / russh 0.54 全部一致。修正的文档偏差：① 版本号 rc1 → rc2（tag `v0.8.0-rc2` / 提交 `53c5e5a`）同步到 README/README_EN/PLAN/ROADMAP/REQUIREMENTS/RELEASE_CHECKLIST/techContext/progress；② NFR-015 写确认改为「设置可关闭（默认开）」，NFR-022 改按现状（tauri-plugin-log 仅 debug 启用、无「打开日志目录」UI），NFR-014 补更新代理引用；③ ARCHITECTURE §8.1 代理协议补 socks4a、§1.1 示例 advanced 默认值对齐代码（keepAliveEnabled=true、writeTimeoutEnabled=true 等）、§9 现状版本改 v0.8、§5 补设置偏好 localStorage 说明；④ techContext 事件补 `app:open-settings`、前端依赖版本校准（lucide-react ^1.34.0 / radix-ui ^1.6.7 / virtuoso ^4.18.12 / codemirror state ^6.7.1 / view ^6.43.9 / cli ^2.11.4）、关键配置事实补 `tiny-sql:settings`；⑤ CHANGELOG 代理协议补 socks4a；⑥ db-driver / src-tauri 的 Cargo.toml description 改三 driver 口径。
 
 **上一轮：应用菜单新增「Settings...」设置弹窗（2026-08-28）**——macOS 应用菜单在「Check for Updates...」下方插入 `Settings...`（`⌘,`，`src-tauri/src/lib.rs` 的 `setup_app_menu`，index 2），点击 emit `app:open-settings`，前端 `page.tsx` 监听后打开 `SettingsDialog`。四个决策：
 
