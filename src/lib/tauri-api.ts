@@ -232,6 +232,7 @@ function parseCommandError(value: unknown): CommandErrorPayload | null {
 /** 应用级原生菜单事件 */
 export const APP_EVENTS = {
   checkUpdate: "app:check-update",
+  openSettings: "app:open-settings",
 } as const;
 
 /** Tauri updater 检测到的新版本信息 */
@@ -254,11 +255,12 @@ export const updateApi = {
     return getVersion();
   },
 
-  async check(): Promise<UpdateInfo | null> {
+  /** proxy 为 http/https 代理地址，省略则直连；检查与后续下载共用同一代理。 */
+  async check(proxy?: string): Promise<UpdateInfo | null> {
     if (!isTauriRuntime()) return null;
 
     const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
+    const update = await check(proxy ? { proxy } : undefined);
     if (!update) return null;
 
     try {
@@ -275,13 +277,15 @@ export const updateApi = {
 
   async downloadAndInstall(
     onEvent?: (event: UpdateDownloadEvent) => void,
+    proxy?: string,
   ): Promise<void> {
     if (!isTauriRuntime()) {
       throw new Error("仅桌面应用支持自动更新");
     }
 
+    // 代理要在 check 时传入：下载复用 check 返回的 Update 上的同一份配置
     const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
+    const update = await check(proxy ? { proxy } : undefined);
     if (!update) {
       throw new Error("当前已是最新版本");
     }

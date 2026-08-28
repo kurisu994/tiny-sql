@@ -43,6 +43,7 @@ import {
 } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import {
   isTabDirty,
   selectActiveTab,
@@ -103,6 +104,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     close,
   } = useSessionStore();
   const confirm = useConfirmStore((s) => s.confirm);
+  const confirmWrite = useSettingsStore((s) => s.confirmWrite);
   const activeTab = selectActiveTab({ tabs, activeTabId });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [objectQuery, setObjectQuery] = useState("");
@@ -359,6 +361,17 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     [connection.driver, databases, schemas],
   );
 
+  /**
+   * 写操作确认：设置里关掉「写操作二次确认」后直接放行。
+   * 只读连接拦截与后端 allow_write 护栏不受此设置影响。
+   */
+  async function confirmWriteOp(
+    options: Parameters<typeof confirm>[0],
+  ): Promise<boolean> {
+    if (!confirmWrite) return true;
+    return confirm(options);
+  }
+
   async function runSql() {
     const sql = activeTab?.sqlText.trim() ?? "";
     if (!sql) return;
@@ -368,7 +381,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         setDumpMsg("该连接已设为应用只读，已拒绝写操作。");
         return;
       }
-      allowWrite = await confirm({
+      allowWrite = await confirmWriteOp({
         title: "确认写操作",
         message: `${safety}\n检测到写操作，请确认已使用只读账号或明确知道风险。是否继续执行？`,
         confirmText: "继续执行",
@@ -389,7 +402,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       latest?.lastErrorKey === "error.driver.write_requires_confirmation" &&
       !allowWrite
     ) {
-      const ok = await confirm({
+      const ok = await confirmWriteOp({
         title: "确认写操作",
         message:
           "脚本中包含写操作，请确认已使用只读账号或明确知道风险。是否继续执行？",
@@ -422,7 +435,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     const allowWrite =
       analyze && needsWriteConfirmation(wrapped, connection.driver);
     if (allowWrite) {
-      const ok = await confirm({
+      const ok = await confirmWriteOp({
         title: "确认写操作",
         message: "EXPLAIN ANALYZE 将执行被分析的写语句。",
         confirmText: "继续",

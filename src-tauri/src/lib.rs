@@ -17,6 +17,10 @@ pub mod tofu;
 const CHECK_UPDATE_MENU_ID: &str = "check_update";
 #[cfg(desktop)]
 const CHECK_UPDATE_EVENT: &str = "app:check-update";
+#[cfg(desktop)]
+const SETTINGS_MENU_ID: &str = "settings";
+#[cfg(desktop)]
+const SETTINGS_EVENT: &str = "app:open-settings";
 
 #[cfg(target_os = "macos")]
 fn setup_app_menu<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
@@ -32,6 +36,15 @@ fn setup_app_menu<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             None::<&str>,
         )?;
         app_menu.insert(&check_update, 1)?;
+        // 设置项紧随「检查更新」，用 macOS 惯用的 Cmd+, 快捷键
+        let settings = MenuItem::with_id(
+            app.handle(),
+            SETTINGS_MENU_ID,
+            "Settings...",
+            true,
+            Some("CmdOrCtrl+,"),
+        )?;
+        app_menu.insert(&settings, 2)?;
     }
     app.set_menu(menu)?;
     Ok(())
@@ -47,6 +60,8 @@ pub fn run() {
     let builder = builder.on_menu_event(|app, event| {
         if event.id() == CHECK_UPDATE_MENU_ID {
             let _ = app.emit(CHECK_UPDATE_EVENT, ());
+        } else if event.id() == SETTINGS_MENU_ID {
+            let _ = app.emit(SETTINGS_EVENT, ());
         }
     });
 

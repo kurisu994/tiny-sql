@@ -45,7 +45,7 @@ const editorTheme = EditorView.theme({
     borderRadius: "6px",
     backgroundColor: "var(--tiny-sql-editor-bg)",
     color: "var(--tiny-sql-editor-fg)",
-    fontSize: "12px",
+    fontSize: "var(--tiny-sql-editor-font-size, 12px)",
   },
   "&.cm-focused": {
     borderColor: "var(--tiny-sql-editor-focus)",

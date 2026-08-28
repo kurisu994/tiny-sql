@@ -11,6 +11,7 @@ import {
   updateApi,
   type UpdateInfo,
 } from "@/lib/tauri-api";
+import { effectiveProxy, useSettingsStore } from "@/stores/settings-store";
 
 const STARTUP_DELAY_MS = 5_000;
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1_000;
@@ -33,6 +34,9 @@ function setLastCheckAt(value: number) {
 }
 
 export function useUpdateChecker() {
+  const autoCheckUpdate = useSettingsStore((s) => s.autoCheckUpdate);
+  const updateProxyEnabled = useSettingsStore((s) => s.updateProxyEnabled);
+  const updateProxy = useSettingsStore((s) => s.updateProxy);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -48,7 +52,9 @@ export function useUpdateChecker() {
     }
 
     try {
-      const update = await updateApi.check();
+      const update = await updateApi.check(
+        effectiveProxy(updateProxyEnabled, updateProxy),
+      );
       setLastCheckAt(Date.now());
       setUpdateInfo(update);
       if (update) {
@@ -63,7 +69,7 @@ export function useUpdateChecker() {
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [updateProxyEnabled, updateProxy]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -78,6 +84,8 @@ export function useUpdateChecker() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    // 设置里关掉后只保留菜单手动检查
+    if (!autoCheckUpdate) return;
     if (Date.now() - getLastCheckAt() < CHECK_INTERVAL_MS) return;
 
     const timer = window.setTimeout(() => {
@@ -85,7 +93,7 @@ export function useUpdateChecker() {
     }, STARTUP_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [checkForUpdate]);
+  }, [checkForUpdate, autoCheckUpdate]);
 
   return {
     updateInfo,

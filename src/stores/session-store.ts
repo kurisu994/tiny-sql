@@ -35,6 +35,12 @@ import {
   type TableOrder,
   sqlFileApi,
 } from "@/lib/tauri-api";
+import { useSettingsStore } from "@/stores/settings-store";
+
+/** 新建浏览 tab 的初始每页行数，取自设置（默认 1000）。 */
+function defaultBrowsePageSize(): number {
+  return useSettingsStore.getState().defaultPageSize;
+}
 
 /** 按 driver 方言引用标识符。 */
 function quoteIdent(name: string, driver: StoredConnection["driver"]): string {
@@ -1339,7 +1345,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       filters: [],
       order: null,
       page: 0,
-      pageSize: 1000,
+      pageSize: defaultBrowsePageSize(),
       total: null,
       hasNextPage: false,
       editable: false,
@@ -1369,7 +1375,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       filters,
       order: null,
       page: 0,
-      pageSize: 1000,
+      pageSize: defaultBrowsePageSize(),
       total: null,
       hasNextPage: false,
       editable: false,

@@ -3,11 +3,14 @@
 import { useEffect, useState } from "react";
 import { PlusIcon, Share2Icon, ShieldCheckIcon } from "lucide-react";
 
+import { listen } from "@tauri-apps/api/event";
+
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ConnectionDialogs } from "@/components/connection-dialogs";
 import { ConnectionForm } from "@/components/connection-form";
 import { CreateDatabaseDialog } from "@/components/create-database-dialog";
 import { SchemaBrowser } from "@/components/schema-browser";
+import { SettingsDialog } from "@/components/settings-dialog";
 import { ShareDialog } from "@/components/share-dialog";
 import {
   SecuritySettingsDialog,
@@ -26,12 +29,19 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useUpdateChecker } from "@/hooks/use-update-checker";
 import { connectionEnv, envDotClass, envLabel, isReadOnly } from "@/lib/connection-meta";
-import { driverLabel, isFileBasedDriver, type StoredConnection } from "@/lib/tauri-api";
+import {
+  APP_EVENTS,
+  driverLabel,
+  isFileBasedDriver,
+  isTauriRuntime,
+  type StoredConnection,
+} from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
 import { useConnectionStore } from "@/stores/connection-store";
 import { useSecurityStore } from "@/stores/security-store";
 import { useSessionStore } from "@/stores/session-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 /** 连接表单弹窗的状态：新建、编辑某条，或关闭 */
 type FormState =
@@ -61,10 +71,14 @@ export default function Home() {
   const refreshSecurity = useSecurityStore((s) => s.refresh);
   const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const hydrateSettings = useSettingsStore((s) => s.hydrate);
   const {
     updateInfo,
+    checking,
     checkError,
     checkNotice,
+    manualCheck,
     dismissUpdate,
     dismissCheckResult,
   } = useUpdateChecker();
@@ -73,6 +87,20 @@ export default function Home() {
   useEffect(() => {
     refreshSecurity();
   }, [refreshSecurity]);
+
+  // 偏好设置从 localStorage 载入（含编辑器字号的 CSS 变量同步）
+  useEffect(() => {
+    hydrateSettings();
+  }, [hydrateSettings]);
+
+  // 应用菜单「Settings...」（⌘,）唤起设置弹窗
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const un = listen(APP_EVENTS.openSettings, () => setSettingsOpen(true));
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
 
   useEffect(() => {
     if (securityInitialized && securityStatus !== "locked") {
@@ -153,6 +181,13 @@ export default function Home() {
         notice={checkNotice}
         error={checkError}
         onDismiss={dismissCheckResult}
+      />
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onCheckUpdate={() => void manualCheck()}
+        checkingUpdate={checking}
+        onOpenSecurity={() => setSecurityDialogOpen(true)}
       />
       <ShareDialog
         open={shareOpen}

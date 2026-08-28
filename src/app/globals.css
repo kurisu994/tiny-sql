@@ -41,6 +41,8 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  /* SQL 编辑器字号：设置弹窗改这个变量，编辑器实例无需重建 */
+  --tiny-sql-editor-font-size: 12px;
 }
 
 .tiny-sql-editor {

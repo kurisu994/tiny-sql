@@ -18,6 +18,7 @@ import {
   type UpdateDownloadEvent,
   type UpdateInfo,
 } from "@/lib/tauri-api";
+import { effectiveProxy, useSettingsStore } from "@/stores/settings-store";
 
 type InstallState = "idle" | "downloading" | "ready" | "error";
 
@@ -32,6 +33,8 @@ function formatBytes(value: number): string {
 }
 
 export function UpdateDialog({ updateInfo, onDismiss }: UpdateDialogProps) {
+  const updateProxyEnabled = useSettingsStore((s) => s.updateProxyEnabled);
+  const updateProxy = useSettingsStore((s) => s.updateProxy);
   const [installState, setInstallState] = useState<InstallState>("idle");
   const [downloaded, setDownloaded] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
@@ -74,7 +77,10 @@ export function UpdateDialog({ updateInfo, onDismiss }: UpdateDialogProps) {
     setError(null);
 
     try {
-      await updateApi.downloadAndInstall(handleDownloadEvent);
+      await updateApi.downloadAndInstall(
+        handleDownloadEvent,
+        effectiveProxy(updateProxyEnabled, updateProxy),
+      );
       setInstallState("ready");
     } catch (e) {
       setInstallState("error");
