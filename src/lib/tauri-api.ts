@@ -893,6 +893,11 @@ export const SSH_EVENTS = {
   hopRtt: "ssh:hop-rtt",
 } as const;
 
+/** 数据库节点延迟事件（SELECT 1 累计 RTT） */
+export const DB_EVENTS = {
+  rtt: "db:rtt",
+} as const;
+
 /** `ssh:tofu-request` 事件载荷 */
 export interface TofuRequestPayload {
   connectionId: string;
@@ -917,6 +922,14 @@ export interface HopRttPayload {
   sessionId: string;
   hopIndex: number;
   state: "measured" | "timeout" | "unavailable";
+  rttMs: number | null;
+}
+
+/** `db:rtt` 事件载荷；为累计到数据库的 SELECT 1 往返，经过整条链路。 */
+export interface DbRttPayload {
+  connectionId: string;
+  sessionId: string;
+  state: HopRttPayload["state"];
   rttMs: number | null;
 }
 

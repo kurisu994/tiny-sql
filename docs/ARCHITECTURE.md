@@ -1146,6 +1146,7 @@ ssh-multihop::open 调用时从 hops 构造里带出 passphrase 用于这次握�
 | `ssh:tofu-request` | `{connectionId, hopIndex, host, port, fingerprint}` | 后端遇到未知 host key | 弹 `SshTofuDialog` |
 | `ssh:hop-status` | `{connectionId, sessionId, hopIndex, status, reason?}`（status ∈ pending/connected/failed/lost） | 隧道每跳状态变化 | zustand 只接收当前 session 事件 → 拓扑节点重渲染 |
 | `ssh:hop-rtt` | `{connectionId, sessionId, hopIndex, state, rttMs}`（state ∈ measured/timeout/unavailable） | 每跳低频 SSH 协议探测完成 | zustand 只接收当前 session 事件 → 更新进入该跳的边指标，不改变节点状态 |
+| `db:rtt` | `{connectionId, sessionId, state, rttMs}`（state ∈ measured/timeout/unavailable） | 低频 `SELECT 1` 探测完成 | zustand 只接收当前 session 事件 → 更新进入数据库节点的边指标，不改变节点状态 |
 | `query:result-chunk` | `{query_id, rows_partial, done: false}` | （规划未用）流式结果 | 各版本 query 均全量返回 RowSet；文件导出采用后端流式写出（db_export_query / db_export_dump），不经 IPC |
 | `backup:progress` | `{queryId, bytes}` | 官方备份/恢复子进程写出数据 | 备份对话框进度 |
 | `copy:progress` | `{queryId, copied}` | 表拷贝每批插入后 | 对比台拷贝进度 |
@@ -1197,7 +1198,9 @@ interface SshHopRttPayload {
 }
 ```
 
-前端把采样显示在“进入对应 SSH hop”的边上：低于 1ms 显示 `SSH <1 ms`，其余四舍五入为整数毫秒，超时和不可用分别显示 `SSH 超时` / `SSH 不可用`。tooltip 必须说明这是累计 SSH 协议 RTT，不是 ICMP 或单段延迟。payload 的 `connectionId + sessionId` 必须同时匹配当前连接；迟到的旧 session 采样直接丢弃。
+前端把采样显示在“进入对应 SSH hop”的边上：低于 1ms 显示 `<1 ms`，其余四舍五入为整数毫秒，超时和不可用分别显示 `超时` / `不可用`。tooltip 必须说明这是累计 SSH 协议 RTT，不是 ICMP 或单段延迟。payload 的 `connectionId + sessionId` 必须同时匹配当前连接；迟到的旧 session 采样直接丢弃。
+
+数据库节点没有 SSH session，不能走 global-request。连接打开后另起低频 `SELECT 1` 采样（1s 首次、之后每 5s、单次 2s 超时），经 `db:rtt` 更新进入数据库节点的边；值是从本机穿过整条链路（含 SSH 隧道）的查询往返，同样不能当作单段延迟。超时 / 不可用只改指标。关闭连接时 abort 采样 task。
 
 ### 7.5 连接配置 schema（落盘前）
 

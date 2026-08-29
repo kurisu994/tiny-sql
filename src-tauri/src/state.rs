@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use tokio::task::JoinHandle;
+
 use db_driver::{
     ColumnMeta, ConstraintMeta, DatabaseMeta, Driver, DriverCloseFuture, DriverFuture, DriverKind,
     DriverSession, IndexMeta, MetadataScope, MySqlDriver, PostgresDriver, QueryOptions, RowSet,
@@ -169,6 +171,8 @@ pub struct OpenConnection {
     pub tunnel: Option<SshTunnel>,
     /// 每次成功打开都生成的新代号，用于隔离重连前后的异步事件。
     pub session_id: String,
+    /// 低频 SELECT 1 采样；关闭或 drop 时 abort，避免泄漏到下一 session。
+    pub db_rtt_task: Option<JoinHandle<()>>,
 }
 
 /// 正在执行的查询及其所属连接，用于关闭 / 重连时按连接取消。
@@ -185,10 +189,22 @@ pub struct ActiveSession {
 }
 
 impl OpenConnection {
-    /// 干净关闭：先 await 关闭连接池，再 drop 隧道（满足「先 pool 后 tunnel」）。
-    pub async fn close(self) {
+    /// 干净关闭：先停 RTT 采样，再 await 关闭连接池；隧道随字段 drop 释放。
+    pub async fn close(mut self) {
+        self.abort_db_rtt();
         Driver::close(&self.driver).await;
-        drop(self.tunnel);
+    }
+
+    fn abort_db_rtt(&mut self) {
+        if let Some(task) = self.db_rtt_task.take() {
+            task.abort();
+        }
+    }
+}
+
+impl Drop for OpenConnection {
+    fn drop(&mut self) {
+        self.abort_db_rtt();
     }
 }
 

@@ -166,7 +166,8 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - 节点状态：`pending`（灰色）/ `connected`（绿色）/ `failed`（红色）/ `lost`（红色）。
 - 状态通过 tauri event `ssh:hop-status` 推送，payload schema 见 [ARCHITECTURE.md](./ARCHITECTURE.md#7-前后端事件契约)。
 - v0.1 节点状态简化为 4 态（pending / connected / failed / lost），**不**做"实时延迟动画"（推 v0.2）。
-- v0.2 通过独立 `ssh:hop-rtt` 事件显示 10s 低频采样；值是从本机累计到该 SSH session 的 global-request RTT，不是 ICMP，也不是可相减的单段链路延迟。2s 超时只更新指标，不把节点改成 failed/lost。
+- v0.2 通过独立 `ssh:hop-rtt` 事件显示低频采样；值是从本机累计到该 SSH session 的 global-request RTT，不是 ICMP，也不是可相减的单段链路延迟。边上只显示毫秒数（`<1 ms` / `N ms` / `超时` / `不可用`），不带 SSH 前缀。2s 超时只更新指标，不把节点改成 failed/lost。
+- 进入数据库节点的边通过 `db:rtt` 显示累计 `SELECT 1` 往返（数据库不是 SSH session，测不到协议 RTT）。采样失败只更新指标。
 - **验收标准**：
   - 连接进行中 → 节点按顺序从 pending → connected。
   - 第 2 跳失败 → hop[1] 红，hop[2..] 保持 pending。

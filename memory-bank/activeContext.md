@@ -2,11 +2,19 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-28（链路图 SSH 延迟标签不显示修复）
+**最后更新**：2026-08-28（链路图画布拖动修复）
 
 ## 当前状态
 
-**本轮：链路图横线上方 SSH 延迟不显示修复（2026-08-28）**——用户截图反馈多跳连接后链路图横线上方没有延迟标签。RTT 展示功能自 v0.2.0 已存在（`topology-graph.tsx` 的 `RttLabel`，`-top-3` 定位在线段上方），但存在时序 bug：后端隧道建立 1s 后发首个 `ssh:hop-rtt` 事件（之后每 10s 一次），而前端 `open()`/`reconnect()` 流程中——事件到达早了会因 `runtimeSessionId` 仍为 null 被 `markHopRtt` 守卫丢弃，到达晚了会被收尾的 `connectedHopStatuses()` 全量重置冲回 `idle`——首个事件必然失效，延迟标签要等 11s 后第二个事件才出现。修复两点：
+**本轮：链路图画布拖不动修复（2026-08-28）**——上一版用 `scrollLeft` + 元素上的 React pointer 事件：内容没溢出时拖了等于没动，且 `setState`/`setPointerCapture` 在 WKWebView 里容易丢手势。改成视口原生 `pointerdown` + window `pointermove/up`，用 `transform` 平移，内容即使没溢出也能拖；滚轮也能平移。vitest topology 4 例、`tsc --noEmit` 通过。**待用户 GUI 实测**：按住节点或空白处拖动链路。
+
+**上一轮：链路图延迟只显示毫秒 + 数据库边补 SELECT 1 RTT + 画布拖动（2026-08-28）**——用户截图反馈三点：① 边上「SSH 90 ms」不要 SSH 前缀；② 最后到 MySQL 的线没有延迟；③ 区域希望能像画布一样拖着看。
+
+依据：SSH RTT 来自 russh global-request，只存在于 SSH session。MySQL 是最后一跳 `direct-tcpip` 的 TCP 目标，没有 SSH session，所以原先拿不到协议 RTT。现用低频 `Driver::ping()`（`SELECT 1`，1s 首次 / 每 5s / 2s 超时）经新事件 `db:rtt` 画在进入数据库的边上，语义仍是「累计到该节点」，不是单段延迟。关闭连接 abort 采样 task。
+
+改动：`topology-graph.tsx` 标签改为 `<1 ms` / `N ms` / `超时` / `不可用`，链路条 `cursor-grab` 拖动平移并藏滚动条；`session-store` 增加 `databaseRtt` / `markDatabaseRtt`；`connection.rs` 打开后 spawn 采样。vitest topology + session-store 59 例、`tsc --noEmit`、`cargo clippy -p tiny-sql -D warnings`、`db_rtt_payload_omits_hop_index` 通过。**待用户 GUI 实测**：边上只显示毫秒、MySQL 前约 1~5 秒出现延迟、节点多时按住拖动画布。
+
+**上一轮：链路图横线上方 SSH 延迟不显示修复（2026-08-28）**——用户截图反馈多跳连接后链路图横线上方没有延迟标签。RTT 展示功能自 v0.2.0 已存在（`topology-graph.tsx` 的 `RttLabel`，`-top-3` 定位在线段上方），但存在时序 bug：后端隧道建立 1s 后发首个 `ssh:hop-rtt` 事件（之后每 10s 一次），而前端 `open()`/`reconnect()` 流程中——事件到达早了会因 `runtimeSessionId` 仍为 null 被 `markHopRtt` 守卫丢弃，到达晚了会被收尾的 `connectedHopStatuses()` 全量重置冲回 `idle`——首个事件必然失效，延迟标签要等 11s 后第二个事件才出现。修复两点：
 
 1. `session-store.ts` 的 `connectedHopStatuses` 增加 `current` 参数，收尾时合并保留已到达的 `rttState`/`rttMs`（open/reconnect 两处调用点传入 `get().hopStatuses`）。
 2. `ssh-multihop` 的 `RTT_SAMPLE_INTERVAL` 10s → 5s，把「首个事件被吞」的盲窗缩短一半（每跳每 5s 一个 global-request，几十字节，噪声可忽略）。

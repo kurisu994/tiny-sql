@@ -178,6 +178,7 @@ V7-CP0 启动准入按用户要求跳过。
 
 ## 重大决策与架构变更记录
 
+- **2026-08-28 链路图延迟去 SSH 前缀，并用 `db:rtt` 补数据库边**：边上只显示毫秒数。末跳数据库没有 SSH session，不能走 global-request；连接打开后低频 `SELECT 1`（1s 首次 / 5s 间隔 / 2s 超时）经 `db:rtt` 更新进入数据库节点的边，关闭时 abort。链路条改为可拖动画布。
 - **2026-08-28 新增应用设置弹窗并发布 v0.8.0-rc2**：macOS 菜单新增 `Settings...`（⌘,）→ `app:open-settings` → 前端 `SettingsDialog`。五个偏好项（`autoCheckUpdate` / `updateProxy` / `confirmWrite` / `defaultPageSize` / `editorFontSize`）存 localStorage `tiny-sql:settings`，不新增 Rust command 与加密盘格式；`defaultPageSize` 接 session-store 新建浏览 tab 初始分页，`confirmWrite` 接 `confirmWriteOp` 包装（关掉仍传 `allowWrite: true`，后端护栏不受影响）。更新代理支持 http / https / socks4 / socks4a / socks5 / socks5h（`src-tauri/Cargo.toml` 显式依赖 reqwest 打开 socks feature；check 与下载共用同一代理）。四文件版本号切到 `0.8.0-rc2`（发布提交 `53c5e5a`）；按代码再对齐文档：NFR-015 写确认可关闭、NFR-022 无「打开日志目录」UI、代理协议补 socks4a、事件列表补 `app:open-settings`、包描述（db-driver / src-tauri Cargo.toml）改三 driver 口径。
 
 - **2026-08-26 发布 v0.8.0-rc1 并按代码再对齐文档**：四文件版本号切到 `0.8.0-rc1`（发布提交 `754f033`）；SQLite driver 随 rc1 进入 main，前后端 command 仍各 54 个（SQLite 未新增 command）。文档同步：README/README_EN/CONTRIBUTING 更新三 driver 与 rc1 状态；ARCHITECTURE 补 SQLite 取消机制（progress handler 无 control pool）、§7.5 schema 三 driver、§10 测试策略；REQUIREMENTS 实现快照与 NFR-042 更新三实现；ROADMAP/PLAN/RELEASE_CHECKLIST v0.8 段记录 rc1 事实；memory-bank 同步版本号与 driver 稳定值（`mysql` / `postgresql` / `sqlite`）。稳定 Release 仍为 v0.7.0。

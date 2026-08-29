@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   driverLabel,
@@ -9,9 +9,10 @@ import {
   type StoredConnection,
 } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
-import type { TopologyHopStatus } from "@/stores/session-store";
+import type { TopologyHopStatus, TopologyRttMetric } from "@/stores/session-store";
 
 type NodeStatus = "pending" | "connected" | "failed" | "lost";
+type RttKind = "ssh" | "db";
 
 type TopologyNode = {
   id: string;
@@ -19,6 +20,7 @@ type TopologyNode = {
   subtitle: string;
   status: NodeStatus;
   reason: string | null;
+  rttKind: RttKind;
   rttState: TopologyHopStatus["rttState"];
   rttMs: number | null;
 };
@@ -44,23 +46,27 @@ const LINE_CLASS: Record<NodeStatus, string> = {
   lost: "bg-red-500",
 };
 
+const IDLE_RTT: TopologyRttMetric = { rttState: "idle", rttMs: null };
+
 export function TopologyGraph({
   connection,
   sessionStatus,
   hopStatuses,
+  databaseRtt = IDLE_RTT,
 }: {
   connection: StoredConnection;
   sessionStatus: "idle" | "connecting" | "connected" | "error";
   hopStatuses: Record<number, TopologyHopStatus>;
+  databaseRtt?: TopologyRttMetric;
 }) {
   const nodes = useMemo(
-    () => buildNodes(connection, sessionStatus, hopStatuses),
-    [connection, sessionStatus, hopStatuses],
+    () => buildNodes(connection, sessionStatus, hopStatuses, databaseRtt),
+    [connection, sessionStatus, hopStatuses, databaseRtt],
   );
 
   return (
     <div className="border-b border-neutral-200 bg-neutral-50 px-4 py-2 dark:border-neutral-800 dark:bg-neutral-950">
-      <div className="flex h-14 items-center overflow-x-auto overflow-y-hidden">
+      <TopologyCanvas>
         {nodes.map((node, index) => (
           <TopologySegment
             key={node.id}
@@ -69,6 +75,118 @@ export function TopologyGraph({
             isLast={index === nodes.length - 1}
           />
         ))}
+      </TopologyCanvas>
+    </div>
+  );
+}
+
+function TopologyCanvas({ children }: { children: ReactNode }) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const offsetRef = useRef({ x: 0, y: 0 });
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [grabbing, setGrabbing] = useState(false);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    function clampOffset(next: { x: number; y: number }) {
+      const view = viewportRef.current;
+      const content = contentRef.current;
+      if (!view?.clientWidth || !content?.offsetWidth) return next;
+      const keep = 80;
+      const minX = Math.min(keep, view.clientWidth - keep) - content.offsetWidth;
+      const maxX = Math.max(0, view.clientWidth - keep);
+      const minY = Math.min(keep, view.clientHeight - keep) - content.offsetHeight;
+      const maxY = Math.max(0, view.clientHeight - keep);
+      return {
+        x: Math.min(maxX, Math.max(minX, next.x)),
+        y: Math.min(maxY, Math.max(minY, next.y)),
+      };
+    }
+
+    function applyOffset(next: { x: number; y: number }) {
+      const clamped = clampOffset(next);
+      offsetRef.current = clamped;
+      setOffset(clamped);
+    }
+
+    function onDown(event: globalThis.PointerEvent) {
+      if (event.button !== 0) return;
+      dragRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: offsetRef.current.x,
+        originY: offsetRef.current.y,
+      };
+      setGrabbing(true);
+    }
+
+    function onMove(event: globalThis.PointerEvent) {
+      const drag = dragRef.current;
+      if (!drag) return;
+      applyOffset({
+        x: drag.originX + (event.clientX - drag.startX),
+        y: drag.originY + (event.clientY - drag.startY),
+      });
+    }
+
+    function onUp() {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      setGrabbing(false);
+    }
+
+    function onWheel(event: WheelEvent) {
+      event.preventDefault();
+      applyOffset({
+        x: offsetRef.current.x - event.deltaX - (event.shiftKey ? event.deltaY : 0),
+        y: offsetRef.current.y - (event.shiftKey ? 0 : event.deltaY),
+      });
+    }
+
+    viewport.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      viewport.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      viewport.removeEventListener("wheel", onWheel);
+    };
+  }, []);
+
+  return (
+    <div
+      ref={viewportRef}
+      data-testid="topology-canvas"
+      className={cn(
+        "h-20 overflow-hidden overscroll-none select-none touch-none",
+        grabbing ? "cursor-grabbing" : "cursor-grab",
+      )}
+      style={{
+        backgroundImage:
+          "radial-gradient(circle, rgb(163 163 163 / 0.28) 0.6px, transparent 0.7px)",
+        backgroundSize: "10px 10px",
+      }}
+    >
+      <div
+        ref={contentRef}
+        data-testid="topology-canvas-content"
+        className="flex h-full w-max items-center"
+        style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+      >
+        {children}
       </div>
     </div>
   );
@@ -78,6 +196,7 @@ function buildNodes(
   connection: StoredConnection,
   sessionStatus: "idle" | "connecting" | "connected" | "error",
   hopStatuses: Record<number, TopologyHopStatus>,
+  databaseRtt: TopologyRttMetric,
 ): TopologyNode[] {
   const hops = connection.ssh.enabled ? connection.ssh.hops : [];
   const hasFailedHop = Object.values(hopStatuses).some((s) => s.status === "failed");
@@ -95,6 +214,7 @@ function buildNodes(
       subtitle: "127.0.0.1",
       status: "connected",
       reason: null,
+      rttKind: "ssh",
       rttState: "idle",
       rttMs: null,
     },
@@ -106,6 +226,7 @@ function buildNodes(
         subtitle: `${hop.host}:${hop.port}`,
         status: tracked?.status ?? (sessionStatus === "connected" ? "connected" : "pending"),
         reason: tracked?.reason ?? null,
+        rttKind: "ssh" as const,
         rttState: tracked?.rttState ?? "idle",
         rttMs: tracked?.rttMs ?? null,
       } satisfies TopologyNode;
@@ -118,8 +239,9 @@ function buildNodes(
         : `${connection.host}:${connection.port}`,
       status: mysqlStatus,
       reason: null,
-      rttState: "idle",
-      rttMs: null,
+      rttKind: "db",
+      rttState: databaseRtt.rttState,
+      rttMs: databaseRtt.rttMs,
     },
   ];
 }
@@ -156,14 +278,18 @@ function RttLabel({ node }: { node: TopologyNode }) {
   const label =
     node.rttState === "measured" && node.rttMs !== null
       ? node.rttMs < 1
-        ? "SSH <1 ms"
-        : `SSH ${Math.round(node.rttMs)} ms`
+        ? "<1 ms"
+        : `${Math.round(node.rttMs)} ms`
       : node.rttState === "timeout"
-        ? "SSH 超时"
-        : "SSH 不可用";
+        ? "超时"
+        : "不可用";
+  const title =
+    node.rttKind === "db"
+      ? `累计到${node.title}的 SELECT 1 往返时间；经过整条链路，不是单段延迟`
+      : `累计到${node.title}的 SSH 协议探测 RTT；不是 ICMP，也不是单段链路延迟`;
   return (
     <span
-      title={`累计到${node.title}的 SSH 协议探测 RTT；不是 ICMP，也不是单段链路延迟`}
+      title={title}
       className={cn(
         "absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded px-1 text-[10px] font-medium",
         node.rttState === "measured"

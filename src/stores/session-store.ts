@@ -24,6 +24,7 @@ import {
   type EditCell,
   type HopStatusPayload,
   type HopRttPayload,
+  type DbRttPayload,
   type IndexMeta,
   type RowSet,
   type SchemaMeta,
@@ -58,6 +59,13 @@ export interface TopologyHopStatus {
   reason: string | null;
   rttState: "idle" | HopRttPayload["state"];
   rttMs: number | null;
+}
+
+/** 拓扑边上的延迟指标；与节点四态独立。 */
+export type TopologyRttMetric = Pick<TopologyHopStatus, "rttState" | "rttMs">;
+
+function idleRttMetric(): TopologyRttMetric {
+  return { rttState: "idle", rttMs: null };
 }
 
 /** 单个查询 tab 的完整独立状态（FR-109）。 */
@@ -560,6 +568,8 @@ interface SessionState {
   tabs: QueryTab[];
   activeTabId: string | null;
   hopStatuses: Record<number, TopologyHopStatus>;
+  /** 累计到数据库节点的 SELECT 1 RTT；与 SSH 跳指标独立。 */
+  databaseRtt: TopologyRttMetric;
   /** keepalive 已断开的跳序号 */
   lostHops: number[];
   /** 已打开且未关闭的连接，切换焦点时不再拆旧隧道 */
@@ -652,6 +662,7 @@ interface SessionState {
   discardAllPendingEdits: () => void;
   markHopStatus: (payload: HopStatusPayload) => void;
   markHopRtt: (payload: HopRttPayload) => void;
+  markDatabaseRtt: (payload: DbRttPayload) => void;
   markHopLost: (hopIndex: number) => void;
 }
 
@@ -688,6 +699,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   loadingData: false,
   ...initialTabs(),
   hopStatuses: {},
+  databaseRtt: idleRttMetric(),
   lostHops: [],
   openSessions: [],
 
@@ -704,6 +716,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       switchedDatabase: null,
       lostHops: [],
       hopStatuses: initialHopStatuses(connection ?? get().activeConnection),
+      databaseRtt: idleRttMetric(),
       passphraseFor: null,
       loadingData: false,
       ...initialTabs(),
@@ -799,6 +812,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       loadingData: false,
       tabs: resetTabExecution(get().tabs),
       hopStatuses: initialHopStatuses(current),
+      databaseRtt: idleRttMetric(),
       lostHops: [],
     });
     let openedSessionId: string | null = null;
@@ -882,6 +896,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       loadingData: false,
       ...initialTabs(),
       hopStatuses: {},
+      databaseRtt: idleRttMetric(),
       lostHops: [],
     });
     if (openId) {
@@ -1918,6 +1933,31 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 : payload.state,
             rttMs: measured ? payload.rttMs : null,
           },
+        },
+      };
+    }),
+
+  markDatabaseRtt: (payload) =>
+    set((s) => {
+      if (
+        !s.runtimeSessionId ||
+        payload.sessionId !== s.runtimeSessionId ||
+        (s.activeConnection?.id && payload.connectionId !== s.activeConnection.id)
+      ) {
+        return s;
+      }
+      const measured =
+        payload.state === "measured" &&
+        payload.rttMs !== null &&
+        Number.isFinite(payload.rttMs) &&
+        payload.rttMs >= 0;
+      return {
+        databaseRtt: {
+          rttState:
+            payload.state === "measured" && !measured
+              ? "unavailable"
+              : payload.state,
+          rttMs: measured ? payload.rttMs : null,
         },
       };
     }),

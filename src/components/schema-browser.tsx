@@ -78,6 +78,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     tabs,
     activeTabId,
     hopStatuses,
+    databaseRtt,
     lostHops,
     errorMsg,
     pendingDbSwitch,
@@ -583,6 +584,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         connection={connection}
         sessionStatus={status}
         hopStatuses={hopStatuses}
+        databaseRtt={databaseRtt}
       />
 
       {lostHops.length > 0 && (

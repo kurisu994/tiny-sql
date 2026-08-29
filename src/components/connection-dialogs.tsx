@@ -6,9 +6,11 @@ import { listen } from "@tauri-apps/api/event";
 
 import { EyeIcon, EyeOffIcon } from "@/components/icons";
 import {
+  DB_EVENTS,
   SSH_EVENTS,
   isTauriRuntime,
   tofuApi,
+  type DbRttPayload,
   type HopRttPayload,
   type HopStatusPayload,
   type TofuRequestPayload,
@@ -29,6 +31,7 @@ export function ConnectionDialogs() {
   const cancelPassphrase = useSessionStore((s) => s.cancelPassphrase);
   const markHopStatus = useSessionStore((s) => s.markHopStatus);
   const markHopRtt = useSessionStore((s) => s.markHopRtt);
+  const markDatabaseRtt = useSessionStore((s) => s.markDatabaseRtt);
 
   // TOFU 请求事件 → 入队
   useEffect(() => {
@@ -62,6 +65,17 @@ export function ConnectionDialogs() {
       un.then((f) => f());
     };
   }, [markHopRtt]);
+
+  // 数据库 SELECT 1 RTT → 画在进入数据库节点的边上
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const un = listen<DbRttPayload>(DB_EVENTS.rtt, (e) => {
+      markDatabaseRtt(e.payload);
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [markDatabaseRtt]);
 
   const current = tofuQueue[0] ?? null;
 

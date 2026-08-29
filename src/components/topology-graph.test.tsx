@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { TopologyGraph } from "@/components/topology-graph";
@@ -47,7 +47,7 @@ const connection: StoredConnection = {
 };
 
 describe("TopologyGraph SSH RTT", () => {
-  it("显示累计 SSH 协议 RTT 并明确不是 ICMP", () => {
+  it("显示累计协议 RTT 且标签不含 SSH 前缀", () => {
     render(
       <TopologyGraph
         connection={connection}
@@ -63,10 +63,11 @@ describe("TopologyGraph SSH RTT", () => {
       />,
     );
 
-    expect(screen.getByText("SSH 13 ms")).toHaveAttribute(
+    expect(screen.getByText("13 ms")).toHaveAttribute(
       "title",
       expect.stringContaining("不是 ICMP"),
     );
+    expect(screen.queryByText("SSH 13 ms")).not.toBeInTheDocument();
     expect(screen.getByText("PostgreSQL")).toBeInTheDocument();
   });
 
@@ -86,7 +87,46 @@ describe("TopologyGraph SSH RTT", () => {
       />,
     );
 
-    expect(screen.getByText("SSH 超时")).toBeInTheDocument();
+    expect(screen.getByText("超时")).toBeInTheDocument();
+    expect(screen.queryByText("SSH 超时")).not.toBeInTheDocument();
     expect(screen.getAllByText("正常")).toHaveLength(3);
+  });
+
+  it("数据库节点显示 SELECT 1 累计延迟", () => {
+    render(
+      <TopologyGraph
+        connection={connection}
+        sessionStatus="connected"
+        hopStatuses={{
+          0: {
+            status: "connected",
+            reason: null,
+            rttState: "measured",
+            rttMs: 12.6,
+          },
+        }}
+        databaseRtt={{ rttState: "measured", rttMs: 18.2 }}
+      />,
+    );
+
+    expect(screen.getByText("18 ms")).toHaveAttribute(
+      "title",
+      expect.stringContaining("SELECT 1"),
+    );
+  });
+
+  it("拖动画布会平移内容", () => {
+    render(
+      <TopologyGraph
+        connection={connection}
+        sessionStatus="connected"
+        hopStatuses={{}}
+      />,
+    );
+    const canvas = screen.getByTestId("topology-canvas");
+    const content = screen.getByTestId("topology-canvas-content");
+    fireEvent.pointerDown(canvas, { button: 0, clientX: 120, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 80, clientY: 10 });
+    expect(content.style.transform).toBe("translate(-40px, 0px)");
   });
 });

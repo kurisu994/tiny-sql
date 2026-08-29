@@ -3,7 +3,13 @@
 //! 负责纯本地连接 CRUD 与测试。connection_test 支持可选多跳 SSH，并把
 //! SSL / 高级连接参数转换给 db-driver。
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use tokio::task::JoinHandle;
 
 use db_driver::{
     Driver, DriverKind, MySqlConnectSettings, MySqlTlsMode, PostgresConnectSettings,
@@ -329,6 +335,24 @@ struct HopRttPayload {
     rtt_ms: Option<f64>,
 }
 
+/// 数据库节点 RTT 采样事件；数值为累计 SELECT 1 往返，经过整条链路。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DbRttPayload {
+    connection_id: String,
+    session_id: String,
+    /// "measured" / "timeout" / "unavailable"
+    state: String,
+    rtt_ms: Option<f64>,
+}
+
+/// 首次采样延迟；握手完成后再开始，不进入连接关键路径。
+const DB_RTT_INITIAL_DELAY: Duration = Duration::from_secs(1);
+/// 低频采样，避免给业务连接池制造额外噪声。
+const DB_RTT_SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+/// 单次 SELECT 1 探测超时；超时只更新指标，不改变连接状态。
+const DB_RTT_SAMPLE_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// 打开一条已保存的连接：建立（可选）SSH 隧道 + 对应数据库连接池，存入注册表。
 ///
 /// `passphrase` 为本次提供的私钥口令；优先级：本次传入 > 会话缓存 > 已持久化
@@ -514,12 +538,19 @@ async fn open_connection_locked(
             .unwrap()
             .insert(id.to_string(), Zeroizing::new(pp));
     }
+    let db_rtt_task = spawn_db_rtt_monitor(
+        driver.clone(),
+        app.clone(),
+        id.to_string(),
+        session_id.clone(),
+    );
     state.connections.lock().await.insert(
         id.to_string(),
         OpenConnection {
             driver,
             tunnel,
             session_id: session_id.clone(),
+            db_rtt_task: Some(db_rtt_task),
         },
     );
     let now = chrono::Utc::now().to_rfc3339();
@@ -641,6 +672,37 @@ fn emit_hop_status(
             reason: reason.map(ToString::to_string),
         },
     );
+}
+
+/// 后台采样累计到数据库的 SELECT 1 RTT；失败只上报指标，不改变连接状态。
+fn spawn_db_rtt_monitor(
+    driver: ActiveDriver,
+    app: AppHandle,
+    connection_id: String,
+    session_id: String,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        tokio::time::sleep(DB_RTT_INITIAL_DELAY).await;
+        loop {
+            let started = Instant::now();
+            let (state, rtt_ms) =
+                match tokio::time::timeout(DB_RTT_SAMPLE_TIMEOUT, Driver::ping(&driver)).await {
+                    Ok(Ok(_)) => ("measured", Some(started.elapsed().as_secs_f64() * 1000.0)),
+                    Ok(Err(_)) => ("unavailable", None),
+                    Err(_) => ("timeout", None),
+                };
+            let _ = app.emit(
+                "db:rtt",
+                DbRttPayload {
+                    connection_id: connection_id.clone(),
+                    session_id: session_id.clone(),
+                    state: state.to_string(),
+                    rtt_ms,
+                },
+            );
+            tokio::time::sleep(DB_RTT_SAMPLE_INTERVAL).await;
+        }
+    })
 }
 
 /// 构造 RTT 回调；测量的是 SSH global-request 往返，不等同 ICMP 或单段延迟。
@@ -825,6 +887,23 @@ mod tests {
         assert_eq!(value["hopIndex"], 2);
         assert_eq!(value["state"], "measured");
         assert_eq!(value["rttMs"], 12.5);
+    }
+
+    #[test]
+    fn db_rtt_payload_omits_hop_index() {
+        let payload = DbRttPayload {
+            connection_id: "c1".to_string(),
+            session_id: "session-new".to_string(),
+            state: "measured".to_string(),
+            rtt_ms: Some(18.2),
+        };
+
+        let value = serde_json::to_value(payload).unwrap();
+        assert_eq!(value["connectionId"], "c1");
+        assert_eq!(value["sessionId"], "session-new");
+        assert_eq!(value["state"], "measured");
+        assert_eq!(value["rttMs"], 18.2);
+        assert!(value.get("hopIndex").is_none());
     }
 
     #[test]

@@ -123,6 +123,7 @@ beforeEach(() => {
     tabs: [makeTab()],
     activeTabId: "tab-1",
     hopStatuses: {},
+    databaseRtt: { rttState: "idle", rttMs: null },
     lostHops: [],
     openSessions: [],
   });
@@ -668,6 +669,50 @@ describe("session-store", () => {
     });
   });
 
+  it("数据库 RTT 只更新当前 session 指标且超时不改变连接状态", () => {
+    useSessionStore.setState({
+      activeConnection: sampleConnection("mysql"),
+      runtimeSessionId: "session-new",
+      status: "connected",
+      databaseRtt: { rttState: "idle", rttMs: null },
+    });
+
+    useSessionStore.getState().markDatabaseRtt({
+      connectionId: "c1",
+      sessionId: "session-old",
+      state: "measured",
+      rttMs: 999,
+    });
+    expect(useSessionStore.getState().databaseRtt).toEqual({
+      rttState: "idle",
+      rttMs: null,
+    });
+
+    useSessionStore.getState().markDatabaseRtt({
+      connectionId: "c1",
+      sessionId: "session-new",
+      state: "measured",
+      rttMs: 18.2,
+    });
+    expect(useSessionStore.getState().databaseRtt).toEqual({
+      rttState: "measured",
+      rttMs: 18.2,
+    });
+    expect(useSessionStore.getState().status).toBe("connected");
+
+    useSessionStore.getState().markDatabaseRtt({
+      connectionId: "c1",
+      sessionId: "session-new",
+      state: "timeout",
+      rttMs: null,
+    });
+    expect(useSessionStore.getState().databaseRtt).toEqual({
+      rttState: "timeout",
+      rttMs: null,
+    });
+    expect(useSessionStore.getState().status).toBe("connected");
+  });
+
   it("open 收尾不冲掉连接窗口内已到达的 SSH RTT 采样", async () => {
     const connection = sampleConnection("mysql");
     connection.ssh = {
@@ -711,6 +756,34 @@ describe("session-store", () => {
       reason: null,
       rttState: "measured",
       rttMs: 12.6,
+    });
+  });
+
+  it("open 收尾不冲掉连接窗口内已到达的数据库 RTT 采样", async () => {
+    const connection = sampleConnection("mysql");
+    const databases = deferred<unknown>();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "connection_open") return Promise.resolve("session-1");
+      if (cmd === "db_list_databases") return databases.promise;
+      return Promise.resolve(undefined);
+    });
+
+    const opening = useSessionStore.getState().open("c1", undefined, connection);
+    await vi.waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("db_list_databases", expect.anything());
+    });
+    useSessionStore.getState().markDatabaseRtt({
+      connectionId: "c1",
+      sessionId: "session-1",
+      state: "measured",
+      rttMs: 18.2,
+    });
+    databases.resolve([{ name: "app", isCurrent: true }]);
+    await opening;
+
+    expect(useSessionStore.getState().databaseRtt).toEqual({
+      rttState: "measured",
+      rttMs: 18.2,
     });
   });
 

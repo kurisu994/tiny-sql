@@ -109,6 +109,6 @@
 - 导入导出与备份：`csv_import_preview`、`db_import_csv`、`db_export_dump`、`db_import_dump`、`backup_probe_tools`、`db_backup_export`、`db_backup_restore`、`db_export_query`。
 - 拷贝与权限：`db_copy_preview`、`db_copy_table_rows`、`db_list_accounts`、`db_show_grants`。
 - 事务 / SQL 文件 / 安全 / 历史 / TOFU：`transaction_*`（5）、`sql_file_*`（5）、`security_*`（6）、`history_list/clear`、`ssh_tofu_decision`。
-- 事件：`ssh:tofu-request`、`ssh:hop-status`、`ssh:hop-rtt`、`backup:progress`、`copy:progress`、`app:check-update`、`app:open-settings`。
+- 事件：`ssh:tofu-request`、`ssh:hop-status`、`ssh:hop-rtt`、`db:rtt`、`backup:progress`、`copy:progress`、`app:check-update`、`app:open-settings`。
 
 相关：[[systemPatterns]] · [[progress]]
