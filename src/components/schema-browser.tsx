@@ -2,7 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
-import { PlusIcon, XIcon } from "lucide-react";
+import {
+  CopyIcon,
+  DatabaseBackupIcon,
+  GitCompareIcon,
+  KeyRoundIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Table2Icon,
+  UploadIcon,
+  WaypointsIcon,
+  XIcon,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { HistoryPanel } from "@/components/history-panel";
@@ -617,27 +628,29 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         </div>
       )}
 
-      <div className="flex shrink-0 gap-1 border-b border-neutral-200 px-3 py-1 text-xs dark:border-neutral-800">
+      <div className="flex shrink-0 items-center gap-0.5 border-b border-neutral-200 px-3 py-1 text-neutral-500 dark:border-neutral-800">
         {(
           [
-            ["browse", "浏览"],
-            ["compare", "对比"],
-            ["er", "关系图"],
-            ["privilege", "权限"],
+            ["browse", "浏览", Table2Icon],
+            ["er", "关系图", WaypointsIcon],
+            ["compare", "对比", GitCompareIcon],
+            ["privilege", "权限", KeyRoundIcon],
           ] as const
-        ).map(([id, label]) => (
+        ).map(([id, label, Icon]) => (
           <button
             key={id}
             type="button"
             onClick={() => setWorkspace(id)}
+            aria-label={label}
+            title={label}
             className={cn(
-              "rounded px-2 py-0.5",
+              "flex size-6 items-center justify-center rounded",
               workspace === id
-                ? "bg-neutral-200 dark:bg-neutral-800"
-                : "hover:bg-neutral-100 dark:hover:bg-neutral-800",
+                ? "bg-neutral-200 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100"
+                : "hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200",
             )}
           >
-            {label}
+            <Icon className="size-3.5" />
           </button>
         ))}
       </div>
@@ -651,9 +664,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       <div className="flex min-h-0 flex-1">
         {/* 左：database / schema / table 树 */}
         <aside className="w-80 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
-          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-100 bg-white/95 px-3 py-1.5 text-xs text-neutral-500 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
-            <span className="shrink-0">数据库对象</span>
-            <div className="flex shrink-0 items-center gap-1">
+          <div className="sticky top-0 z-10 flex items-center justify-end border-b border-neutral-100 bg-white/95 px-3 py-1.5 text-xs text-neutral-500 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
+            <div className="flex shrink-0 items-center gap-0.5">
               {/* 新建表（FR-251）：需已选中 database（MySQL）/ schema（PostgreSQL） */}
               <button
                 type="button"
@@ -666,9 +678,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 }
                 aria-label="新建表"
                 title="新建表"
-                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >
-                新建
+                <PlusIcon className="size-3.5" />
               </button>
               <button
                 type="button"
@@ -682,9 +694,9 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 }
                 aria-label="复制为新表"
                 title="把当前表复制为同库新表"
-                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >
-                复制
+                <CopyIcon className="size-3.5" />
               </button>
               {/* 导入 SQL dump（FR-252）：流式执行整个文件 */}
               <button
@@ -698,10 +710,10 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                   (connection.driver === "postgresql" && !selectedSchema)
                 }
                 aria-label="导入 SQL"
-                title="导入 SQL dump 文件（流式逐条执行）"
-                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                title={importingDump ? "正在导入 SQL dump" : "导入 SQL dump 文件（流式逐条执行）"}
+                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >
-                {importingDump ? "导入中" : "导入"}
+                <UploadIcon className={cn("size-3.5", importingDump && "animate-pulse")} />
               </button>
               <button
                 type="button"
@@ -709,19 +721,21 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 disabled={!connected || !selectedDb}
                 aria-label="官方备份"
                 title="官方 mysqldump / pg_dump 备份与恢复（不是 SQL dump）"
-                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >
-                备份
+                <DatabaseBackupIcon className="size-3.5" />
               </button>
               <button
                 type="button"
                 onClick={refreshMetadata}
                 disabled={!connected || refreshingMetadata}
                 aria-label="刷新数据库对象"
-                title="刷新数据库对象"
-                className="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-800"
+                title={refreshingMetadata ? "正在刷新数据库对象" : "刷新数据库对象"}
+                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >
-                {refreshingMetadata ? "刷新中" : "刷新"}
+                <RefreshCwIcon
+                  className={cn("size-3.5", refreshingMetadata && "animate-spin")}
+                />
               </button>
             </div>
           </div>
