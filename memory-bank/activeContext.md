@@ -2,11 +2,15 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-29（关系图性能：批量拉结构 + 画布直绘）
+**最后更新**：2026-08-29（发布 v0.8.0 正式版）
 
 ## 当前状态
 
-**本轮：关系图两处性能问题（2026-08-29）**——用户反馈①表多的库首次加载很慢；②触控板缩放掉帧。
+**本轮：发布 v0.8.0 正式版（2026-08-29）**——关系图两次改动合入 main 后直接切正式版。`just check` 全绿（vitest 207 / Rust 全套）后执行 `just release v0.8.0`：版本号 0.8.0-rc2 → 0.8.0，CHANGELOG `[Unreleased]` 切出 `## [0.8.0] — 2026-08-29`，发布提交 `12d3aae`，tag `v0.8.0`，Release run `33230468506` 触发四平台构建。
+
+两点记录：① RELEASE_CHECKLIST 的 v0.8 正式发布条件是「GUI 实测通过后执行」，而关系图重做与 `db_schema_overview` 是 rc2 之后新增、只在 jsdom + 截图里验证过；已向用户说明风险，用户选择直接发正式版。② 正式版会生成 `latest.json`，v0.7 用户会收到自动更新推送——**发布后若在 GUI 上发现 ER 相关问题，走 v0.8.1 补丁**。
+
+**上一轮：关系图两处性能问题（2026-08-29）**——用户反馈①表多的库首次加载很慢；②触控板缩放掉帧。
 
 1. **首屏：3N 次往返 → 常数次查询**。`loadSchemaSnapshot` 对每张表并发查列 / 索引 / 约束，74 张表就是 222 次往返，走隧道更糟。新增 `Driver::schema_overview` + `db_schema_overview` command：MySQL 用 4 条 information_schema 全库查询（tables / columns / table_constraints / key_column_usage）在内存归并，PostgreSQL 用 3 条 pg_catalog 全 schema 查询，**SQLite 仍逐表循环**（本地文件 pragma 很便宜，只需把 N 次 IPC 收敛成 1 次）。新类型 `TableOverview` 不含索引——ER 的键位标记看约束与 `columnKey`，三个 driver 都已归一化成 PRI/UNI/MUL，不必为它多查一轮。真实 MySQL 实测：74 张表按旧前端并发度 6 计 9.98s → 0.71s（约 14 倍）。ER 结果进 metadata cache（新增 `overview` resource，5 分钟 TTL），工具栏加刷新按钮强制重拉。`loadSchemaSnapshot` 保留给结构对比用，未动。
 2. **缩放掉帧：wheel 事件不再进 React 状态**。触控板一次捏合能发上百个 wheel 事件，原来每个都 `setScale`/`setOffset`，几百张卡片全量 diff。改成 `viewRef` + rAF 直接写 DOM（content 的 transform、viewport 的网格背景、缩放百分比的 textContent），React 只在手势停下 120ms 后收到一次低频镜像 `viewSync`，仅用于重算可视区裁剪。为防重渲染覆盖 ref 写入的值，JSX 不再输出 transform / background-position，改由 `useLayoutEffect(paint)` 每次渲染后回写。卡片与连线加 `memo` + 稳定回调，拖一张卡片只重绘那一张。

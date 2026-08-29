@@ -4,6 +4,8 @@
 
 ## v0.8 发布检查清单
 
+> **v0.8.0 正式版发布结果（2026-08-29）**：发布提交 `12d3aae`、tag `v0.8.0`，Release workflow [run 33230468506](https://github.com/kurisu994/tiny-sql/actions/runs/33230468506) 四平台全部成功。[GitHub Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.8.0) 为非草稿、非预发布且是 latest，含 macOS arm64/x64 `.dmg` 与 `.app.tar.gz(.sig)`、Windows x64 `.exe(.sig)`、Linux x64 `.AppImage(.sig)` 和正式版 `latest.json`；四个平台 URL 均已核对指向 `v0.8.0` 资产且带签名。相比 rc2 追加了关系图重做（实体卡片画布）与 `db_schema_overview` 整库结构批量拉取——这两项只做过 jsdom + 截图验证，作者决定不再等额外 GUI 实测轮次直接切正式版，发布后 GUI 上发现的 ER 问题走 v0.8.1 补丁。
+>
 > **v0.8.0-rc2 发布结果（2026-08-28）**：发布提交 `53c5e5a`、tag `v0.8.0-rc2`（2026-08-26 先发 `v0.8.0-rc1`，提交 `754f033`）；prerelease（非草稿，无 `latest.json`），不影响 v0.7.0 稳定版用户。四平台构建以 GitHub Actions 为准。rc2 含应用设置弹窗（Settings…，⌘,）。
 
 ### v0.8 RC 前本地检查
@@ -24,7 +26,7 @@
 ### v0.8 正式发布追加条件
 
 - V8-T8.1 / T8.2 由作者验收。
-- rc2 已发布；GUI 实测通过后执行 `just release v0.8.0`。
+- rc2 已发布；GUI 实测通过后执行 `just release v0.8.0`。**（2026-08-29 已执行）**
 
 ## v0.7 发布检查清单
 

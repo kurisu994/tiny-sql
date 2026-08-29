@@ -14,7 +14,7 @@
 | v0.5 | ✅ 随 v0.7.0 正式发布 | FR-253 / FR-260 / FR-221 |
 | v0.6 | ✅ 随 v0.7.0 正式发布 | FR-220 / FR-261 / FR-263 |
 | v0.7 | ✅ 正式版已发布 | 2026-08-24 `just release v0.7.0`（发布提交 `d2d3f5c`，tag `v0.7.0`）。范围含 v0.4–v0.7 全部已编码功能 |
-| v0.8 | 🚧 rc2 已发布 | 2026-08-24 完成 FR-270–275 与 `just check`（vitest 168 / app_lib 67）；2026-08-25 追加 SQLite driver（见下）后 `just check` 复跑全绿（vitest 179 / db-driver 单测 47 + SQLite integration 23）；2026-08-26 发布 `v0.8.0-rc1`；2026-08-28 新增应用设置弹窗并发布 `v0.8.0-rc2`（prerelease，四平台构建成功，无 `latest.json`，vitest 190）。待 GUI 实测与正式切版。双向同步 / BI / AI 挂 v0.9+ |
+| v0.8 | ✅ 正式版已发布 | 2026-08-29 `just release v0.8.0`（发布提交 `12d3aae`，tag `v0.8.0`，Release run `33230468506` 四平台全部成功，Release 为 latest，含四平台资产与已核对的 `latest.json`）。范围：FR-270–275、SQLite driver、应用设置弹窗与更新代理、ER 关系图重做为实体卡片画布 + 整库结构批量拉取。rc1 2026-08-26、rc2 2026-08-28。双向同步 / BI / AI 挂 v0.9+ |
 
 CHANGELOG 已切出 `0.1.0` 版本段，`[Unreleased]` 已开始记录后续体验变化。v0.1.0 Release notes 与该版本段一致，并明确记录三项已知限制。
 
