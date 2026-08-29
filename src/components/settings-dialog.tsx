@@ -20,11 +20,13 @@ import {
 } from "@/components/ui/tabs";
 import { isTauriRuntime, updateApi } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
+import { THEME_CHOICES, THEME_LABELS } from "@/lib/appearance";
 import {
   EDITOR_FONT_SIZE_CHOICES,
   isValidProxyUrl,
   PAGE_SIZE_CHOICES,
   useSettingsStore,
+  type ThemePreference,
 } from "@/stores/settings-store";
 
 interface SettingsDialogProps {
@@ -99,6 +101,7 @@ export function SettingsDialog({
     confirmWrite,
     defaultPageSize,
     editorFontSize,
+    theme,
     update,
     reset,
   } = useSettingsStore();
@@ -157,6 +160,26 @@ export function SettingsDialog({
           </TabsList>
 
           <TabsContent value="general" className="min-h-56">
+            <SettingRow
+              title="外观"
+              description="界面浅色或深色。跟随系统时与 macOS 外观一致。"
+              control={
+                <select
+                  aria-label="外观"
+                  className={selectClass}
+                  value={theme}
+                  onChange={(e) =>
+                    update({ theme: e.target.value as ThemePreference })
+                  }
+                >
+                  {THEME_CHOICES.map((choice) => (
+                    <option key={choice} value={choice}>
+                      {THEME_LABELS[choice]}
+                    </option>
+                  ))}
+                </select>
+              }
+            />
             <SettingRow
               title="自动检查更新"
               description="启动 5 秒后检查一次，之后每 24 小时一次；关闭后仍可从菜单手动检查。"

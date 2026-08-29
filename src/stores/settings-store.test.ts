@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { resetAppearanceForTests } from "@/lib/appearance";
 import {
   DEFAULT_SETTINGS,
   effectiveProxy,
@@ -10,10 +11,28 @@ import {
 
 const STORAGE_KEY = "tiny-sql:settings";
 
+function mockMatchMedia(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: (query: string) => ({
+      matches,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 beforeEach(() => {
   localStorage.clear();
   useSettingsStore.setState({ ...DEFAULT_SETTINGS });
   document.documentElement.style.removeProperty("--tiny-sql-editor-font-size");
+  resetAppearanceForTests();
+  mockMatchMedia(false);
 });
 
 describe("settings-store", () => {
@@ -107,6 +126,28 @@ describe("settings-store", () => {
     );
     expect(loadSettings().updateProxy).toBe("socks5://");
     expect(effectiveProxy("socks5://")).toBeUndefined();
+  });
+
+  it("外观默认跟随系统，非法值回落默认", () => {
+    expect(loadSettings().theme).toBe("system");
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_SETTINGS, theme: "sepia" }),
+    );
+    expect(loadSettings().theme).toBe("system");
+  });
+
+  it("hydrate / update 外观会切换 html.dark", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_SETTINGS, theme: "dark" }),
+    );
+    useSettingsStore.getState().hydrate();
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+
+    useSettingsStore.getState().update({ theme: "light" });
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(loadSettings().theme).toBe("light");
   });
 
   it("reset 恢复默认并落盘", () => {

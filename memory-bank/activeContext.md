@@ -2,11 +2,15 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-28（链路图画布拖动修复）
+**最后更新**：2026-08-28（暗色底改为 #181818）
 
 ## 当前状态
 
-**本轮：链路图画布拖不动修复（2026-08-28）**——上一版用 `scrollLeft` + 元素上的 React pointer 事件：内容没溢出时拖了等于没动，且 `setState`/`setPointerCapture` 在 WKWebView 里容易丢手势。改成视口原生 `pointerdown` + window `pointermove/up`，用 `transform` 平移，内容即使没溢出也能拖；滚轮也能平移。vitest topology 4 例、`tsc --noEmit` 通过。**待用户 GUI 实测**：按住节点或空白处拖动链路。
+**本轮：暗色底改为设计色 #181818（2026-08-28）**——用户给的色卡取样为 rgb(24,24,24)。`.dark` 的 `--background` / `--sidebar` / `--color-neutral-950` 与 SQL 编辑器底都改成 `#181818`，避免窗口是炭黑、局部 `neutral-950` 仍是纯黑。
+
+**上一轮：设置里加外观三选一（2026-08-28）**——不在连接列表顶栏塞太阳按钮。`theme` 进 `tiny-sql:settings`，设置 → 通用第一项：跟随系统 / 浅色 / 深色，默认跟随系统。Tailwind 暗色改为 `<html class="dark">`（`@custom-variant dark`），CSS 变量从 `prefers-color-scheme` 迁到 `.dark`。启动脚本读 localStorage 避免闪浅色。**待用户 GUI 实测**：⌘, 改外观立即切换。
+
+**上一轮：链路图画布拖不动修复（2026-08-28）**——上一版用 `scrollLeft` + 元素上的 React pointer 事件：内容没溢出时拖了等于没动，且 `setState`/`setPointerCapture` 在 WKWebView 里容易丢手势。改成视口原生 `pointerdown` + window `pointermove/up`，用 `transform` 平移，内容即使没溢出也能拖；滚轮也能平移。vitest topology 4 例、`tsc --noEmit` 通过。**待用户 GUI 实测**：按住节点或空白处拖动链路。
 
 **上一轮：链路图延迟只显示毫秒 + 数据库边补 SELECT 1 RTT + 画布拖动（2026-08-28）**——用户截图反馈三点：① 边上「SSH 90 ms」不要 SSH 前缀；② 最后到 MySQL 的线没有延迟；③ 区域希望能像画布一样拖着看。
 

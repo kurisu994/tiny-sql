@@ -99,7 +99,7 @@
 | 连接 driver 持久化值 | `mysql` / `postgresql` / `sqlite`；旧记录缺字段默认 `mysql`，兼容读取不主动重写密文。SQLite 复用 `database` 字段存数据库文件路径，`host` / `port` / `user` / `password` / `ssh` / `ssl` 均不参与 |
 | 连接只读 / 环境 | `readOnly` 缺省 false；`env` 为 `none` / `prod` / `staging` / `dev`（FR-270 / FR-271） |
 | known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
-| 应用偏好设置 | localStorage 键 `tiny-sql:settings`（纯 UI 偏好：`autoCheckUpdate` / `updateProxy` / `confirmWrite` / `defaultPageSize` / `editorFontSize`），损坏或越界逐字段回落默认（v0.8 设置弹窗） |
+| 应用偏好设置 | localStorage 键 `tiny-sql:settings`（纯 UI 偏好：`autoCheckUpdate` / `updateProxy` / `confirmWrite` / `defaultPageSize` / `editorFontSize` / `theme`），损坏或越界逐字段回落默认（v0.8 设置弹窗）。`theme` 为 `system` / `light` / `dark`，默认 `system`；暗色通过 `<html class="dark">` 生效 |
 
 ## 当前 command（src-tauri 实际，54 个）
 

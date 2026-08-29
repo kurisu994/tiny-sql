@@ -7,12 +7,19 @@
 
 import { create } from "zustand";
 
+import {
+  applyAppearance,
+  isThemePreference,
+  type ThemePreference,
+} from "@/lib/appearance";
+
 const STORAGE_KEY = "tiny-sql:settings";
 
 /** 数据浏览默认每页行数的可选项，与 browse-view 的分页下拉保持一致 */
 export const PAGE_SIZE_CHOICES = [100, 500, 1000] as const;
 /** SQL 编辑器字号可选项（px） */
 export const EDITOR_FONT_SIZE_CHOICES = [11, 12, 13, 14, 16] as const;
+export type { ThemePreference };
 /** 代理地址最大长度，防止误粘贴超长内容塞满 localStorage */
 const PROXY_MAX_LENGTH = 512;
 
@@ -63,6 +70,8 @@ export interface Settings {
   defaultPageSize: number;
   /** SQL 编辑器字号（px） */
   editorFontSize: number;
+  /** 界面外观：跟随系统 / 浅色 / 深色 */
+  theme: ThemePreference;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -71,6 +80,7 @@ export const DEFAULT_SETTINGS: Settings = {
   confirmWrite: true,
   defaultPageSize: 1000,
   editorFontSize: 12,
+  theme: "system",
 };
 
 /** 逐字段校验读回的 JSON：任何字段缺失或越界都退回默认值，不整体丢弃 */
@@ -108,6 +118,7 @@ function sanitize(raw: unknown): Settings {
       EDITOR_FONT_SIZE_CHOICES,
       DEFAULT_SETTINGS.editorFontSize as (typeof EDITOR_FONT_SIZE_CHOICES)[number],
     ),
+    theme: isThemePreference(value.theme) ? value.theme : DEFAULT_SETTINGS.theme,
   };
 }
 
@@ -120,6 +131,17 @@ export function loadSettings(): Settings {
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
+}
+
+function snapshot(state: Settings): Settings {
+  return {
+    autoCheckUpdate: state.autoCheckUpdate,
+    updateProxy: state.updateProxy,
+    confirmWrite: state.confirmWrite,
+    defaultPageSize: state.defaultPageSize,
+    editorFontSize: state.editorFontSize,
+    theme: state.theme,
+  };
 }
 
 function persist(settings: Settings) {
@@ -142,7 +164,7 @@ export function applyEditorFontSize(size: number) {
 }
 
 interface SettingsState extends Settings {
-  /** 从 localStorage 载入并同步副作用（CSS 变量），应用启动时调用一次 */
+  /** 从 localStorage 载入并同步副作用（CSS 变量与外观 class），应用启动时调用一次 */
   hydrate: () => void;
   /** 更新部分字段并立即持久化 */
   update: (patch: Partial<Settings>) => void;
@@ -157,31 +179,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const loaded = loadSettings();
     set(loaded);
     applyEditorFontSize(loaded.editorFontSize);
+    applyAppearance(loaded.theme);
   },
 
   update: (patch) => {
     set(patch);
-    const {
-      autoCheckUpdate,
-      updateProxy,
-      confirmWrite,
-      defaultPageSize,
-      editorFontSize,
-    } = get();
-    const next = {
-      autoCheckUpdate,
-      updateProxy,
-      confirmWrite,
-      defaultPageSize,
-      editorFontSize,
-    };
+    const next = snapshot(get());
     persist(next);
     if (patch.editorFontSize !== undefined) applyEditorFontSize(next.editorFontSize);
+    if (patch.theme !== undefined) applyAppearance(next.theme);
   },
 
   reset: () => {
     set({ ...DEFAULT_SETTINGS });
     persist({ ...DEFAULT_SETTINGS });
     applyEditorFontSize(DEFAULT_SETTINGS.editorFontSize);
+    applyAppearance(DEFAULT_SETTINGS.theme);
   },
 }));

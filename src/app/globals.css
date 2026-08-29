@@ -2,11 +2,11 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* 暗色跟随系统：保留 Tailwind v4 默认的 prefers-color-scheme 策略，
-   现有 dark: 工具类无需迁移即可生效（不引入 .dark class 切换）。 */
+/* 暗色由 <html class="dark"> 控制（跟随系统 / 浅色 / 深色），不再只听系统媒体查询。 */
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --font-sans: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei",
     sans-serif;
   --background: oklch(1 0 0);
@@ -110,55 +110,56 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* shadcn 暗色变量跟随系统主题，与现有 dark: 工具类保持一致 */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
-  }
+/* shadcn / 编辑器暗色变量：与 dark: 工具类共用 .dark。
+   黑色底用设计色 #181818，并覆盖 neutral-950，避免 dark:bg-neutral-950 仍是纯黑。 */
+.dark {
+  color-scheme: dark;
+  --color-neutral-950: #181818;
+  --background: #181818;
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: #181818;
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
 
-  .tiny-sql-editor {
-    --tiny-sql-editor-bg: #0a0a0a;
-    --tiny-sql-editor-fg: #e5e5e5;
-    --tiny-sql-editor-border: #404040;
-    --tiny-sql-editor-focus: #60a5fa;
-    --tiny-sql-editor-caret: #93c5fd;
-    --tiny-sql-editor-gutter-bg: #111111;
-    --tiny-sql-editor-gutter-border: #262626;
-    --tiny-sql-editor-gutter-fg: #737373;
-    --tiny-sql-editor-active-line: #111827;
-    --tiny-sql-editor-tooltip-bg: #171717;
-    --tiny-sql-editor-selection: #172554;
-  }
+.dark .tiny-sql-editor {
+  --tiny-sql-editor-bg: #181818;
+  --tiny-sql-editor-fg: #e5e5e5;
+  --tiny-sql-editor-border: #404040;
+  --tiny-sql-editor-focus: #60a5fa;
+  --tiny-sql-editor-caret: #93c5fd;
+  --tiny-sql-editor-gutter-bg: #1c1c1c;
+  --tiny-sql-editor-gutter-border: #2a2a2a;
+  --tiny-sql-editor-gutter-fg: #737373;
+  --tiny-sql-editor-active-line: #222222;
+  --tiny-sql-editor-tooltip-bg: #1f1f1f;
+  --tiny-sql-editor-selection: #172554;
 }
 
 @layer base {

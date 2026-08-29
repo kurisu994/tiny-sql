@@ -966,7 +966,7 @@ sqlx::MySqlPool (max_connections = 5)
 
 ## 5. 加密 store 设计
 
-> 应用纯 UI 偏好（设置弹窗：自动检查更新 / 更新代理 / 默认分页 / 编辑器字号 / 写确认开关）**不走**本加密 store——它们是前端偏好，落 localStorage 键 `tiny-sql:settings`（见 `src/stores/settings-store.ts`），不含密钥与连接信息。
+> 应用纯 UI 偏好（设置弹窗：外观 / 自动检查更新 / 更新代理 / 默认分页 / 编辑器字号 / 写确认开关）**不走**本加密 store——它们是前端偏好，落 localStorage 键 `tiny-sql:settings`（见 `src/stores/settings-store.ts`），不含密钥与连接信息。外观 `theme` 为 `system` / `light` / `dark`，暗色通过 `<html class="dark">` 生效。
 
 ### 5.1 连接配置加密
 

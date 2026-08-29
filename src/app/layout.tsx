@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+
+import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/appearance";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +13,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      </head>
       <body>{children}</body>
     </html>
   );

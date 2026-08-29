@@ -88,7 +88,7 @@ export default function Home() {
     refreshSecurity();
   }, [refreshSecurity]);
 
-  // 偏好设置从 localStorage 载入（含编辑器字号的 CSS 变量同步）
+  // 偏好设置从 localStorage 载入（含编辑器字号与外观 class）
   useEffect(() => {
     hydrateSettings();
   }, [hydrateSettings]);
