@@ -472,6 +472,19 @@ pub struct ConstraintMeta {
     pub reference: Option<String>,
 }
 
+/// 单表的结构概览（FR-263 ER 图用）。
+///
+/// 只带 ER 需要的表 / 列 / 约束，不含索引：键位标记走 [`ColumnMeta::column_key`]，
+/// 三个 driver 都已按 PRI / UNI / MUL 归一化。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableOverview {
+    pub name: String,
+    pub comment: Option<String>,
+    pub columns: Vec<ColumnMeta>,
+    pub constraints: Vec<ConstraintMeta>,
+}
+
 /// 筛选值绑定（FR-242）：能解析为整数/浮点的按数值绑定（PostgreSQL 严格类型比较
 /// 需要），其余按文本（MySQL 隐式转换、PG 日期/布尔文本均可比较）。
 #[derive(Debug, Clone, PartialEq)]
@@ -735,6 +748,14 @@ pub trait Driver: Send + Sync {
         scope: &'a MetadataScope,
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ConstraintMeta>>;
+
+    /// 一次性拉取整个作用域下所有表的列与约束（FR-263）。
+    ///
+    /// ER 图逐表查要 3N 次往返，几百张表走 SSH 隧道能等十几秒，这里收敛成常数次查询。
+    fn schema_overview<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+    ) -> DriverFuture<'a, Vec<TableOverview>>;
 
     /// 执行 SQL；取消令牌由应用层按 query_id 管理。
     fn query<'a>(
@@ -1212,6 +1233,165 @@ impl MySqlDriver {
                 },
             })
             .collect())
+    }
+
+    /// 一次性拉取整库的表 / 列 / 约束（FR-263 ER 图用）。
+    ///
+    /// 四条 information_schema 全库查询取回后在内存里按表归并，替代逐表 3N 次往返。
+    pub async fn schema_overview(&self, database: &str) -> Result<Vec<TableOverview>, DriverError> {
+        use std::collections::BTreeMap;
+
+        let tables = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT table_name, table_comment \
+             FROM information_schema.tables \
+             WHERE table_schema = ? AND table_type = 'BASE TABLE' \
+             ORDER BY table_name",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+
+        let columns = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            "SELECT table_name, column_name, column_type, is_nullable, column_key, \
+                    column_default, column_comment \
+             FROM information_schema.columns \
+             WHERE table_schema = ? \
+             ORDER BY table_name, ordinal_position",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+
+        let headers = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT table_name, constraint_name, constraint_type \
+             FROM information_schema.table_constraints \
+             WHERE table_schema = ? \
+             ORDER BY table_name, constraint_name",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+
+        let usage = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            "SELECT table_name, constraint_name, column_name, \
+                    referenced_table_schema, referenced_table_name, referenced_column_name \
+             FROM information_schema.key_column_usage \
+             WHERE table_schema = ? \
+             ORDER BY table_name, constraint_name, ordinal_position",
+        )
+        .bind(database)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DriverError::QueryFailed(e.to_string()))?;
+
+        let mut overviews: BTreeMap<String, TableOverview> = tables
+            .into_iter()
+            .map(|(name, comment)| {
+                (
+                    name.clone(),
+                    TableOverview {
+                        name,
+                        // MySQL 的 table_comment 无注释时是空串，归一成 None
+                        comment: comment.filter(|text| !text.is_empty()),
+                        columns: Vec::new(),
+                        constraints: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+
+        for (table, name, data_type, is_nullable, column_key, default_value, comment) in columns {
+            let Some(overview) = overviews.get_mut(&table) else {
+                continue;
+            };
+            overview.columns.push(ColumnMeta {
+                name,
+                data_type,
+                nullable: is_nullable.eq_ignore_ascii_case("YES"),
+                column_key,
+                default_value,
+                comment: comment.filter(|text| !text.is_empty()),
+            });
+        }
+
+        struct Acc {
+            constraint_type: String,
+            columns: Vec<String>,
+            ref_schema: Option<String>,
+            ref_table: Option<String>,
+            ref_columns: Vec<String>,
+        }
+        let mut accs: BTreeMap<(String, String), Acc> = headers
+            .into_iter()
+            .filter(|(table, _, _)| overviews.contains_key(table))
+            .map(|(table, name, constraint_type)| {
+                (
+                    (table, name),
+                    Acc {
+                        constraint_type,
+                        columns: Vec::new(),
+                        ref_schema: None,
+                        ref_table: None,
+                        ref_columns: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+        for (table, name, column, ref_schema, ref_table, ref_column) in usage {
+            let Some(acc) = accs.get_mut(&(table, name)) else {
+                continue;
+            };
+            if let Some(column) = column {
+                acc.columns.push(column);
+            }
+            if let (Some(schema), Some(table), Some(column)) = (ref_schema, ref_table, ref_column) {
+                acc.ref_schema = Some(schema);
+                acc.ref_table = Some(table);
+                acc.ref_columns.push(column);
+            }
+        }
+        for ((table, name), acc) in accs {
+            let Some(overview) = overviews.get_mut(&table) else {
+                continue;
+            };
+            overview.constraints.push(ConstraintMeta {
+                name,
+                constraint_type: acc.constraint_type,
+                columns: acc.columns,
+                reference: match (acc.ref_schema, acc.ref_table) {
+                    (Some(schema), Some(table)) if !acc.ref_columns.is_empty() => {
+                        Some(format!("{schema}.{table}({})", acc.ref_columns.join(", ")))
+                    }
+                    _ => None,
+                },
+            });
+        }
+
+        Ok(overviews.into_values().collect())
     }
 
     /// 执行 SQL，支持顶层安全追加 LIMIT、10w 硬上限与 `KILL QUERY` 取消。
@@ -1779,6 +1959,13 @@ impl Driver for MySqlDriver {
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ConstraintMeta>> {
         Box::pin(MySqlDriver::list_constraints(self, &scope.database, table))
+    }
+
+    fn schema_overview<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+    ) -> DriverFuture<'a, Vec<TableOverview>> {
+        Box::pin(MySqlDriver::schema_overview(self, &scope.database))
     }
 
     fn query<'a>(

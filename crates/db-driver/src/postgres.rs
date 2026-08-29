@@ -270,6 +270,159 @@ impl PostgresDriver {
             .collect())
     }
 
+    /// 一次性拉取当前 schema 下所有表的列与约束（FR-263 ER 图用）。
+    ///
+    /// 三条 pg_catalog 全 schema 查询后按表归并，替代逐表 3N 次往返；只取普通表和
+    /// 分区表，视图不进 ER 图。
+    pub async fn schema_overview(
+        &self,
+        scope: &MetadataScope,
+    ) -> Result<Vec<TableOverview>, DriverError> {
+        use std::collections::BTreeMap;
+
+        self.ensure_current_database(&scope.database).await?;
+        let schema = scope
+            .schema
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(DriverError::SchemaRequired)?;
+
+        let tables = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT c.relname, obj_description(c.oid, 'pg_class') \
+             FROM pg_class AS c \
+             JOIN pg_namespace AS n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') \
+             ORDER BY c.relname",
+        )
+        .bind(schema)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(query_failed)?;
+
+        let columns = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                bool,
+                String,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
+            "SELECT c.relname, \
+                    a.attname, \
+                    format_type(a.atttypid, a.atttypmod), \
+                    NOT a.attnotnull, \
+                    CASE \
+                        WHEN EXISTS ( \
+                            SELECT 1 FROM pg_index AS i \
+                            WHERE i.indrelid = a.attrelid \
+                              AND i.indisprimary \
+                              AND a.attnum = ANY(i.indkey) \
+                        ) THEN 'PRI' \
+                        WHEN EXISTS ( \
+                            SELECT 1 FROM pg_index AS i \
+                            WHERE i.indrelid = a.attrelid \
+                              AND i.indisunique \
+                              AND i.indnkeyatts = 1 \
+                              AND a.attnum = ANY(i.indkey) \
+                        ) THEN 'UNI' \
+                        WHEN EXISTS ( \
+                            SELECT 1 FROM pg_index AS i \
+                            WHERE i.indrelid = a.attrelid \
+                              AND a.attnum = ANY(i.indkey) \
+                        ) THEN 'MUL' \
+                        ELSE '' \
+                    END, \
+                    pg_get_expr(ad.adbin, ad.adrelid), \
+                    col_description(a.attrelid, a.attnum) \
+             FROM pg_attribute AS a \
+             JOIN pg_class AS c ON c.oid = a.attrelid \
+             JOIN pg_namespace AS n ON n.oid = c.relnamespace \
+             LEFT JOIN pg_attrdef AS ad \
+                    ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum \
+             WHERE n.nspname = $1 \
+               AND c.relkind IN ('r', 'p') \
+               AND a.attnum > 0 \
+               AND NOT a.attisdropped \
+             ORDER BY c.relname, a.attnum",
+        )
+        .bind(schema)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(query_failed)?;
+
+        let constraints =
+            sqlx::query_as::<_, (String, String, String, Option<Vec<String>>, Option<String>)>(
+                "SELECT c.relname, \
+                    con.conname, \
+                    CASE con.contype \
+                        WHEN 'p' THEN 'PRIMARY KEY' \
+                        WHEN 'f' THEN 'FOREIGN KEY' \
+                        WHEN 'u' THEN 'UNIQUE' \
+                        ELSE 'CHECK' \
+                    END, \
+                    (SELECT array_agg(a.attname ORDER BY k.n) \
+                     FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, n) \
+                     JOIN pg_attribute AS a \
+                       ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS columns, \
+                    pg_get_constraintdef(con.oid) AS definition \
+             FROM pg_constraint AS con \
+             JOIN pg_class AS c ON c.oid = con.conrelid \
+             JOIN pg_namespace AS n ON n.oid = c.relnamespace \
+             WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') \
+             ORDER BY c.relname, con.conname",
+            )
+            .bind(schema)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(query_failed)?;
+
+        let mut overviews: BTreeMap<String, TableOverview> = tables
+            .into_iter()
+            .map(|(name, comment)| {
+                (
+                    name.clone(),
+                    TableOverview {
+                        name,
+                        comment,
+                        columns: Vec::new(),
+                        constraints: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+
+        for (table, name, data_type, nullable, column_key, default_value, comment) in columns {
+            let Some(overview) = overviews.get_mut(&table) else {
+                continue;
+            };
+            overview.columns.push(ColumnMeta {
+                name,
+                data_type,
+                nullable,
+                column_key,
+                default_value,
+                comment,
+            });
+        }
+        for (table, name, constraint_type, columns, definition) in constraints {
+            let Some(overview) = overviews.get_mut(&table) else {
+                continue;
+            };
+            overview.constraints.push(ConstraintMeta {
+                name,
+                constraint_type,
+                columns: columns.unwrap_or_default(),
+                reference: definition,
+            });
+        }
+
+        Ok(overviews.into_values().collect())
+    }
+
     /// 列出 PostgreSQL 表的索引（FR-241）：pg_index 按索引名归组，列保持索引内顺序。
     /// 表达式索引（indkey 含 0）只保留列成员。
     pub async fn list_indexes(
@@ -994,6 +1147,13 @@ impl Driver for PostgresDriver {
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ConstraintMeta>> {
         Box::pin(PostgresDriver::list_constraints(self, scope, table))
+    }
+
+    fn schema_overview<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+    ) -> DriverFuture<'a, Vec<TableOverview>> {
+        Box::pin(PostgresDriver::schema_overview(self, scope))
     }
 
     fn query<'a>(

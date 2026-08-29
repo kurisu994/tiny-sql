@@ -230,6 +230,23 @@ pub async fn db_list_constraints(
         .map_err(|e| e.i18n_key().to_string())
 }
 
+/// 一次性拉取整个作用域下所有表的列与约束（FR-263 ER 图用）。
+///
+/// 关系图逐表查要 3N 次往返，几百张表走隧道时首屏要等十几秒，这里收敛成一次调用。
+#[tauri::command]
+pub async fn db_schema_overview(
+    state: State<'_, AppState>,
+    id: String,
+    database: String,
+    schema: Option<String>,
+) -> Result<Vec<db_driver::TableOverview>, String> {
+    let driver = driver_of(&state, &id).await?;
+    let scope = metadata_scope(Driver::kind(&driver), database, schema)?;
+    Driver::schema_overview(&driver, &scope)
+        .await
+        .map_err(|e| e.i18n_key().to_string())
+}
+
 /// 执行 SQL，返回结果集。
 ///
 /// `row_limit` 用于区分表浏览 1000 行与 SQL 编辑器 10w 行；后端会强制 clamp。

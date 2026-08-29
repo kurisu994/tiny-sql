@@ -545,6 +545,102 @@ async fn browse_table_filters_sorts_and_paginates() {
     driver.close().await;
 }
 
+// === FR-263 整库结构概览 ===
+
+/// schema_overview：一次查回全库的表 / 列 / 约束，结果与逐表查一致。
+#[tokio::test]
+#[ignore = "需要本地 MySQL"]
+async fn schema_overview_matches_per_table_metadata() {
+    let url = test_url();
+    let driver = MySqlDriver::connect_url(&url).await.expect("连接失败");
+    let db = url
+        .rsplit('/')
+        .next()
+        .expect("URL 应含 database")
+        .split('?')
+        .next()
+        .expect("database 名");
+    for sql in [
+        "DROP TABLE IF EXISTS tx_ov_child",
+        "DROP TABLE IF EXISTS tx_ov_parent",
+        "CREATE TABLE tx_ov_parent (id INT PRIMARY KEY, code VARCHAR(20) NOT NULL COMMENT '编码', UNIQUE KEY uq_ov_code (code)) COMMENT='父表'",
+        "CREATE TABLE tx_ov_child (\
+            id INT PRIMARY KEY, \
+            parent_id INT NOT NULL, \
+            note VARCHAR(50) NULL, \
+            CONSTRAINT fk_ov_child FOREIGN KEY (parent_id) REFERENCES tx_ov_parent (id) \
+        )",
+    ] {
+        driver
+            .query_with_options(sql, write_opts(), CancellationToken::new())
+            .await
+            .expect("准备测试表失败");
+    }
+
+    let overview = driver
+        .schema_overview(db)
+        .await
+        .expect("schema_overview 失败");
+    let parent = overview
+        .iter()
+        .find(|table| table.name == "tx_ov_parent")
+        .expect("应包含 tx_ov_parent");
+    assert_eq!(parent.comment.as_deref(), Some("父表"));
+    let code = parent
+        .columns
+        .iter()
+        .find(|column| column.name == "code")
+        .expect("缺少 code 列");
+    assert_eq!(code.comment.as_deref(), Some("编码"));
+    assert!(!code.nullable);
+    assert_eq!(code.column_key, "UNI");
+
+    let child = overview
+        .iter()
+        .find(|table| table.name == "tx_ov_child")
+        .expect("应包含 tx_ov_child");
+    // 列顺序按 ordinal_position
+    assert_eq!(
+        child
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id", "parent_id", "note"]
+    );
+    // 无注释的表 / 列归一成 None，前端不必再判空串
+    assert_eq!(child.comment, None);
+    assert_eq!(child.columns[2].comment, None);
+
+    let per_table = driver
+        .list_constraints(db, "tx_ov_child")
+        .await
+        .expect("list_constraints 失败");
+    let batched_fk = child
+        .constraints
+        .iter()
+        .find(|c| c.constraint_type == "FOREIGN KEY")
+        .expect("批量结果缺少外键");
+    let single_fk = per_table
+        .iter()
+        .find(|c| c.constraint_type == "FOREIGN KEY")
+        .expect("逐表结果缺少外键");
+    assert_eq!(batched_fk.name, single_fk.name);
+    assert_eq!(batched_fk.columns, single_fk.columns);
+    assert_eq!(batched_fk.reference, single_fk.reference);
+
+    for sql in [
+        "DROP TABLE IF EXISTS tx_ov_child",
+        "DROP TABLE IF EXISTS tx_ov_parent",
+    ] {
+        driver
+            .query_with_options(sql, write_opts(), CancellationToken::new())
+            .await
+            .expect("清理失败");
+    }
+    driver.close().await;
+}
+
 // === FR-241 索引与约束 metadata ===
 
 /// list_indexes / list_constraints：主键、唯一索引、普通索引、外键引用正确归组。

@@ -5,7 +5,9 @@ export type MetadataResource =
   | "tables"
   | "columns"
   | "indexes"
-  | "constraints";
+  | "constraints"
+  /** 整库结构概览（FR-263 ER 图，一次拉全表） */
+  | "overview";
 
 /** metadata cache 的完整分区键，禁止省略 connection/driver/schema 边界。 */
 export interface MetadataCacheKey {

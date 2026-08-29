@@ -486,6 +486,90 @@ async fn postgres_browse_table_filters_sorts_and_paginates() {
 
 // === FR-241 索引与约束 metadata ===
 
+/// schema_overview：一次查回当前 schema 的表 / 列 / 约束，结果与逐表查一致（FR-263）。
+#[tokio::test]
+#[ignore = "需要本地 PostgreSQL"]
+async fn postgres_schema_overview_matches_per_table_metadata() {
+    let driver = connect().await;
+    for sql in [
+        "DROP TABLE IF EXISTS tx_ov_child",
+        "DROP TABLE IF EXISTS tx_ov_parent",
+        "CREATE TABLE tx_ov_parent (id INT PRIMARY KEY, code VARCHAR(20) NOT NULL UNIQUE)",
+        "CREATE TABLE tx_ov_child (\
+            id INT PRIMARY KEY, \
+            parent_id INT NOT NULL REFERENCES tx_ov_parent (id), \
+            note VARCHAR(50) \
+        )",
+        "COMMENT ON TABLE tx_ov_parent IS '父表'",
+        "COMMENT ON COLUMN tx_ov_parent.code IS '编码'",
+    ] {
+        driver
+            .query_with_options(sql, write_opts(), CancellationToken::new())
+            .await
+            .expect("准备测试表失败");
+    }
+    let scope = pg_current_scope(&driver).await;
+
+    let overview = driver
+        .schema_overview(&scope)
+        .await
+        .expect("schema_overview 失败");
+    let parent = overview
+        .iter()
+        .find(|table| table.name == "tx_ov_parent")
+        .expect("应包含 tx_ov_parent");
+    assert_eq!(parent.comment.as_deref(), Some("父表"));
+    let code = parent
+        .columns
+        .iter()
+        .find(|column| column.name == "code")
+        .expect("缺少 code 列");
+    assert_eq!(code.comment.as_deref(), Some("编码"));
+    assert!(!code.nullable);
+    assert_eq!(code.column_key, "UNI");
+
+    let child = overview
+        .iter()
+        .find(|table| table.name == "tx_ov_child")
+        .expect("应包含 tx_ov_child");
+    assert_eq!(
+        child
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["id", "parent_id", "note"]
+    );
+
+    let per_table = driver
+        .list_constraints(&scope, "tx_ov_child")
+        .await
+        .expect("list_constraints 失败");
+    let batched_fk = child
+        .constraints
+        .iter()
+        .find(|c| c.constraint_type == "FOREIGN KEY")
+        .expect("批量结果缺少外键");
+    let single_fk = per_table
+        .iter()
+        .find(|c| c.constraint_type == "FOREIGN KEY")
+        .expect("逐表结果缺少外键");
+    assert_eq!(batched_fk.name, single_fk.name);
+    assert_eq!(batched_fk.columns, single_fk.columns);
+    assert_eq!(batched_fk.reference, single_fk.reference);
+
+    for sql in [
+        "DROP TABLE IF EXISTS tx_ov_child",
+        "DROP TABLE IF EXISTS tx_ov_parent",
+    ] {
+        driver
+            .query_with_options(sql, write_opts(), CancellationToken::new())
+            .await
+            .expect("清理失败");
+    }
+    driver.close().await;
+}
+
 /// list_indexes / list_constraints：主键、唯一索引、外键引用与 CHECK 正确归组（PG 方言）。
 #[tokio::test]
 #[ignore = "需要本地 PostgreSQL"]

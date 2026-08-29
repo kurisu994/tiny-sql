@@ -205,6 +205,31 @@ impl SqliteDriver {
             .collect())
     }
 
+    /// 逐表汇总列与约束（FR-263 ER 图用）。
+    ///
+    /// SQLite 是本地文件，pragma 查询本身很便宜，这里只把 N 张表的多次 IPC 往返
+    /// 收敛成一次调用。
+    pub async fn schema_overview(
+        &self,
+        scope: &MetadataScope,
+    ) -> Result<Vec<TableOverview>, DriverError> {
+        let mut overviews = Vec::new();
+        for table in self.list_tables(scope).await? {
+            if table.table_type != "BASE TABLE" {
+                continue;
+            }
+            let columns = self.list_columns(scope, &table.name).await?;
+            let constraints = self.list_constraints(scope, &table.name).await?;
+            overviews.push(TableOverview {
+                name: table.name,
+                comment: table.comment,
+                columns,
+                constraints,
+            });
+        }
+        Ok(overviews)
+    }
+
     /// 列出表的索引（FR-241）。
     ///
     /// `INTEGER PRIMARY KEY`（rowid 别名）在 `index_list` 中没有条目，
@@ -731,6 +756,13 @@ impl Driver for SqliteDriver {
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ConstraintMeta>> {
         Box::pin(SqliteDriver::list_constraints(self, scope, table))
+    }
+
+    fn schema_overview<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+    ) -> DriverFuture<'a, Vec<TableOverview>> {
+        Box::pin(SqliteDriver::schema_overview(self, scope))
     }
 
     fn query<'a>(

@@ -424,6 +424,14 @@ export interface ConstraintMeta {
   reference: string | null;
 }
 
+/** 单表结构概览（FR-263 ER 图用）：一次调用拿回整库的表 / 列 / 约束 */
+export interface TableOverview {
+  name: string;
+  comment: string | null;
+  columns: ColumnMeta[];
+  constraints: ConstraintMeta[];
+}
+
 /** 查询结果集（所有单元格统一为字符串，null = SQL NULL） */
 export interface RowSet {
   columns: string[];
@@ -489,6 +497,8 @@ export const dbApi = {
       schema,
       table,
     }),
+  schemaOverview: (id: string, database: string, schema: string | null) =>
+    invoke<TableOverview[]>("db_schema_overview", { id, database, schema }),
   query: (id: string, sql: string, options: QueryOptions = {}) =>
     invoke<RowSet>("db_query", {
       id,

@@ -120,6 +120,7 @@ pub fn run() {
             commands::query::db_list_columns,
             commands::query::db_list_indexes,
             commands::query::db_list_constraints,
+            commands::query::db_schema_overview,
             commands::query::db_query,
             commands::query::db_query_cancel,
             commands::query::db_query_many,

@@ -255,6 +255,46 @@ async fn sqlite_constraints_expose_primary_key_and_foreign_key() {
 }
 
 #[tokio::test]
+async fn sqlite_schema_overview_returns_all_tables_with_columns_and_constraints() {
+    let db = TempDb::new("overview");
+    let driver = open_with_seed(&db).await;
+
+    let overview = driver
+        .schema_overview(&scope())
+        .await
+        .expect("schema overview 失败");
+
+    let names: Vec<&str> = overview.iter().map(|table| table.name.as_str()).collect();
+    assert!(names.contains(&"users"), "应包含 users：{names:?}");
+    assert!(names.contains(&"orders"), "应包含 orders：{names:?}");
+
+    let orders = overview
+        .iter()
+        .find(|table| table.name == "orders")
+        .expect("缺少 orders");
+    let id = orders
+        .columns
+        .iter()
+        .find(|column| column.name == "id")
+        .expect("缺少 id 列");
+    assert_eq!(id.column_key, "PRI", "主键列应标 PRI");
+    assert!(
+        orders.columns.iter().any(|column| column.name == "user_id"),
+        "应带出全部列"
+    );
+
+    let fk = orders
+        .constraints
+        .iter()
+        .find(|c| c.constraint_type == "FOREIGN KEY")
+        .expect("缺少外键约束");
+    assert_eq!(fk.columns, vec!["user_id".to_string()]);
+    assert_eq!(fk.reference.as_deref(), Some("users(id)"));
+
+    driver.close().await;
+}
+
+#[tokio::test]
 async fn sqlite_query_applies_row_limit_and_marks_truncation() {
     let db = TempDb::new("limit");
     let driver = open_with_seed(&db).await;

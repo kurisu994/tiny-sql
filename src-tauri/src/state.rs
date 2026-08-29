@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 use db_driver::{
     ColumnMeta, ConstraintMeta, DatabaseMeta, Driver, DriverCloseFuture, DriverFuture, DriverKind,
     DriverSession, IndexMeta, MetadataScope, MySqlDriver, PostgresDriver, QueryOptions, RowSet,
-    SchemaMeta, SqliteDriver, TableBrowseQuery, TableBrowseResult, TableMeta,
+    SchemaMeta, SqliteDriver, TableBrowseQuery, TableBrowseResult, TableMeta, TableOverview,
 };
 use ssh_multihop::SshTunnel;
 use tokio::sync::Mutex as AsyncMutex;
@@ -96,6 +96,13 @@ impl Driver for ActiveDriver {
         table: &'a str,
     ) -> DriverFuture<'a, Vec<ConstraintMeta>> {
         self.inner().list_constraints(scope, table)
+    }
+
+    fn schema_overview<'a>(
+        &'a self,
+        scope: &'a MetadataScope,
+    ) -> DriverFuture<'a, Vec<TableOverview>> {
+        self.inner().schema_overview(scope)
     }
 
     fn query<'a>(

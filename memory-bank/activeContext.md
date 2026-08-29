@@ -2,11 +2,29 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-28（工作台与对象树改图标）
+**最后更新**：2026-08-29（关系图性能：批量拉结构 + 画布直绘）
 
 ## 当前状态
 
-**本轮：工作台 Tab 改图标并去掉「数据库对象」（2026-08-28）**——浏览/对比/关系图/权限改为 Table2 / GitCompare / Waypoints / KeyRound；对象树顶栏去掉「数据库对象」文字，操作图标右对齐。
+**本轮：关系图两处性能问题（2026-08-29）**——用户反馈①表多的库首次加载很慢；②触控板缩放掉帧。
+
+1. **首屏：3N 次往返 → 常数次查询**。`loadSchemaSnapshot` 对每张表并发查列 / 索引 / 约束，74 张表就是 222 次往返，走隧道更糟。新增 `Driver::schema_overview` + `db_schema_overview` command：MySQL 用 4 条 information_schema 全库查询（tables / columns / table_constraints / key_column_usage）在内存归并，PostgreSQL 用 3 条 pg_catalog 全 schema 查询，**SQLite 仍逐表循环**（本地文件 pragma 很便宜，只需把 N 次 IPC 收敛成 1 次）。新类型 `TableOverview` 不含索引——ER 的键位标记看约束与 `columnKey`，三个 driver 都已归一化成 PRI/UNI/MUL，不必为它多查一轮。真实 MySQL 实测：74 张表按旧前端并发度 6 计 9.98s → 0.71s（约 14 倍）。ER 结果进 metadata cache（新增 `overview` resource，5 分钟 TTL），工具栏加刷新按钮强制重拉。`loadSchemaSnapshot` 保留给结构对比用，未动。
+2. **缩放掉帧：wheel 事件不再进 React 状态**。触控板一次捏合能发上百个 wheel 事件，原来每个都 `setScale`/`setOffset`，几百张卡片全量 diff。改成 `viewRef` + rAF 直接写 DOM（content 的 transform、viewport 的网格背景、缩放百分比的 textContent），React 只在手势停下 120ms 后收到一次低频镜像 `viewSync`，仅用于重算可视区裁剪。为防重渲染覆盖 ref 写入的值，JSX 不再输出 transform / background-position，改由 `useLayoutEffect(paint)` 每次渲染后回写。卡片与连线加 `memo` + 稳定回调，拖一张卡片只重绘那一张。
+
+顺带把 `Math.max(...nodes.map())` 换成归约循环（几千张表会顶到参数上限）。门禁：cargo fmt / clippy -D warnings / cargo test（含新增 SQLite overview 用例）、MySQL 与 PostgreSQL 集成测试新用例真库跑通、vitest 207/207、`pnpm build` 全绿。**待用户 GUI 实测**：大库首屏耗时与触控板缩放手感。
+
+**上一轮：关系图重做为 ER 画布（2026-08-29）**——用户截图反馈旧关系图不直观：节点只是「表名 + 前 3 列」的小方块，且分层布局把同一层全部横排成一行，几十张无外键的表拉出屏幕外。重做为实体卡片画布，仍不引入 React Flow 等图编辑器依赖（`schema-er.ts` 原注释即此约定），用 HTML 卡片 + 绝对定位 + SVG 连线层自绘。
+
+四个决策：
+
+1. **HTML 卡片而非纯 SVG 节点**：列名 / 注释 / 类型三段式排版要 truncate 与右对齐，SVG `<text>` 得手算宽度。改为绝对定位的 div 卡片叠在 SVG 连线层之上，整层 `transform: translate + scale`。连线端口 y 由 `ER_HEADER_HEIGHT + index * ER_ROW_HEIGHT` 推出，与卡片 DOM 用同一组常量，行高变了不会错位。
+2. **布局按连通分量分组 + shelf 打包**：`layoutErGraph` 先并查集分组，组内 longest-path 分层（父表在上）、层内居中，再按 `sqrt(总面积 * 2.4)` 的目标宽度折行。**有外键的组铺在上方，单表组按表名另起网格**——项目自身约定不建 FK，多数库全是孤立表，不分开会在关系块旁边留大片空白。
+3. **连线走卡片外侧**：两卡片水平投影相交时（典型上下分层父子表）两端取同一侧，控制点统一贴最外边缘 28px；否则取对侧。避免了旧版横穿卡片以及甩到负坐标的长弧。子表侧画鸦爪（多），父表侧画短横（一）。
+4. **大库不卡**：布局 memo 不依赖拖动坐标（拖一张表不触发整图重排）；只渲染可视区 + 300px 余量内的卡片；超过 40 张表首次加载默认折叠成表头。每次重新布局（加载 / 筛选 / 折叠切换）自动适应视图一次。
+
+改动：`src/lib/schema-er.ts`（`ErColumn` 结构、`buildErColumns` 主键置顶与键位标注、`layoutErGraph`）、`src/components/er-view.tsx` 全量重写、新增 `src/components/er-view.test.tsx`。门禁：vitest 206/206、`tsc --noEmit`、`pnpm build` 通过；用 jsdom 渲染产物 + Tailwind CDN 截图核对过明暗两套观感。**待用户 GUI 实测**：真实库的布局密度、拖动与缩放手感。
+
+**上一轮：工作台 Tab 改图标并去掉「数据库对象」（2026-08-28）**——浏览/对比/关系图/权限改为 Table2 / GitCompare / Waypoints / KeyRound；对象树顶栏去掉「数据库对象」文字，操作图标右对齐。
 
 **上一轮：对象树操作改图标（2026-08-28）**——「新建 / 复制 / 导入 / 备份 / 刷新」改为 lucide 图标（Plus / Copy / Upload / DatabaseBackup / RefreshCw），保留 aria-label 与 title。不新增图标库。刷新中转圈，导入中脉冲。
 
