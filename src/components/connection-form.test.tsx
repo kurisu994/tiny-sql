@@ -83,7 +83,12 @@ describe("ConnectionForm", () => {
   });
 
   it("测试连接会转发仅用于本次握手的私钥 passphrase", async () => {
-    vi.mocked(invoke).mockResolvedValue(undefined);
+    vi.mocked(invoke).mockResolvedValue({
+      tunnelMs: 320,
+      connectMs: 45,
+      pingMs: 12,
+      totalMs: 380,
+    });
     render(<ConnectionForm editing={null} onDone={() => {}} />);
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "SSH" }), {
@@ -106,5 +111,37 @@ describe("ConnectionForm", () => {
         expect.objectContaining({ passphrase: "test-secret" }),
       ),
     );
+  });
+
+  it("测试连接成功后显示延迟与各段耗时", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      tunnelMs: 318.4,
+      connectMs: 45.2,
+      pingMs: 12.6,
+      totalMs: 376.2,
+    });
+    render(<ConnectionForm editing={null} onDone={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+
+    expect(await screen.findByText("✓ 连接成功 · 延迟 13 ms")).toBeInTheDocument();
+    expect(
+      screen.getByText("SSH 隧道 318 ms · 建立连接 45 ms · 总计 376 ms"),
+    ).toBeInTheDocument();
+  });
+
+  it("直连没有隧道段，且不足 10ms 的延迟保留一位小数", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      tunnelMs: null,
+      connectMs: 8.32,
+      pingMs: 0.44,
+      totalMs: 9.1,
+    });
+    render(<ConnectionForm editing={null} onDone={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "测试连接" }));
+
+    expect(await screen.findByText("✓ 连接成功 · 延迟 0.4 ms")).toBeInTheDocument();
+    expect(screen.getByText("建立连接 8.3 ms · 总计 9.1 ms")).toBeInTheDocument();
   });
 });

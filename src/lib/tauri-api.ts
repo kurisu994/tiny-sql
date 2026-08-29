@@ -93,10 +93,24 @@ export interface StoredConnection {
   ssl: SslConfig;
   advanced: AdvancedConfig;
   lastUsedAt?: string | null;
+  /** 手动拖拽排序序号（FR-003），越小越靠前；旧记录缺省 null 排在末尾 */
+  sortOrder?: number | null;
   /** 应用层只读（FR-270），旧记录缺省 false */
   readOnly?: boolean;
   /** 环境标签（FR-271），旧记录缺省 none */
   env?: ConnectionEnv;
+}
+
+/** 测试连接的耗时明细（毫秒，可能不足 1ms 带小数） */
+export interface ConnectionTestReport {
+  /** SSH 隧道建链耗时；直连或 SQLite 为 null */
+  tunnelMs?: number | null;
+  /** 数据库握手耗时（TCP + TLS + 认证） */
+  connectMs: number;
+  /** 握手后 `SELECT 1` 的往返延迟 */
+  pingMs: number;
+  /** 总耗时 */
+  totalMs: number;
 }
 
 /** 新建 / 测试连接的入参（不含 id） */
@@ -312,9 +326,11 @@ export const connectionApi = {
   update: (connection: StoredConnection) =>
     invoke<void>("connection_update", { connection }),
   remove: (id: string) => invoke<void>("connection_delete", { id }),
+  /** 按拖拽后的完整顺序重写排序序号 */
+  reorder: (ids: string[]) => invoke<void>("connection_reorder", { ids }),
   /** 测试连接；passphrase 仅用于本次 SSH 握手，不保存也不进入会话缓存。 */
   test: (input: ConnectionInput, passphrase?: string) =>
-    invoke<void>("connection_test", {
+    invoke<ConnectionTestReport>("connection_test", {
       input,
       passphrase: passphrase ?? null,
     }),

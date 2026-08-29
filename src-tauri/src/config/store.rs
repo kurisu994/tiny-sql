@@ -48,9 +48,13 @@ pub struct StoredConnection {
     /// 连接高级设置。部分字段先持久化，driver 支持后逐步接线。
     #[serde(default)]
     pub advanced: AdvancedConfig,
-    /// 最近使用时间（ISO 8601），用于列表排序（FR-003）
+    /// 最近使用时间（ISO 8601），仅作展示与未排序记录的兜底排序（FR-003）
     #[serde(default)]
     pub last_used_at: Option<String>,
+    /// 手动拖拽排序序号，越小越靠前（FR-003）。
+    /// None 表示这条从未参与过手动排序，列表里排在已排序记录之后。
+    #[serde(default)]
+    pub sort_order: Option<i64>,
     /// 应用层只读（FR-270）。缺省 false，不替代数据库账号权限。
     #[serde(default)]
     pub read_only: bool,
@@ -258,6 +262,21 @@ impl ConnectionStore {
         }
         Ok(())
     }
+
+    /// 按前端给出的完整 id 顺序重写 sort_order（FR-003 手动排序）。
+    ///
+    /// `ids` 里没出现的连接（并发新建、导入等）保持原有 sort_order，
+    /// 排序仍由 [`crate::commands::connection::connection_list`] 兜底。
+    /// 未知 id 直接忽略，不报错。
+    pub fn reorder(&self, ids: &[String]) -> Result<(), String> {
+        let mut connections = self.load()?;
+        for (index, id) in ids.iter().enumerate() {
+            if let Some(conn) = connections.iter_mut().find(|c| &c.id == id) {
+                conn.sort_order = Some(index as i64);
+            }
+        }
+        self.save(&connections)
+    }
 }
 
 #[cfg(test)]
@@ -299,6 +318,7 @@ mod tests {
             ssl: SslConfig::default(),
             advanced: AdvancedConfig::default(),
             last_used_at: None,
+            sort_order: None,
             read_only: false,
             env: default_env(),
         }
@@ -313,6 +333,57 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].host, "secret-host.internal");
         assert_eq!(loaded[0].password, "p@ss-w0rd");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reorder_writes_sort_order_by_position() {
+        let (dir, _security, store) = temp_store();
+        for id in ["c1", "c2", "c3"] {
+            store.upsert(sample(id, "h")).unwrap();
+        }
+
+        store
+            .reorder(&["c3".to_string(), "c1".to_string(), "c2".to_string()])
+            .unwrap();
+
+        let loaded = store.load().unwrap();
+        let order = |id: &str| {
+            loaded
+                .iter()
+                .find(|c| c.id == id)
+                .and_then(|c| c.sort_order)
+        };
+        assert_eq!(order("c3"), Some(0));
+        assert_eq!(order("c1"), Some(1));
+        assert_eq!(order("c2"), Some(2));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reorder_ignores_unknown_ids_and_keeps_missing_ones() {
+        let (dir, _security, store) = temp_store();
+        store.upsert(sample("c1", "h")).unwrap();
+        let mut c2 = sample("c2", "h");
+        c2.sort_order = Some(7);
+        store.upsert(c2).unwrap();
+
+        // 只重排 c1，未出现的 c2 保持原序号，未知 id 静默忽略
+        store
+            .reorder(&["c1".to_string(), "ghost".to_string()])
+            .unwrap();
+
+        let loaded = store.load().unwrap();
+        assert_eq!(
+            loaded.iter().find(|c| c.id == "c1").unwrap().sort_order,
+            Some(0)
+        );
+        assert_eq!(
+            loaded.iter().find(|c| c.id == "c2").unwrap().sort_order,
+            Some(7)
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

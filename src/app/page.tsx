@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { useDragSort } from "@/hooks/use-drag-sort";
 import { useUpdateChecker } from "@/hooks/use-update-checker";
 import { connectionEnv, envDotClass, envLabel, isReadOnly } from "@/lib/connection-meta";
 import {
@@ -50,8 +51,19 @@ type FormState =
   | null;
 
 export default function Home() {
-  const { connections, loading, error, load, create, remove } =
+  const { connections, loading, error, load, create, remove, reorder } =
     useConnectionStore();
+  // 连接列表拖拽排序（FR-003）
+  const {
+    containerRef: listRef,
+    draggingId,
+    dropIndex,
+    startDrag,
+    consumeClickSuppression,
+  } = useDragSort<HTMLDivElement>(
+    connections.map((c) => c.id),
+    reorder,
+  );
   // 列表高亮选中（仅视觉），与表单弹窗解耦
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // 表单弹窗状态
@@ -271,7 +283,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div ref={listRef} className="flex-1 overflow-y-auto">
           {loading && connections.length === 0 && (
             <p className="p-3 text-sm text-neutral-500">加载中…</p>
           )}
@@ -279,22 +291,38 @@ export default function Home() {
           {!loading && connections.length === 0 && !error && (
             <p className="p-3 text-sm text-neutral-500">还没有连接，点「+ 新建」开始。</p>
           )}
-          <ul>
-            {connections.map((c) => {
+          <ul className={cn(draggingId && "cursor-grabbing select-none")}>
+            {connections.map((c, index) => {
               const isOpen = openId === c.id;
               const isConnected = isOpen && sessionStatus === "connected";
               const connecting = sessionStatus === "connecting";
               return (
                 <li
                   key={c.id}
-                  className="border-b border-neutral-100 dark:border-neutral-900"
+                  data-drag-id={c.id}
+                  className={cn(
+                    "relative border-b border-neutral-100 dark:border-neutral-900",
+                    draggingId === c.id && "opacity-40",
+                  )}
                 >
+                  {/* 拖拽插入位置指示线：落在本项之前，或落在列表最末 */}
+                  {dropIndex === index && (
+                    <span className="pointer-events-none absolute inset-x-0 -top-px z-10 h-0.5 bg-blue-500" />
+                  )}
+                  {dropIndex === connections.length &&
+                    index === connections.length - 1 && (
+                      <span className="pointer-events-none absolute inset-x-0 -bottom-px z-10 h-0.5 bg-blue-500" />
+                    )}
                   <ContextMenu>
                     <ContextMenuTrigger asChild>
                       <button
-                        onClick={() => setSelectedId(c.id)}
+                        onPointerDown={(e) => startDrag(c.id, e)}
+                        onClick={() => {
+                          if (consumeClickSuppression()) return;
+                          setSelectedId(c.id);
+                        }}
                         onDoubleClick={() => openSession(c)}
-                        title="双击连接，右键更多操作"
+                        title="双击连接，拖动排序，右键更多操作"
                         className={cn(
                           "flex w-full min-w-0 flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-neutral-50 data-[state=open]:bg-blue-50 dark:hover:bg-neutral-900 dark:data-[state=open]:bg-blue-950",
                           selectedId === c.id && "bg-blue-50 dark:bg-blue-950",

@@ -108,6 +108,7 @@ pub fn run() {
             commands::connection::connection_list,
             commands::connection::connection_create,
             commands::connection::connection_update,
+            commands::connection::connection_reorder,
             commands::connection::connection_delete,
             commands::connection::connection_test,
             commands::connection::connection_open,

@@ -2,11 +2,23 @@
 
 > 最轻量、最常更新的文件。每次会话结束前由 AI 更新「活跃文件 / 决策 / 下一步 / 阻塞」。
 
-**最后更新**：2026-08-29（发布 v0.8.0 正式版）
+**最后更新**：2026-08-29（连接列表拖拽排序）
 
 ## 当前状态
 
-**本轮：发布 v0.8.0 正式版（2026-08-29）**——关系图两次改动合入 main 后直接切正式版。`just check` 全绿（vitest 207 / Rust 全套）后执行 `just release v0.8.0`：版本号 0.8.0-rc2 → 0.8.0，CHANGELOG `[Unreleased]` 切出 `## [0.8.0] — 2026-08-29`，发布提交 `12d3aae`，tag `v0.8.0`，Release run `33230468506` 触发四平台构建。
+**本轮：连接列表拖拽排序（2026-08-29，v0.8.0 之后的 Unreleased）**——用户要给左侧连接列表加拖动排序。
+
+关键取舍：原 FR-003 是「按 `last_used_at` 倒序」，双击连接后它会自动跳顶，和手动排序直接冲突。已向用户确认，选定**手动顺序取代自动排序**：`StoredConnection` 新增 `sort_order: Option<i64>`，`connection_list` 先按序号升序，`None`（旧记录 / 新建 / 分享导入）排在其后并保留最近使用倒序作兜底，因此升级后首屏顺序与升级前一致，用户第一次拖动就把全量顺序写实。新增 `connection_reorder(ids)` 命令 + `ConnectionStore::reorder`（未出现的 id 保持原值，未知 id 忽略）。FR-003 / ARCHITECTURE 命令表与连接模型 / productContext 已同步改写。
+
+前端不引 dnd 依赖：新增 `src/hooks/use-drag-sort.ts`，pointer 事件 + `data-drag-id` 读 rect 算插入位，指示线由调用方画。**故意不用 HTML5 draggable**——Tauri 窗口默认接管文件拖放，WebView 里 dragstart/drop 不可靠。位移超 4px 才算拖拽（不抢单击选中 / 双击连接），只接左键（右键留给上下文菜单），拖完吞掉补发的那次 click，指针贴容器上下边缘 28px 时 rAF 自动滚动。store 的 `reorder` 做乐观更新：本地先落位避免松手回弹，后端失败回滚并报错。
+
+顺带按用户要求把工作台顶部两栏并成一栏：视图切换（浏览 / 关系图 / 对比 / 权限）后面接一条竖分隔线，再接原本挂在对象树 aside 里 sticky 的五个操作按钮（新建表 / 复制表 / 导入 SQL / 官方备份 / 刷新），并只在 `workspace === "browse"` 时渲染——这些操作都作用于左侧树，别的视图有自己的工具栏。aside 顶部的 sticky 条整块删掉，`dumpMsg` 提示保留在原位。
+
+再按用户要求给「测试连接」加延迟展示：`connection_test` 从 `Result<(), String>` 改成返回 `ConnectionTestReport`（`tunnelMs?` / `connectMs` / `pingMs` / `totalMs`，f64 毫秒）。分段是准的——sqlx 的 `connect_with` 是 eager 建池，握手确实发生在 connect 阶段，随后的 `Driver::ping` 走热连接，测到的才是纯往返延迟。UI 主行「✓ 连接成功 · 延迟 13 ms」，次行小字列隧道 / 建立连接 / 总计；`formatMs` 对 <10ms 保留一位小数，否则内网库统统显示 0 ms。
+
+门禁：cargo fmt --check / clippy -D warnings / cargo test --workspace 全绿，vitest 218（新增 hook 6 例 + store 3 例），tsc 与 `pnpm build` 通过。**待用户 GUI 实测**：拖拽手感、重启后顺序是否保持。尚未提交。
+
+**上一轮：发布 v0.8.0 正式版（2026-08-29）**——关系图两次改动合入 main 后直接切正式版。`just check` 全绿（vitest 207 / Rust 全套）后执行 `just release v0.8.0`：版本号 0.8.0-rc2 → 0.8.0，CHANGELOG `[Unreleased]` 切出 `## [0.8.0] — 2026-08-29`，发布提交 `12d3aae`，tag `v0.8.0`，Release run `33230468506` 触发四平台构建。
 
 两点记录：① RELEASE_CHECKLIST 的 v0.8 正式发布条件是「GUI 实测通过后执行」，而关系图重做与 `db_schema_overview` 是 rc2 之后新增、只在 jsdom + 截图里验证过；已向用户说明风险，用户选择直接发正式版。② 正式版会生成 `latest.json`，v0.7 用户会收到自动更新推送——**发布后若在 GUI 上发现 ER 相关问题，走 v0.8.1 补丁**。
 

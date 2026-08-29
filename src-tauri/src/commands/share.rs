@@ -285,6 +285,7 @@ pub fn connection_share_import(
         let old_id = connection.id.clone();
         connection.id = Uuid::new_v4().to_string();
         connection.last_used_at = None;
+        connection.sort_order = None;
         connection.name = unique_name(&names, &connection.name);
         names.push(connection.name.clone());
         for key in payload

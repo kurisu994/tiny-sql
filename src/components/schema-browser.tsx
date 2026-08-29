@@ -653,6 +653,83 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
             <Icon className="size-3.5" />
           </button>
         ))}
+        {/* 对象树操作：只在浏览视图有意义，与视图切换并成一栏 */}
+        {workspace === "browse" && (
+          <>
+            <span className="mx-1.5 h-4 w-px bg-neutral-200 dark:bg-neutral-800" />
+            {/* 新建表（FR-251）：需已选中 database（MySQL）/ schema（PostgreSQL） */}
+            <button
+              type="button"
+              onClick={() => setCreateTableOpen(true)}
+              disabled={
+                readOnly ||
+                !connected ||
+                !selectedDb ||
+                (connection.driver === "postgresql" && !selectedSchema)
+              }
+              aria-label="新建表"
+              title="新建表"
+              className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              <PlusIcon className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setCloneOpen(true)}
+              disabled={
+                readOnly ||
+                !connected ||
+                !selectedDb ||
+                !activeTab?.selectedTable ||
+                (connection.driver === "postgresql" && !selectedSchema)
+              }
+              aria-label="复制为新表"
+              title="把当前表复制为同库新表"
+              className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              <CopyIcon className="size-3.5" />
+            </button>
+            {/* 导入 SQL dump（FR-252）：流式执行整个文件 */}
+            <button
+              type="button"
+              onClick={() => void importDump()}
+              disabled={
+                readOnly ||
+                !connected ||
+                !selectedDb ||
+                importingDump ||
+                (connection.driver === "postgresql" && !selectedSchema)
+              }
+              aria-label="导入 SQL"
+              title={importingDump ? "正在导入 SQL dump" : "导入 SQL dump 文件（流式逐条执行）"}
+              className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              <UploadIcon className={cn("size-3.5", importingDump && "animate-pulse")} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setBackupOpen(true)}
+              disabled={!connected || !selectedDb}
+              aria-label="官方备份"
+              title="官方 mysqldump / pg_dump 备份与恢复（不是 SQL dump）"
+              className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              <DatabaseBackupIcon className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={refreshMetadata}
+              disabled={!connected || refreshingMetadata}
+              aria-label="刷新数据库对象"
+              title={refreshingMetadata ? "正在刷新数据库对象" : "刷新数据库对象"}
+              className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              <RefreshCwIcon
+                className={cn("size-3.5", refreshingMetadata && "animate-spin")}
+              />
+            </button>
+          </>
+        )}
       </div>
       {workspace === "compare" ? (
         <CompareView />
@@ -664,81 +741,6 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       <div className="flex min-h-0 flex-1">
         {/* 左：database / schema / table 树 */}
         <aside className="w-80 overflow-y-auto border-r border-neutral-200 dark:border-neutral-800">
-          <div className="sticky top-0 z-10 flex items-center justify-end border-b border-neutral-100 bg-white/95 px-3 py-1.5 text-xs text-neutral-500 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
-            <div className="flex shrink-0 items-center gap-0.5">
-              {/* 新建表（FR-251）：需已选中 database（MySQL）/ schema（PostgreSQL） */}
-              <button
-                type="button"
-                onClick={() => setCreateTableOpen(true)}
-                disabled={
-                  readOnly ||
-                  !connected ||
-                  !selectedDb ||
-                  (connection.driver === "postgresql" && !selectedSchema)
-                }
-                aria-label="新建表"
-                title="新建表"
-                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-              >
-                <PlusIcon className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setCloneOpen(true)}
-                disabled={
-                  readOnly ||
-                  !connected ||
-                  !selectedDb ||
-                  !activeTab?.selectedTable ||
-                  (connection.driver === "postgresql" && !selectedSchema)
-                }
-                aria-label="复制为新表"
-                title="把当前表复制为同库新表"
-                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-              >
-                <CopyIcon className="size-3.5" />
-              </button>
-              {/* 导入 SQL dump（FR-252）：流式执行整个文件 */}
-              <button
-                type="button"
-                onClick={() => void importDump()}
-                disabled={
-                  readOnly ||
-                  !connected ||
-                  !selectedDb ||
-                  importingDump ||
-                  (connection.driver === "postgresql" && !selectedSchema)
-                }
-                aria-label="导入 SQL"
-                title={importingDump ? "正在导入 SQL dump" : "导入 SQL dump 文件（流式逐条执行）"}
-                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-              >
-                <UploadIcon className={cn("size-3.5", importingDump && "animate-pulse")} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setBackupOpen(true)}
-                disabled={!connected || !selectedDb}
-                aria-label="官方备份"
-                title="官方 mysqldump / pg_dump 备份与恢复（不是 SQL dump）"
-                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-              >
-                <DatabaseBackupIcon className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={refreshMetadata}
-                disabled={!connected || refreshingMetadata}
-                aria-label="刷新数据库对象"
-                title={refreshingMetadata ? "正在刷新数据库对象" : "刷新数据库对象"}
-                className="flex size-6 items-center justify-center rounded hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-              >
-                <RefreshCwIcon
-                  className={cn("size-3.5", refreshingMetadata && "animate-spin")}
-                />
-              </button>
-            </div>
-          </div>
           {dumpMsg && (
             <div className="border-b border-neutral-100 px-3 py-1 text-xs text-neutral-500 dark:border-neutral-800">
               {dumpMsg}

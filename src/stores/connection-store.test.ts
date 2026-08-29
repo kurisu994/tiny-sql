@@ -83,6 +83,38 @@ describe("connection-store", () => {
     expect(mockInvoke).toHaveBeenCalledWith("connection_list");
   });
 
+  it("reorder 先本地落位再写后端", async () => {
+    const b = { ...sampleConn, id: "2", name: "b" };
+    useConnectionStore.setState({ connections: [sampleConn, b] });
+    mockInvoke.mockResolvedValueOnce(undefined);
+
+    await useConnectionStore.getState().reorder(["2", "1"]);
+
+    expect(mockInvoke).toHaveBeenCalledWith("connection_reorder", { ids: ["2", "1"] });
+    expect(useConnectionStore.getState().connections.map((c) => c.id)).toEqual(["2", "1"]);
+  });
+
+  it("reorder 失败时回滚顺序并报错", async () => {
+    const b = { ...sampleConn, id: "2", name: "b" };
+    useConnectionStore.setState({ connections: [sampleConn, b] });
+    mockInvoke.mockRejectedValueOnce("error.security.locked");
+
+    await useConnectionStore.getState().reorder(["2", "1"]);
+
+    expect(useConnectionStore.getState().connections.map((c) => c.id)).toEqual(["1", "2"]);
+    expect(useConnectionStore.getState().error).toBeTruthy();
+  });
+
+  it("reorder 的 ids 与当前列表对不上时改为重新拉取", async () => {
+    useConnectionStore.setState({ connections: [sampleConn] });
+    mockInvoke.mockResolvedValueOnce([sampleConn]);
+
+    await useConnectionStore.getState().reorder(["ghost"]);
+
+    expect(mockInvoke).toHaveBeenCalledWith("connection_list");
+    expect(mockInvoke).not.toHaveBeenCalledWith("connection_reorder", expect.anything());
+  });
+
   it("remove 调 connection_delete 后重新拉取", async () => {
     mockInvoke.mockResolvedValueOnce(undefined).mockResolvedValueOnce([]);
     await useConnectionStore.getState().remove("1");

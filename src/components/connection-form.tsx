@@ -8,6 +8,7 @@ import {
   translateError,
   type AdvancedConfig,
   type ConnectionInput,
+  type ConnectionTestReport,
   type DriverKind,
   type SslConfig,
   type SslMode,
@@ -89,8 +90,13 @@ const SSL_MODE_OPTIONS: { value: SslMode; label: string }[] = [
 type TestState =
   | { kind: "idle" }
   | { kind: "testing" }
-  | { kind: "ok" }
+  | { kind: "ok"; report: ConnectionTestReport }
   | { kind: "err"; msg: string };
+
+/** 毫秒展示：10ms 以上取整，以下保留一位，避免内网库统统显示 0 ms */
+function formatMs(ms: number): string {
+  return `${ms >= 10 ? Math.round(ms) : Math.round(ms * 10) / 10} ms`;
+}
 
 /**
  * 连接编辑表单 —— 新建（editing=null）或编辑已有连接。
@@ -185,8 +191,8 @@ export function ConnectionForm({
   async function onTest() {
     setTest({ kind: "testing" });
     try {
-      await connectionApi.test(toInput(), testPassphrase || undefined);
-      setTest({ kind: "ok" });
+      const report = await connectionApi.test(toInput(), testPassphrase || undefined);
+      setTest({ kind: "ok", report });
     } catch (e) {
       setTest({ kind: "err", msg: translateError(e) });
     }
@@ -403,9 +409,16 @@ export function ConnectionForm({
       </div>
 
       {test.kind === "ok" && (
-        <p className="rounded-md bg-green-100 px-3 py-2 text-sm text-green-800 dark:bg-green-950 dark:text-green-300">
-          ✓ 连接成功
-        </p>
+        <div className="rounded-md bg-green-100 px-3 py-2 text-sm text-green-800 dark:bg-green-950 dark:text-green-300">
+          <p>✓ 连接成功 · 延迟 {formatMs(test.report.pingMs)}</p>
+          {/* 延迟是热连接上的 SELECT 1 往返，握手与建隧道单列，方便判断慢在哪一段 */}
+          <p className="mt-0.5 text-xs opacity-80">
+            {test.report.tunnelMs != null &&
+              `SSH 隧道 ${formatMs(test.report.tunnelMs)} · `}
+            建立连接 {formatMs(test.report.connectMs)} · 总计{" "}
+            {formatMs(test.report.totalMs)}
+          </p>
+        </div>
       )}
       {test.kind === "err" && (
         <p className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">

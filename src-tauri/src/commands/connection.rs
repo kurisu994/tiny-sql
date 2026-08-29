@@ -4,6 +4,7 @@
 //! SSL / 高级连接参数转换给 db-driver。
 
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
@@ -53,16 +54,33 @@ pub struct ConnectionInput {
     pub env: String,
 }
 
-/// 列出所有连接，按最近使用时间倒序（FR-003）。
+/// 列出所有连接，按用户手动排序（FR-003）。
+///
+/// 排序规则：有 `sort_order` 的按序号升序排在前面；从未手动排过的（旧记录、
+/// 新建、导入）落在后面，彼此之间仍按最近使用时间倒序，保持升级前的观感。
 ///
 /// Week 2 简化：返回完整配置（含明文 password）供前端编辑回显——本地单机工具，
 /// 内存明文可接受，落盘已整体加密（NFR-010）。后续要收紧可改为 meta + 单独 get。
 #[tauri::command]
 pub async fn connection_list(state: State<'_, AppState>) -> Result<Vec<StoredConnection>, String> {
     let mut conns = state.store.lock().unwrap().load()?;
-    // None（从未使用）排在最后，最近使用的排最前
-    conns.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
+    conns.sort_by(|a, b| match (a.sort_order, b.sort_order) {
+        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        // 都没排过：最近使用的排最前，从未使用（None）排最后
+        (None, None) => b.last_used_at.cmp(&a.last_used_at),
+    });
     Ok(conns)
+}
+
+/// 按前端拖拽后的完整 id 顺序重写排序序号（FR-003）。
+#[tauri::command]
+pub async fn connection_reorder(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    state.store.lock().unwrap().reorder(&ids)
 }
 
 /// 新建连接，后端生成 uuid id 并返回完整记录。
@@ -84,6 +102,8 @@ pub async fn connection_create(
         ssl: input.ssl,
         advanced: input.advanced,
         last_used_at: None,
+        // 新建的连接排在列表末尾，直到用户手动拖动
+        sort_order: None,
         read_only: input.read_only,
         env: store::normalize_env(&input.env),
     };
@@ -110,16 +130,31 @@ pub async fn connection_delete(state: State<'_, AppState>, id: String) -> Result
     state.store.lock().unwrap().delete(&id)
 }
 
+/// 连接测试的耗时明细（毫秒，保留小数——本地库和内网库常常不到 1ms）
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionTestReport {
+    /// SSH 隧道建链耗时；直连或文件型 driver 为 None
+    pub tunnel_ms: Option<f64>,
+    /// 数据库握手耗时（TCP + TLS + 认证；连接池是 eager 的，这里就是真实握手）
+    pub connect_ms: f64,
+    /// 握手后跑一条 `SELECT 1` 的往返延迟——用热连接测，才是链路延迟
+    pub ping_ms: f64,
+    /// 从开始到 ping 结束的总耗时
+    pub total_ms: f64,
+}
+
 /// 测试连接：建立完整链路（可选 SSH 隧道 + 数据库握手 + SELECT 1）后立即销毁。
 /// `passphrase` 仅用于本次测试，不写入持久化文件或会话缓存。
-/// 成功返回 ()，失败返回 i18n key 由前端翻译（FR-002）。
+/// 成功返回各段耗时（FR-002），失败返回 i18n key 由前端翻译。
 #[tauri::command]
 pub async fn connection_test(
     app: AppHandle,
     state: State<'_, AppState>,
     input: ConnectionInput,
     passphrase: Option<String>,
-) -> Result<(), String> {
+) -> Result<ConnectionTestReport, String> {
+    let started = Instant::now();
     // SQLite 等文件型 driver 连的是本地文件，隧道配置一律忽略
     let hops: Vec<SshHop> = if input.ssh.enabled && !input.driver.is_file_based() {
         build_runtime_hops(&input.ssh, passphrase.as_deref())?
@@ -130,9 +165,10 @@ pub async fn connection_test(
     // 直连用真实 host:port；走隧道时换成隧道的本地端口。
     // 测试连接同样必须走 known_hosts + TOFU 校验：verifier 缺省会接受任意
     // host key，SSH 凭据会发给未经校验的主机。瞬时链路无需 keepalive 上报。
-    let (host, port, _tunnel) = if hops.is_empty() {
-        (input.host.clone(), input.port, None)
+    let (host, port, _tunnel, tunnel_ms) = if hops.is_empty() {
+        (input.host.clone(), input.port, None, None)
     } else {
+        let tunnel_started = Instant::now();
         let test_id = format!("test-{}", uuid::Uuid::new_v4());
         let ctx = TunnelContext {
             status_cb: None,
@@ -143,10 +179,17 @@ pub async fn connection_test(
         let tunnel = ssh_multihop::open(&hops, &input.host, input.port, &ctx)
             .await
             .map_err(|e| e.i18n_key().to_string())?;
+        let tunnel_ms = elapsed_ms(tunnel_started);
         let addr = tunnel.local_addr();
-        (addr.ip().to_string(), addr.port(), Some(tunnel))
+        (
+            addr.ip().to_string(),
+            addr.port(),
+            Some(tunnel),
+            Some(tunnel_ms),
+        )
     };
 
+    let connect_started = Instant::now();
     let driver = connect_database_driver(RuntimeDatabaseTarget {
         kind: input.driver,
         host: &host,
@@ -159,11 +202,25 @@ pub async fn connection_test(
         read_only: input.read_only,
     })
     .await?;
+    let connect_ms = elapsed_ms(connect_started);
+
+    let ping_started = Instant::now();
     let result = Driver::ping(&driver).await;
+    let ping_ms = elapsed_ms(ping_started);
     Driver::close(&driver).await;
     result.map_err(|e| e.i18n_key().to_string())?;
-    Ok(())
+    Ok(ConnectionTestReport {
+        tunnel_ms,
+        connect_ms,
+        ping_ms,
+        total_ms: elapsed_ms(started),
+    })
     // _tunnel 在此 drop，关闭 listener 与 session
+}
+
+/// 统一把计时转成毫秒
+fn elapsed_ms(since: Instant) -> f64 {
+    since.elapsed().as_secs_f64() * 1000.0
 }
 
 /// 把持久化的 SSH 配置转换成 ssh-multihop 运行时跳数组。

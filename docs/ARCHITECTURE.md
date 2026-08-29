@@ -689,9 +689,10 @@ impl OpenConnection {
 |---|---|---|---|
 | `connection_create` | `(name, config)` | `StoredConnection` | 后端生成 uuid，返回完整记录 |
 | `connection_update` | `(connection)` | `()` | 同上 |
-| `connection_list` | - | `Vec<StoredConnection>` | 按最近使用倒序（从未使用排最后）；返回完整配置（含解密后的 password）供前端编辑回显，落盘已整体加密 |
+| `connection_list` | - | `Vec<StoredConnection>` | 按手动排序 `sortOrder` 升序，未排序的排在其后并按最近使用倒序；返回完整配置（含解密后的 password）供前端编辑回显，落盘已整体加密 |
+| `connection_reorder` | `ids` | - | 按前端拖拽后的完整 id 顺序重写 `sortOrder`，未出现的 id 保持原值 |
 | `connection_delete` | `id` | `()` | 加密落盘后删 |
-| `connection_test` | `(config, passphrase?)` | `()` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；passphrase 只用于本次测试，不持久化或缓存 |
+| `connection_test` | `(config, passphrase?)` | `ConnectionTestReport` | 建立链路（同样走 TOFU 校验）→ SELECT 1 → 销毁；返回 `tunnelMs?` / `connectMs` / `pingMs` / `totalMs` 四段耗时（ms，f64）；passphrase 只用于本次测试，不持久化或缓存 |
 | `connection_open` | `(id, passphrase?, remember_passphrase?)` | `session_id` | 建立持久连接并注册到 AppState；remember_passphrase 在主密码解锁时加密持久化 passphrase |
 | `connection_reconnect` | `(id, expected_session_id?, passphrase?, database_override?)` | `session_id` | 仅在期望 session 仍为当前值时取消旧查询、关闭旧 pool/tunnel 并建立新 session；`database_override` 仅本次 session 生效 |
 | `connection_close` | `(id, expected_session_id?)` | `()` | 仅关闭匹配 session；迟到关闭幂等忽略 |
@@ -1006,7 +1007,8 @@ v2 envelope（自描述 JSON）：{ "v": 2, "nonce": "<base64 12B>", "data": "<b
     "ssh": { "enabled": true, "hops": [ { "host": "...", "port": 22, "username": "...", "authType": "privateKey", "privateKeyPath": "~/.ssh/id_rsa", "password": "..." }, ... ] },
     "ssl": { "mode": "disabled", "caPath": "", "clientCertPath": "", "clientKeyPath": "" },
     "advanced": { "keepAliveEnabled": true, "keepAliveIntervalSeconds": 60, "keepAliveFailureThreshold": 3, "connectTimeoutEnabled": true, "connectTimeoutSeconds": 30, "readTimeoutEnabled": false, "readTimeoutSeconds": 30, "writeTimeoutEnabled": true, "writeTimeoutSeconds": 30, "compressionEnabled": false, "autoConnect": false, ... },
-    "lastUsedAt": "2026-06-20T10:00:00Z"
+    "lastUsedAt": "2026-06-20T10:00:00Z",
+    "sortOrder": 0
   },
   ...
 ]
@@ -1220,6 +1222,7 @@ interface StoredConnection {
   ssl: SslConfig;
   advanced: AdvancedConfig;
   lastUsedAt?: string;   // ISO 8601
+  sortOrder?: number | null; // FR-003 手动排序序号，缺省 null 排在已排序记录之后
   readOnly?: boolean;    // FR-270，缺省 false
   env?: "none" | "prod" | "staging" | "dev"; // FR-271，缺省 none
 }

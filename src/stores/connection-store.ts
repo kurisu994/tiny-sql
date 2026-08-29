@@ -24,6 +24,8 @@ interface ConnectionState {
   update: (connection: StoredConnection) => Promise<void>;
   /** 删除连接 */
   remove: (id: string) => Promise<void>;
+  /** 按拖拽后的完整顺序重排（本地先落位，失败回滚） */
+  reorder: (ids: string[]) => Promise<void>;
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
@@ -60,5 +62,25 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   remove: async (id) => {
     await connectionApi.remove(id);
     await get().load();
+  },
+
+  reorder: async (ids) => {
+    const previous = get().connections;
+    const byId = new Map(previous.map((c) => [c.id, c]));
+    const next = ids
+      .map((id) => byId.get(id))
+      .filter((c): c is StoredConnection => c !== undefined);
+    // ids 应是当前列表的全排列；对不上说明列表已变，退回后端结果为准
+    if (next.length !== previous.length) {
+      await get().load();
+      return;
+    }
+    // 先本地落位，避免松手后列表回弹一帧
+    set({ connections: next, error: null });
+    try {
+      await connectionApi.reorder(ids);
+    } catch (e) {
+      set({ connections: previous, error: translateError(e) });
+    }
   },
 }));
