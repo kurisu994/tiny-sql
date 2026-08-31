@@ -59,7 +59,7 @@
 | MSRV | 1.77.2 | `rust-version` |
 | Node | 见 `.nvmrc` | CI 用 Node 24 |
 | pnpm | 11+ | pnpm-workspace.yaml |
-| 应用版本 | 0.8.0-rc2 | package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock（稳定 Release 仍为 `v0.7.0`，rc2 为 prerelease） |
+| 应用版本 | 0.8.0 | package.json / src-tauri/Cargo.toml / tauri.conf.json / Cargo.lock（`v0.8.0` 正式版已发布，tag `v0.8.0` / 发布提交 `12d3aae`） |
 
 ## 构建命令（justfile，`set dotenv-load`）
 
@@ -101,11 +101,11 @@
 | known_hosts 路径 | `~/Library/Application Support/tiny-sql/known_hosts.json`（明文，自有库，不碰 `~/.ssh`，NFR-012） |
 | 应用偏好设置 | localStorage 键 `tiny-sql:settings`（纯 UI 偏好：`autoCheckUpdate` / `updateProxy` / `confirmWrite` / `defaultPageSize` / `editorFontSize` / `theme`），损坏或越界逐字段回落默认（v0.8 设置弹窗）。`theme` 为 `system` / `light` / `dark`，默认 `system`；暗色通过 `<html class="dark">` 生效 |
 
-## 当前 command（src-tauri 实际，54 个）
+## 当前 command（src-tauri 实际，56 个）
 
-- 连接：`connection_create/list/update/delete`、`connection_test(input, passphrase?)`、`connection_open(id, passphrase?, remember_passphrase?)`、`connection_reconnect(id, expected_session_id?, passphrase?, database_override?)`、`connection_close(id, expected_session_id?)`。
+- 连接：`connection_create/list/update/delete`、`connection_test(input, passphrase?)`、`connection_open(id, passphrase?, remember_passphrase?)`、`connection_reconnect(id, expected_session_id?, passphrase?, database_override?)`、`connection_close(id, expected_session_id?)`、`connection_reorder(ids)`（连接列表拖拽排序，`StoredConnection.sort_order` 落盘）。
 - 分享：`connection_share_export/preview/import`。
-- 元数据与查询：`db_list_databases/schemas/tables/columns/indexes/constraints`、`db_create_database`、`db_query`、`db_query_cancel`、`db_query_many`、`db_browse_table`、`db_apply_table_edits`。
+- 元数据与查询：`db_list_databases/schemas/tables/columns/indexes/constraints`、`db_create_database`、`db_query`、`db_query_cancel`、`db_query_many`、`db_browse_table`、`db_apply_table_edits`、`db_schema_overview`（表/列/索引/约束全库批量拉取，MySQL 4 条 information_schema / PG 3 条 pg_catalog，SQLite 逐表但收敛成 1 次 IPC）。
 - 导入导出与备份：`csv_import_preview`、`db_import_csv`、`db_export_dump`、`db_import_dump`、`backup_probe_tools`、`db_backup_export`、`db_backup_restore`、`db_export_query`。
 - 拷贝与权限：`db_copy_preview`、`db_copy_table_rows`、`db_list_accounts`、`db_show_grants`。
 - 事务 / SQL 文件 / 安全 / 历史 / TOFU：`transaction_*`（5）、`sql_file_*`（5）、`security_*`（6）、`history_list/clear`、`ssh_tofu_decision`。

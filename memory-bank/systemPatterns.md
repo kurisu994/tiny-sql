@@ -124,6 +124,6 @@ tiny-sql/
 - ❌ **数据库设计不定义 FOREIGN KEY**（全局规则）—— 关联由代码与索引控制。
 - ❌ **keepalive 默认值不要 30s/1 次即报** —— 默认用 60s + 连续 3 次，防误报；运行时只读监控不得额外发心跳干扰用户设置的间隔。
 - ❌ **不把 SSH RTT 冒充网络分段延迟** —— 仅显示累计 SSH 协议探测值；不得相减、不得用超时直接驱动 failed/lost。
-- ❌ **不把暗色切成 `.dark` class 策略** —— 保持 Tailwind v4 默认 `prefers-color-scheme`（跟随系统），shadcn 主题变量在 `@media` 下随系统切换，避免现有满屏 `dark:` 工具类失效。
+- ❌ **不再依赖 `prefers-color-scheme` 媒体查询切暗色** —— v0.8 设置弹窗提供「跟随系统 / 浅色 / 深色」三选一，已迁到 `<html class="dark">` + `@custom-variant dark`，CSS 变量从媒体查询迁到 `.dark`；启动脚本读 `tiny-sql:settings` 避免闪浅色。
 
 相关：[[techContext]] · [[productContext]] · [[activeContext]]
