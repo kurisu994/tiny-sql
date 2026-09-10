@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**状态：稳定 Release 为 v0.7.0；main 已切 `v0.8.0-rc2`（含 SQLite driver），待 GUI/RC 验收后正式发布。** GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
+**状态：稳定 Release 为 v0.8.0（含 SQLite driver、应用设置与 ER 画布）；`main` 上还有 v0.8.0 之后的未发布体验优化（连接列表拖拽排序、工作台工具栏合并、测试连接延迟），落在 CHANGELOG 的 `[Unreleased]` 段。** GitHub Actions 为 macOS（Apple Silicon / Intel）、Windows x64、Linux x64 产出安装包与签名更新包；正式版附四平台 `latest.json`。历史与计划见 [CHANGELOG.md](./CHANGELOG.md) 与 [docs/ROADMAP.md](./docs/ROADMAP.md)。
 
 ## 为什么又造一个 SQL 客户端
 
@@ -146,11 +146,11 @@ justfile                    # 项目命令入口
 
 ## 安装
 
-> 从 [v0.7.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.7.0) 下载当前稳定版（云端打包完成后资产才会齐）。
+> 从 [v0.8.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.8.0) 下载当前稳定版（云端打包完成后资产才会齐）。
 
-v0.7.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
+v0.8.0 提供 **macOS（Apple Silicon + Intel）** `.dmg`、**Windows x64** `.exe` 和 **Linux x64** `.AppImage`。
 
-`v0.8.0-rc2` 已发布为 prerelease（含 SQLite 支持），正式版发布前需手动下载验证。
+v0.8.0 之后的体验优化（连接列表拖拽排序、工作台工具栏合并、测试连接延迟）尚未发版，暂需自行构建。
 
 正式版会在 GitHub Release 中附带 `latest.json` 与签名更新包，应用内自动更新只跟随 GitHub 的 latest 正式版。`v*-rc*`、beta、alpha 预发布版本仍需手动下载验证。
 

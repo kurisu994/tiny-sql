@@ -43,4 +43,15 @@ tiny-sql 是一个多级跳板机友好的 MySQL / PostgreSQL / SQLite 桌面客
 
 ## AI 会话收尾与记忆银行
 
-每次最终回复前，AI 必须检查本轮是否产生代码变更、重要决策、阻塞或下一步计划；如有，先更新 `memory-bank/activeContext.md`，记录当前状态、活跃文件、已做决策、下一步和阻塞。涉及里程碑、架构调整或长期约定变化时，同步更新 `memory-bank/progress.md`，最后再检查一下是否需要更新 `CHANGELOG.md`。
+项目记忆在 `memory-bank/`，**入口是 [`memory-bank/README.md`](./memory-bank/README.md)**，四层结构与写入规则详解见该文件。
+
+收尾时的写入位置按层归属决定：
+
+- **任务层** `memory-bank/active/<branch>.md`：本轮做了什么、验收标准、下一步与阻塞（最常更新）。
+- **个人层** `memory-bank/journal/<dev>.md`：会话流水与踩过的坑。**只追加，不改历史，每段结尾留空行**。
+- **归档层** `memory-bank/archive/YYYY-MM/`：里程碑与已完成任务的决策记录，写完不再动。
+- **共识层** `memory-bank/00-project.md` 与 `1X-*.md`：项目定位与分领域编码约定。改动走 PR review，**冲突不要 `--ours` 硬合**。
+
+每次最终回复前检查本轮是否产生代码变更、重要决策、阻塞或下一步计划；涉及里程碑 / 架构调整 / 长期约定变化时同步归档层，最后再检查是否需要更新 `CHANGELOG.md`。
+
+> Claude Code 已装路径触发注入 hook（`.claude/hooks/inject-memory-bank.py`），读写源码时按 `1X-*.md` 的 `paths` frontmatter 自动注入对应规范。**Pi / Grok / Cursor 不支持**，按 `memory-bank/README.md` 的路径映射表人工查阅。

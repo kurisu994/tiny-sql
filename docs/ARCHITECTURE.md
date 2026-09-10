@@ -148,7 +148,7 @@ src-tauri/src/
 └── ...
 ```
 
-功能等价。开源解耦弱一点（`ssh-multihop` 不能独立 publish）但保 ship。该兜底已在 CP-1 验证后关闭，不再列入当前待办计划；历史记录见 [progress.md](../memory-bank/progress.md)。
+功能等价。开源解耦弱一点（`ssh-multihop` 不能独立 publish）但保 ship。该兜底已在 CP-1 验证后关闭，不再列入当前待办计划；历史记录见 [progress.md](../memory-bank/archive/2026-08/progress.md)。
 
 ---
 

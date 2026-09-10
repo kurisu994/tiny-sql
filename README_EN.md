@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/kurisu994/tiny-sql/actions/workflows/ci.yml)
 
-**Status: the latest stable GitHub Release is v0.7.0; `main` has cut `v0.8.0-rc2` (incl. the SQLite driver), pending GUI/RC acceptance before the stable cut.** GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
+**Status: the latest stable GitHub Release is v0.8.0 (incl. the SQLite driver, app settings, and the ER canvas); `main` carries post-v0.8.0 UX improvements that are not released yet (drag-to-reorder connections, merged workspace toolbar, test-connection latency), tracked under `[Unreleased]` in CHANGELOG.** GitHub Actions publishes installers for macOS (Apple Silicon / Intel), Windows x64, and Linux x64, plus signed update packages; stable releases also ship four-platform `latest.json`. See [CHANGELOG.md](./CHANGELOG.md) and [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Why another SQL client
 
@@ -148,11 +148,11 @@ justfile                    # project command entry point
 
 ## Installation
 
-> Download the current stable release from [v0.7.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.7.0) (assets appear after the cloud build finishes).
+> Download the current stable release from [v0.8.0 Release](https://github.com/kurisu994/tiny-sql/releases/tag/v0.8.0) (assets appear after the cloud build finishes).
 
-v0.7.0 provides `.dmg` for **macOS (Apple Silicon + Intel)**, `.exe` for **Windows x64**, and `.AppImage` for **Linux x64**.
+v0.8.0 provides `.dmg` for **macOS (Apple Silicon + Intel)**, `.exe` for **Windows x64**, and `.AppImage` for **Linux x64**.
 
-`v0.8.0-rc2` has been published as a prerelease (incl. SQLite support); it requires manual download until the stable cut.
+The post-v0.8.0 UX improvements (drag-to-reorder connections, merged workspace toolbar, test-connection latency) are not released yet and currently require a local build.
 
 Stable releases ship with `latest.json` and signed update packages on GitHub Releases; in-app auto-update only follows the latest stable release on GitHub. `v*-rc*`, beta, and alpha pre-releases still require manual download and verification.
 

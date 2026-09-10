@@ -309,13 +309,13 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-111** 结果表格列宽拖拽调整（v0.2 已实现：拖拽 + localStorage 持久化 + 恢复默认）
 - **FR-112** schema 树列清单展示
 
-实施顺序与历史见 [progress.md](../memory-bank/progress.md)。
+实施顺序与历史见 [progress.md](../memory-bank/archive/2026-08/progress.md)。
 
 ---
 
 ### 3.3 v0.3 范围（查询与浏览效率 + 可靠事务）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md](../memory-bank/progress.md)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md](../memory-bank/archive/2026-08/progress.md)。
 
 - **FR-242** 表数据服务端筛选、排序和分页（P0）：WHERE 列白名单 + 操作符枚举 + 值全参数化，LIMIT/OFFSET 分页与总行数 COUNT，双方言各自标识符引用；禁止先拉全表再在前端处理。
 - **FR-244** 连接绑定的独占 session 与可靠事务（P0）：`BEGIN` / `COMMIT` / `ROLLBACK` 固定同一 connection；session 独立于 pool 限额并有空闲超时强制回收；断链即事务消亡，不提供「重连续事务」；是 v0.4 安全编辑（FR-250）的前置能力。
@@ -323,13 +323,13 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-241** index / constraint 元数据树与数据库对象搜索（P1）：MySQL `information_schema` 与 PostgreSQL `pg_index` / `pg_constraint` 双方言实现，接入 v0.2 LRU cache 失效链；搜索按名称过滤并定位展开树节点；column 树仍由 FR-112 负责。
 - **FR-243** 多结果 tab 与 SQL 格式化（P1）：保持「单语句直接执行」护栏不变；「执行全部」由后端按方言分号状态机拆分逐条执行，每条独立 guard 分类与写确认，边界不确定即拒绝执行；一次执行保留多个结果集；多查询 tab 仍由 FR-109 负责。
 
-实施顺序与历史见 [progress.md](../memory-bank/progress.md)。
+实施顺序与历史见 [progress.md](../memory-bank/archive/2026-08/progress.md)。
 
 ---
 
 ### 3.4 v0.4 范围（安全数据维护与对象管理）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.4 归档](../memory-bank/progress.md#v04-已交付周计划归档)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.4 归档](../memory-bank/archive/2026-08/progress.md#v04-已交付周计划归档)。
 
 > **实现状态（2026-08-22，已随 v0.7.0 发布）**：三项 FR 代码与自动化门禁已全部完成，integration 双 driver 全绿（编辑批 7 项 + bulk_insert 3 项 + dump 往返 2 项）；`v0.4.0-rc1` 已发布（prerelease，四平台构建成功）；2026-08-24 随 `v0.7.0` 正式发布，验收并入 v0.7 发布流程。
 
@@ -343,7 +343,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 ### 3.5 v0.5 范围（结构变更、官方备份与连接协作）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.5 归档](../memory-bank/progress.md#v05-已交付周计划归档)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.5 归档](../memory-bank/archive/2026-08/progress.md#v05-已交付周计划归档)。
 
 > **实现状态（2026-08-24，已随 v0.7.0 发布）**：三项 FR 编码与自动化单测已完成；2026-08-24 随 `v0.7.0` 正式发布，验收并入 v0.7 发布流程。
 
@@ -357,7 +357,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 ### 3.6 v0.6 范围（结构对比、可审阅同步与关系图）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.6 归档](../memory-bank/progress.md#v06-已交付周计划归档)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.6 归档](../memory-bank/archive/2026-08/progress.md#v06-已交付周计划归档)。
 
 > **实现状态（2026-08-24，已随 v0.7.0 发布）**：三项 FR 编码与单测已完成；2026-08-24 随 `v0.7.0` 正式发布，验收并入 v0.7 发布流程。
 
@@ -371,7 +371,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 ### 3.7 v0.7 范围（表数据搬迁、库内权限与执行计划）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.7 归档](../memory-bank/progress.md#v07-已交付周计划归档)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.7 归档](../memory-bank/archive/2026-08/progress.md#v07-已交付周计划归档)。
 
 > **实现状态（2026-08-24，已随 v0.7.0 发布）**：三项 FR 编码与单测已完成；`v0.7.0` 已于同日正式发布。
 
@@ -385,7 +385,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 
 ### 3.8 v0.8 范围（防连错与查询补齐）
 
-非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.8 归档](../memory-bank/progress.md#v08-已交付周计划归档)。
+非详细需求，仅锚点。详见 [ROADMAP.md](./ROADMAP.md) 与 [progress.md v0.8 归档](../memory-bank/archive/2026-08/progress.md#v08-已交付周计划归档)。
 
 > **实现状态（2026-08-28）**：六项 FR 编码与单测已完成；2026-08-25 追加 SQLite driver；2026-08-26 发布 `v0.8.0-rc1`；2026-08-28 追加应用设置弹窗（localStorage 偏好，非 FR 项）并发布 `v0.8.0-rc2`（prerelease，`just check` 全绿：vitest 190 / db-driver 单测 47 + SQLite integration 23）。GUI/RC 正式切版由用户验收。
 

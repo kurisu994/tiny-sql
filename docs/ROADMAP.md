@@ -53,7 +53,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 ## v0.2 — 已发布（2026-08-20）
 
-详细任务历史见 [progress.md](../memory-bank/progress.md)。
+详细任务历史见 [progress.md](../memory-bank/archive/2026-08/progress.md)。
 
 **发布事实**：`v0.2.0` 已于 2026-08-20 正式发布。Week 1-6 全部功能（下表）+ V2-T7.4 决策 + 文档收口完成；`just check` 全绿，双 driver integration 全过，全平台构建与应用内升级闭环验收通过。
 
@@ -101,7 +101,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 ### v0.3 — 查询与浏览效率（已发布，2026-08-22）
 
-详细任务历史见 [progress.md](../memory-bank/progress.md)。
+详细任务历史见 [progress.md](../memory-bank/archive/2026-08/progress.md)。
 
 **发布事实**：v0.3 全部五项 FR 已于 2026-08-20 完成编码与自动化门禁（Week 1-6 + V3-T7.3 文档 + V3-T7.4 门禁）；`just check` 全绿，双 driver integration 20/20，本机 dmg + updater 签名产物构建成功。V3-T7.1 双 driver × 直连/1 跳/3 跳全功能真实回归已于 2026-08-21 用户实测通过；`v0.3.0-rc1` 同日发布（四平台 prerelease，无 `latest.json`）。V3-T7.2 RC 一周试用于 2026-08-22 关闭（0 数据丢失 / 0 凭据泄露 / 0 不可恢复 crash，无阻塞 P0/P1）。`v0.3.0` 已于 2026-08-22 正式发布（发布提交 `0825da5`，Release run `32546492367` 四平台成功，非草稿非预发布，含四平台资产与 `latest.json`）。
 
@@ -115,7 +115,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 ### v0.4 — 安全数据维护与对象管理（已随 v0.7.0 发布）
 
-详细任务历史见 [progress.md v0.4 归档](../memory-bank/progress.md#v04-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
+详细任务历史见 [progress.md v0.4 归档](../memory-bank/archive/2026-08/progress.md#v04-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：Week 1-7 全部三项 FR + V4-T8.3 文档 + V4-T8.4 门禁已于 2026-08-22 完成，V4-CP0~CP4 全部收口；`just check` 全绿（双 driver integration 33/33），本机 dmg + updater 签名产物构建成功。`v0.4.0-rc1` 同日发布（发布提交 `dbae167`，Release run `32554496338` 四平台成功，prerelease，无 `latest.json`）。剩余仅为 V4-T8.1 GUI 真实回归、V4-T8.2 一周试用与正式发布（V4-CP5，均需用户参与）。
 
@@ -127,7 +127,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 ### v0.5 — 结构变更、官方备份与连接协作（已随 v0.7.0 发布）
 
-详细任务历史见 [progress.md v0.5 归档](../memory-bank/progress.md#v05-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
+详细任务历史见 [progress.md v0.5 归档](../memory-bank/archive/2026-08/progress.md#v05-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：2026-08-24 三项 FR 编码与 `just check` 完成；随 `v0.7.0` 正式发布（GUI/RC 验收并入 v0.7 发布流程）。
 
@@ -139,7 +139,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 ### v0.6 — 结构对比、可审阅同步与关系图（已随 v0.7.0 发布）
 
-详细任务历史见 [progress.md v0.6 归档](../memory-bank/progress.md#v06-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
+详细任务历史见 [progress.md v0.6 归档](../memory-bank/archive/2026-08/progress.md#v06-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：2026-08-24 三项 FR 编码与单测完成；随 `v0.7.0` 正式发布（GUI/RC 验收并入 v0.7 发布流程）。
 
@@ -151,7 +151,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 ### v0.7 — 表数据搬迁、库内权限与执行计划（已发布，2026-08-24）
 
-详细任务历史见 [progress.md v0.7 归档](../memory-bank/progress.md#v07-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
+详细任务历史见 [progress.md v0.7 归档](../memory-bank/archive/2026-08/progress.md#v07-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：2026-08-24 随 `v0.7.0` 正式发布。
 
@@ -163,7 +163,7 @@ v0.9+ ── 双向同步 + BI/AI + 平台与 crate 长期演进
 
 ### v0.8 — 防连错与查询补齐（rc2 已发布，待验收）
 
-详细任务历史见 [progress.md v0.8 归档](../memory-bank/progress.md#v08-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
+详细任务历史见 [progress.md v0.8 归档](../memory-bank/archive/2026-08/progress.md#v08-已交付周计划归档)；收口见 [PLAN](./PLAN.md)。
 
 **当前进度**：2026-08-24 六项 FR 编码完成；2026-08-25 追加 SQLite driver（三实现落地）；2026-08-26 发布 `v0.8.0-rc1`；2026-08-28 新增应用设置弹窗（`src/stores/settings-store.ts` + `src/components/settings-dialog.tsx`，localStorage 偏好，无新 Rust command）并发布 `v0.8.0-rc2`（prerelease，四平台构建成功，无 `latest.json`）。`just check` 全绿：vitest 190 / db-driver 单测 47 + SQLite integration 23。待 GUI 实测与正式切版。
 
