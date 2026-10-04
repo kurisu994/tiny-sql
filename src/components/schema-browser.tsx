@@ -54,7 +54,12 @@ import {
 } from "@/lib/tauri-api";
 import { cn } from "@/lib/utils";
 import { useConfirmStore } from "@/stores/confirm-store";
-import { useSettingsStore } from "@/stores/settings-store";
+import {
+  applyEditorHeight,
+  clampEditorHeight,
+  DEFAULT_SETTINGS,
+  useSettingsStore,
+} from "@/stores/settings-store";
 import {
   isTabDirty,
   selectActiveTab,
@@ -1063,6 +1068,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 tables={tables}
                 columnsByTable={columnsByTable}
               />
+              <SqlEditorResizeHandle />
             )}
             <div className="mt-2 flex items-center gap-2">
               <button
@@ -1931,5 +1937,40 @@ function CellInspector({
         </Button>
       )}
     </div>
+  );
+}
+
+/** SQL 编辑器底边：拖拽改高度并记住，双击恢复默认。 */
+function SqlEditorResizeHandle() {
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="拖拽调整 SQL 编辑器高度"
+      title="拖拽调整高度，双击恢复默认"
+      onMouseDown={(event) => {
+        event.preventDefault();
+        const startY = event.clientY;
+        const start = useSettingsStore.getState().editorHeight;
+        const move = (e: MouseEvent) => {
+          applyEditorHeight(clampEditorHeight(start + e.clientY - startY));
+        };
+        const up = (e: MouseEvent) => {
+          window.removeEventListener("mousemove", move);
+          window.removeEventListener("mouseup", up);
+          useSettingsStore.getState().update({
+            editorHeight: clampEditorHeight(start + e.clientY - startY),
+          });
+        };
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", up);
+      }}
+      onDoubleClick={() => {
+        useSettingsStore.getState().update({
+          editorHeight: DEFAULT_SETTINGS.editorHeight,
+        });
+      }}
+      className="mt-1 h-2 cursor-row-resize rounded-sm hover:bg-blue-400/40"
+    />
   );
 }

@@ -40,7 +40,7 @@ const lintCompartment = new Compartment();
 
 const editorTheme = EditorView.theme({
   "&": {
-    height: "96px",
+    height: "var(--tiny-sql-editor-height, 240px)",
     border: "1px solid var(--tiny-sql-editor-border)",
     borderRadius: "6px",
     backgroundColor: "var(--tiny-sql-editor-bg)",
@@ -58,7 +58,6 @@ const editorTheme = EditorView.theme({
     overflow: "auto",
   },
   ".cm-content": {
-    minHeight: "94px",
     padding: "8px 0",
     caretColor: "var(--tiny-sql-editor-caret)",
   },
