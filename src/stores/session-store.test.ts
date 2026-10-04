@@ -288,6 +288,22 @@ describe("session-store", () => {
     expect(activeTab().activeResultIndex).toBe(1);
   });
 
+  it("preserveEditor 时执行片段不覆盖编辑器脚本", async () => {
+    useSessionStore.setState({
+      openId: "c1",
+      tabs: [makeTab({ sqlText: "SELECT 1;\nSELECT 2;", initialSql: "SELECT 1;\nSELECT 2;" })],
+      activeTabId: "tab-1",
+    });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "db_query") {
+        return Promise.resolve({ columns: ["n"], rows: [["1"]], truncated: false });
+      }
+      return Promise.resolve(undefined);
+    });
+    await useSessionStore.getState().executeSql("SELECT 1", { preserveEditor: true });
+    expect(activeTab().sqlText).toBe("SELECT 1;\nSELECT 2;");
+  });
+
   it("多语句写未确认时保留错误 key 供 UI 重试（FR-243）", async () => {
     useSessionStore.setState({ openId: "c1", selectedDb: "app" });
     mockInvoke.mockImplementation((cmd: string) => {

@@ -606,7 +606,7 @@ interface SessionState {
   setSqlText: (sql: string) => void;
   executeSql: (
     sql: string,
-    options?: { rowLimit?: number; allowWrite?: boolean },
+    options?: { rowLimit?: number; allowWrite?: boolean; preserveEditor?: boolean },
   ) => Promise<void>;
   cancelQuery: () => Promise<void>;
   /** 在当前 tab 开启事务（FR-244）：建立独占 session，后续语句固定同一物理连接 */
@@ -1468,6 +1468,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     await runTabQuery(get, set, activeTabId, sql, {
       rowLimit: options?.rowLimit ?? 100000,
       allowWrite: options?.allowWrite ?? false,
+      preserveEditor: options?.preserveEditor ?? false,
     });
   },
 
@@ -1983,7 +1984,7 @@ async function runTabQuery(
   set: Set,
   tabId: string,
   sql: string,
-  options: { rowLimit: number; allowWrite?: boolean },
+  options: { rowLimit: number; allowWrite?: boolean; preserveEditor?: boolean },
   selectedTable: string | null = null,
 ): Promise<void> {
   const openId = get().openId;
@@ -1993,9 +1994,13 @@ async function runTabQuery(
     get().activeConnection?.driver === "postgresql"
       ? get().selectedSchema
       : null;
+  // 执行光标语句或 EXPLAIN 时保留编辑器原文，避免脚本被覆盖成单句。
+  const editorSql = options.preserveEditor
+    ? (get().tabs.find((tab) => tab.id === tabId)?.sqlText ?? sql)
+    : sql;
   set((s) => ({
     tabs: patchTab(s.tabs, tabId, {
-      sqlText: sql,
+      sqlText: editorSql,
       selectedTable,
       loadingData: true,
       queryRunning: true,

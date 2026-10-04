@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import {
   CopyIcon,
@@ -38,6 +38,7 @@ import { formatCellDisplay } from "@/lib/cell-inspect";
 import { buildExplainTree, explainSql, type ExplainNode } from "@/lib/explain";
 import { parseForeignKey } from "@/lib/schema-er";
 import { needsWriteConfirmation } from "@/lib/sql-guard";
+import { sqlToExecute } from "@/lib/sql-editor";
 import {
   dbApi,
   exportApi,
@@ -123,6 +124,8 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   const confirm = useConfirmStore((s) => s.confirm);
   const confirmWrite = useSettingsStore((s) => s.confirmWrite);
   const activeTab = selectActiveTab({ tabs, activeTabId });
+  /** 编辑器光标 / 选区。用 ref 避免每次移动光标都重渲染整棵工作台。 */
+  const editorSelection = useRef({ cursor: 0, from: 0, to: 0 });
   const [historyOpen, setHistoryOpen] = useState(false);
   const [objectQuery, setObjectQuery] = useState("");
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
@@ -389,8 +392,16 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
     return confirm(options);
   }
 
-  async function runSql() {
-    const sql = activeTab?.sqlText.trim() ?? "";
+  /** 当前要执行的 SQL：默认光标所在语句或选区，全部则是整段脚本。 */
+  function sqlForScope(scope: "current" | "all") {
+    const full = activeTab?.sqlText ?? "";
+    if (scope === "all") return full.trim();
+    const selection = editorSelection.current;
+    return sqlToExecute(full, selection.cursor, selection.from, selection.to);
+  }
+
+  async function runSql(scope: "current" | "all" = "current") {
+    const sql = sqlForScope(scope);
     if (!sql) return;
     let allowWrite = false;
     if (needsWriteConfirmation(sql, connection.driver)) {
@@ -407,7 +418,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       if (!allowWrite) return;
     }
     setExplainTree(null);
-    await executeSql(sql, { rowLimit: 100000, allowWrite });
+    await executeSql(sql, { rowLimit: 100000, allowWrite, preserveEditor: true });
     // 多语句脚本的写确认回填：前端粗判只看首 token，漏网的写语句由后端
     // 返回 write_requires_confirmation，这里补确认后按确认态重试（FR-243）
     const state = useSessionStore.getState();
@@ -427,13 +438,17 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
         danger: true,
       });
       if (ok) {
-        await executeSql(sql, { rowLimit: 100000, allowWrite: true });
+        await executeSql(sql, {
+          rowLimit: 100000,
+          allowWrite: true,
+          preserveEditor: true,
+        });
       }
     }
   }
 
   async function runExplain(analyze: boolean) {
-    const sql = activeTab?.sqlText.trim() ?? "";
+    const sql = sqlForScope("current");
     if (!sql) return;
     if (analyze) {
       if (readOnly) {
@@ -460,7 +475,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
       });
       if (!ok) return;
     }
-    await executeSql(wrapped, { rowLimit: 100000, allowWrite });
+    await executeSql(wrapped, { rowLimit: 100000, allowWrite, preserveEditor: true });
     const latest = selectActiveTab(useSessionStore.getState());
     if (latest?.rowSet) {
       const tree = buildExplainTree(connection.driver, latest.rowSet);
@@ -522,7 +537,7 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
   async function exportResult(format: ExportFormat) {
     const openId = useSessionStore.getState().openId;
     if (!activeTab || !openId || exporting) return;
-    const sql = activeTab.sqlText.trim();
+    const sql = sqlForScope("current");
     if (!sql) return;
     if (needsWriteConfirmation(sql, connection.driver)) {
       setExportMsg("仅支持导出只读查询结果");
@@ -1054,10 +1069,14 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
           {!activeTab?.browse && (
             <div className="border-b border-neutral-200 p-3 dark:border-neutral-800">
               {activeTab && (
+              <>
               <SqlCodeEditor
                 value={activeTab.sqlText}
                 onChange={setSqlText}
-                onRun={runSql}
+                onRun={() => void runSql("current")}
+                onSelectionChange={(selection) => {
+                  editorSelection.current = selection;
+                }}
                 disabled={!connected || activeTab.queryRunning}
                 queryErrorMsg={activeTab.queryErrorMsg}
                 driver={connection.driver}
@@ -1069,10 +1088,13 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 columnsByTable={columnsByTable}
               />
               <SqlEditorResizeHandle />
+              </>
             )}
             <div className="mt-2 flex items-center gap-2">
               <button
-                onClick={runSql}
+                type="button"
+                onClick={() => void runSql("current")}
+                title="执行光标所在语句或选区（⌘↩）"
                 disabled={
                   !connected ||
                   !activeTab ||
@@ -1082,6 +1104,20 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
                 className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 执行
+              </button>
+              <button
+                type="button"
+                onClick={() => void runSql("all")}
+                title="按顺序执行编辑器中的全部语句"
+                disabled={
+                  !connected ||
+                  !activeTab ||
+                  activeTab.queryRunning ||
+                  activeTab.sqlText.trim().length === 0
+                }
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-neutral-600 dark:hover:bg-neutral-800"
+              >
+                全部
               </button>
               <button
                 onClick={cancelQuery}
