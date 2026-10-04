@@ -83,7 +83,6 @@ export interface SqlToken {
 
 export interface SqlDiagnostic {
   code:
-    | "multiple_statements"
     | "unclosed_block_comment"
     | "unclosed_identifier"
     | "unclosed_parenthesis"
@@ -289,8 +288,6 @@ function tokenizeSql(sql: string): SqlToken[] {
 function collectDiagnostics(tokens: SqlToken[]): SqlDiagnostic[] {
   const diagnostics: SqlDiagnostic[] = [];
   const parentheses: SqlToken[] = [];
-  let hasCodeBeforeStatementEnd = false;
-  let statementEnd: SqlToken | null = null;
 
   for (const token of tokens) {
     if (token.kind === "error") {
@@ -300,18 +297,7 @@ function collectDiagnostics(tokens: SqlToken[]): SqlDiagnostic[] {
 
     if (token.kind === "comment" || token.kind === "whitespace") continue;
 
-    if (statementEnd) {
-      diagnostics.push({
-        code: "multiple_statements",
-        line: statementEnd.line,
-        column: statementEnd.column,
-        length: statementEnd.text.length,
-        message: "一次只能执行一条 SQL",
-      });
-      statementEnd = null;
-      continue;
-    }
-
+    // 多条语句已由查询路径拆开执行，编辑器不再把分号后的下一条标成错误。
     if (token.text === "(") {
       parentheses.push(token);
     } else if (token.text === ")") {
@@ -326,10 +312,6 @@ function collectDiagnostics(tokens: SqlToken[]): SqlDiagnostic[] {
       } else {
         parentheses.pop();
       }
-    } else if (token.text === ";" && hasCodeBeforeStatementEnd) {
-      statementEnd = token;
-    } else {
-      hasCodeBeforeStatementEnd = true;
     }
   }
 
