@@ -15,8 +15,15 @@ export function explainHint(label: string): string | undefined {
   if (upper.includes("FILESORT")) return "额外排序";
   if (upper.includes("TEMPORARY")) return "临时表";
   if (upper.includes("SEQ SCAN")) return "顺序扫描";
-  // SQLite：`SCAN t` 是全表扫描，`SCAN t USING ... INDEX ...` 是索引扫描
-  if (upper.startsWith("SCAN ") && !upper.includes(" USING ")) return "全表扫描";
+  // SQLite：`SCAN t` 是全表扫描，`SCAN t USING ... INDEX ...` 是索引扫描。
+  // `SCAN CONSTANT` 是常量（例如 SELECT 1），不是扫表。
+  if (
+    upper.startsWith("SCAN ") &&
+    !upper.includes(" USING ") &&
+    !upper.startsWith("SCAN CONSTANT")
+  ) {
+    return "全表扫描";
+  }
   return undefined;
 }
 

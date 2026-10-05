@@ -21,6 +21,7 @@ import {
   buildAlterTableSql,
   buildAlterTableStatements,
   isValidDataType,
+  mysqlMajorFromVersion,
   validateAlterTable,
   type AlterColumnInput,
 } from "@/lib/ddl";
@@ -105,7 +106,7 @@ interface AlterTableDialogProps {
 
 /**
  * 修改表对话框（FR-253）：回填现有列 → 按 driver 生成 ALTER 预览 → 二次确认后逐条执行。
- * 不改主键；非主键列可 RENAME COLUMN。失败保留表单。
+ * 不改主键。非主键改名：MySQL 8+ 预览 RENAME COLUMN，5.7 或版本未知时预览 CHANGE COLUMN。失败保留表单。
  */
 export function AlterTableDialog({
   open,
@@ -118,6 +119,11 @@ export function AlterTableDialog({
   onApplied,
 }: AlterTableDialogProps) {
   const confirm = useConfirmStore((s) => s.confirm);
+  const mysqlMajor = useSessionStore((s) => {
+    if (driver !== "mysql") return undefined;
+    const version = s.openSessions.find((item) => item.id === s.openId)?.serverVersion;
+    return mysqlMajorFromVersion(version);
+  });
   const [columns, setColumns] = useState<AlterColumnInput[]>(() =>
     original.map(fromMeta),
   );
@@ -146,13 +152,14 @@ export function AlterTableDialog({
   const input = useMemo(
     () => ({
       driver,
+      mysqlMajor,
       database,
       schema,
       table,
       original,
       columns,
     }),
-    [driver, database, schema, table, original, columns],
+    [driver, mysqlMajor, database, schema, table, original, columns],
   );
 
   const validation = validateAlterTable(input);

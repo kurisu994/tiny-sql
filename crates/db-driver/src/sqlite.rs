@@ -23,6 +23,15 @@ use super::*;
 /// SQLite 主库名。SQLite 的 "database" 即 ATTACH 名，未 ATTACH 时只有 main。
 const MAIN_DATABASE: &str = "main";
 
+/// `PRAGMA database_list` 的一行。`temp` 只放 TEMPORARY 对象，不是用户库。
+fn sqlite_database_meta(name: String) -> DatabaseMeta {
+    DatabaseMeta {
+        is_current: name == MAIN_DATABASE,
+        temporary: name == "temp",
+        name,
+    }
+}
+
 /// progress handler 的回调间隔（约多少条虚拟机指令回调一次）。
 /// 太小影响吞吐，太大取消不跟手；64 在大表扫描下大约每毫秒内可响应多次。
 const PROGRESS_HANDLER_OPS: i32 = 64;
@@ -105,16 +114,14 @@ impl SqliteDriver {
             .map_err(query_failed)?;
         let databases: Vec<DatabaseMeta> = rows
             .into_iter()
-            .map(|(_, name, _)| DatabaseMeta {
-                is_current: name == MAIN_DATABASE,
-                name,
-            })
+            .map(|(_, name, _)| sqlite_database_meta(name))
             .collect();
         // 极端情况下（pragma 被裁剪）兜底给出主库，保证前端树不空
         if databases.is_empty() {
             return Ok(vec![DatabaseMeta {
                 name: MAIN_DATABASE.to_string(),
                 is_current: true,
+                temporary: false,
             }]);
         }
         Ok(databases)
@@ -1304,4 +1311,22 @@ fn decode_sqlite_bytes(row: &SqliteRow, index: usize) -> Option<String> {
             Ok(value) => value.to_string(),
             Err(_) => format!("<{} bytes>", bytes.len()),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temp_database_is_marked_temporary_and_main_stays_current() {
+        let main = sqlite_database_meta("main".to_string());
+        assert!(main.is_current);
+        assert!(!main.temporary);
+        let temp = sqlite_database_meta("temp".to_string());
+        assert!(!temp.is_current);
+        assert!(temp.temporary);
+        let attached = sqlite_database_meta("other".to_string());
+        assert!(!attached.is_current);
+        assert!(!attached.temporary);
+    }
 }

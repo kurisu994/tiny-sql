@@ -25,3 +25,13 @@
 旧版 6 枢纽 → 新版四层（`00-project` / `1X-*` / `active/` / `journal/` / `archive/`）。用 `migrate_legacy.py --apply` 搬运，AI 做合并拆分：systemPatterns + techContext 拆成 `10-ssh-multihop` / `11-db-driver` / `12-tauri-shell` / `13-toolchain` / `20-frontend` 五份，各带 `paths` frontmatter。顺带把上一轮遗留的悬空锚点指向 `archive/2026-08/progress.md`。
 
 注意：Pi 不支持路径触发注入（扩展只能走 systemPrompt / 会话级注入），hook 只对 Claude Code 生效；Pi 里按 `memory-bank/README.md` 的映射表人工查阅。
+
+## 2026-10-05 — dogfood
+
+按 `docs/dogfooding-task.md` 跑了一轮，记录在 gitignore 的 `docs/dogfooding-log.md`。测试 URL 这次 TCP 能通，是直连 MySQL 5.7，不是多跳。写操作放在 `tiny_sql_dogfood_*` 沙箱，测完 `DROP DATABASE`。临时测试文件已删，没有改产品代码。
+
+踩坑：processlist 用 `LIKE '%marker%'` 会把探针自己数进去（`_` 还是通配符），第一次误判取消失败；拆开 marker 后 468ms 归零。5.7 上 `RENAME COLUMN` 是 1064，`ADD/MODIFY/DROP` 正常。
+
+## 2026-10-05 — dogfood 修复
+
+按日志修了四件事，没扩到未测项。5.7 改列名用 `CHANGE COLUMN`，版本来自打开连接时的 `SELECT VERSION()`，不进 SQL 历史；读不到版本也走 CHANGE。SQLite `temp` 标 `temporary`，对比默认选 `isCurrent`。`SCAN CONSTANT` 不再当全表扫描。`tauri-plugin-updater` 锁到 2.11，和 npm 对齐。

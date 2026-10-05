@@ -822,13 +822,25 @@ export function SchemaBrowser({ connection }: { connection: StoredConnection }) 
               >
                 <DatabaseTreeIcon active={selectedDb === db.name} />
                 <span className="min-w-0 truncate">{db.name}</span>
+                {db.temporary && (
+                  <span className="shrink-0 text-[10px] text-neutral-400">临时</span>
+                )}
                 {connection.driver === "postgresql" && db.isCurrent && (
                   <span className="ml-auto shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400">
                     当前
                   </span>
                 )}
               </button>
-              {expandedDb === db.name && connection.driver !== "postgresql" && (
+              {expandedDb === db.name &&
+                connection.driver !== "postgresql" &&
+                db.temporary &&
+                !loadingData &&
+                tables.length === 0 && (
+                  <p className="px-3 py-1 pl-8 text-xs text-neutral-400">无临时表</p>
+                )}
+              {expandedDb === db.name &&
+                connection.driver !== "postgresql" &&
+                !(db.temporary && !loadingData && tables.length === 0) && (
                 <TableTreeList
                   tables={tables}
                   loading={loadingData}

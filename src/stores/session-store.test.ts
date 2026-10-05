@@ -599,6 +599,27 @@ describe("session-store", () => {
     );
   });
 
+  it("打开 MySQL 后把 VERSION() 记到会话上，其他 driver 不探测", async () => {
+    const mysql = sampleConnection("mysql");
+    routeInvoke({
+      connection_open: "session-1",
+      db_list_databases: [{ name: "app", isCurrent: true }],
+      db_server_version: "5.7.42-log",
+    });
+    await useSessionStore.getState().open("c1", undefined, mysql);
+    expect(useSessionStore.getState().openSessions[0]?.serverVersion).toBe("5.7.42-log");
+    expect(mockInvoke).toHaveBeenCalledWith("db_server_version", { id: "c1" });
+
+    const sqlite = { ...sampleConnection("sqlite"), id: "c2", database: "/tmp/a.db" };
+    routeInvoke({
+      connection_open: "session-2",
+      db_list_databases: [{ name: "main", isCurrent: true }],
+    });
+    mockInvoke.mockClear();
+    await useSessionStore.getState().open("c2", undefined, sqlite);
+    expect(mockInvoke).not.toHaveBeenCalledWith("db_server_version", expect.anything());
+  });
+
   it("重连后忽略旧 session 的迟到 SSH 状态事件", () => {
     useSessionStore.setState({
       activeConnection: sampleConnection("mysql"),

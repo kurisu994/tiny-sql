@@ -19,7 +19,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
+# 与 package.json 里的 @tauri-apps/plugin-updater@2.11.0 对齐。只升一边的话，tauri dev 会报主次版本不一致。
+tauri-plugin-updater = "=2.11.0"
 # 本 crate 不直接调 reqwest：这条依赖只为给 tauri-plugin-updater 内部的 reqwest
 # 打开 socks feature（Cargo 的 feature 统一），否则更新代理填 socks5:// 会在
 # Proxy 解析阶段被拒。socks 实现内置于 reqwest，启用它不引入任何新 crate。

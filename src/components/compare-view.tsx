@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
 import { loadSchemaSnapshot } from "@/lib/schema-snapshot";
 import { buildSyncStatements, joinSyncSql, type SyncDirection } from "@/lib/schema-sync";
 import { isReadOnly } from "@/lib/connection-meta";
+import { preferredDatabase } from "@/lib/databases";
 import { copyTargetToken } from "@/lib/table-copy";
 import {
   dbApi,
@@ -36,6 +37,38 @@ interface SidePick {
 }
 
 const emptyPick: SidePick = { connectionId: "", database: "", schema: "" };
+
+/** 拉一侧的库列表；还没选库时落到当前库，不选 SQLite temp。 */
+function useSideDatabases(
+  connectionId: string,
+  setDatabases: Dispatch<SetStateAction<DatabaseMeta[]>>,
+  setPick: Dispatch<SetStateAction<SidePick>>,
+) {
+  useEffect(() => {
+    if (!connectionId) {
+      setDatabases([]);
+      return;
+    }
+    let cancelled = false;
+    void dbApi
+      .listDatabases(connectionId)
+      .then((databases) => {
+        if (cancelled) return;
+        setDatabases(databases);
+        setPick((current) => {
+          if (current.connectionId !== connectionId || current.database) return current;
+          const database = preferredDatabase(databases);
+          return database ? { ...current, database } : current;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setDatabases([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId, setDatabases, setPick]);
+}
 
 /**
  * 双连接结构对比工作台（FR-220 / FR-261）。
@@ -61,21 +94,8 @@ export function CompareView() {
   const leftSession = openSessions.find((item) => item.id === left.connectionId) ?? null;
   const rightSession = openSessions.find((item) => item.id === right.connectionId) ?? null;
 
-  useEffect(() => {
-    if (!left.connectionId) {
-      setLeftDbs([]);
-      return;
-    }
-    void dbApi.listDatabases(left.connectionId).then(setLeftDbs).catch(() => setLeftDbs([]));
-  }, [left.connectionId]);
-
-  useEffect(() => {
-    if (!right.connectionId) {
-      setRightDbs([]);
-      return;
-    }
-    void dbApi.listDatabases(right.connectionId).then(setRightDbs).catch(() => setRightDbs([]));
-  }, [right.connectionId]);
+  useSideDatabases(left.connectionId, setLeftDbs, setLeft);
+  useSideDatabases(right.connectionId, setRightDbs, setRight);
 
   useEffect(() => {
     const session = leftSession;

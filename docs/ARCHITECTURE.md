@@ -635,7 +635,7 @@ pub enum DriverError {
   写 command 与 ANALYZE 认只读。环境只做展示。
 - **复制新表（FR-272）**：前端生成 CREATE，执行走 `db_query`；灌数复用拷贝内核。
 - **检查器 / FK（FR-273）**：纯前端；跳转复用 `browse_table` 筛选。
-- **RENAME / EXPLAIN 提示（FR-274 / FR-275）**：`ddl.ts` 增 RENAME COLUMN；树节点加 hint。
+- **RENAME / EXPLAIN 提示（FR-274 / FR-275）**：`ddl.ts` 对 MySQL 8+ / PostgreSQL / SQLite 生成 `RENAME COLUMN`，MySQL 5.7 生成 `CHANGE COLUMN`（版本来自打开连接时的 `SELECT VERSION()`，不进 SQL 历史）。树节点加 hint；`SCAN CONSTANT` 不是全表扫描。
 
 `DatabaseMeta.is_current` 与 `SchemaMeta.is_default` 是不同语义；`MetadataScope` 不把 MySQL 的 database/schema 同义关系强加给 PostgreSQL。MySQL scope 只携带 database，PostgreSQL scope 必须同时携带当前 database 与 schema。PostgreSQL 无法在一条连接上切换 database，请求非当前 database 时返回 `error.driver.database_switch_required`，由应用层重建目标连接。
 

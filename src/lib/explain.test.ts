@@ -34,6 +34,7 @@ describe("buildExplainTree · SQLite", () => {
     expect(nodes).toHaveLength(2);
     expect(nodes[0].label).toBe("SCAN users");
     expect(nodes[0].hint).toBe("全表扫描");
+    expect(explainHint("SCAN CONSTANT ROW")).toBeUndefined();
     expect(nodes[0].children[0].label).toContain("USING INDEX");
     // 走了索引不算全表扫描
     expect(nodes[0].children[0].hint).toBeUndefined();
