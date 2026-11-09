@@ -519,6 +519,24 @@ export interface OpenSessionInfo {
   id: string;
   sessionId: string;
   connection: StoredConnection;
+  /** MySQL `SELECT VERSION()` 原文。探测失败或不适用时为空。 */
+  serverVersion?: string | null;
+}
+
+/** 打开 MySQL 后记下版本。失败留空，改列名会按 5.7 生成 CHANGE COLUMN。 */
+async function loadMysqlServerVersion(id: string): Promise<void> {
+  try {
+    const version = await dbApi.serverVersion(id);
+    const state = useSessionStore.getState();
+    if (!state.openSessions.some((item) => item.id === id)) return;
+    useSessionStore.setState({
+      openSessions: state.openSessions.map((item) =>
+        item.id === id ? { ...item, serverVersion: version ?? null } : item,
+      ),
+    });
+  } catch {
+    // 探测失败不挡住连接；预览改列名时走 5.7 语法
+  }
 }
 
 function upsertOpenSession(
@@ -606,7 +624,7 @@ interface SessionState {
   setSqlText: (sql: string) => void;
   executeSql: (
     sql: string,
-    options?: { rowLimit?: number; allowWrite?: boolean },
+    options?: { rowLimit?: number; allowWrite?: boolean; preserveEditor?: boolean },
   ) => Promise<void>;
   cancelQuery: () => Promise<void>;
   /** 在当前 tab 开启事务（FR-244）：建立独占 session，后续语句固定同一物理连接 */
@@ -763,6 +781,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           get().hopStatuses,
         ),
       });
+      if (focused?.driver === "mysql") {
+        await loadMysqlServerVersion(id);
+        if (!isCurrentSessionRequest(requestEpoch)) return;
+      }
     } catch (e) {
       if (!isCurrentSessionRequest(requestEpoch)) return;
       const key = typeof e === "string" ? e : String(e);
@@ -834,6 +856,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         databases,
         hopStatuses: connectedHopStatuses(current, get().hopStatuses),
       });
+      if (current.driver === "mysql") {
+        await loadMysqlServerVersion(id);
+        if (!isCurrentSessionRequest(requestEpoch)) return;
+      }
     } catch (e) {
       if (!isCurrentSessionRequest(requestEpoch)) return;
       const key = typeof e === "string" ? e : String(e);
@@ -1468,6 +1494,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     await runTabQuery(get, set, activeTabId, sql, {
       rowLimit: options?.rowLimit ?? 100000,
       allowWrite: options?.allowWrite ?? false,
+      preserveEditor: options?.preserveEditor ?? false,
     });
   },
 
@@ -1983,7 +2010,7 @@ async function runTabQuery(
   set: Set,
   tabId: string,
   sql: string,
-  options: { rowLimit: number; allowWrite?: boolean },
+  options: { rowLimit: number; allowWrite?: boolean; preserveEditor?: boolean },
   selectedTable: string | null = null,
 ): Promise<void> {
   const openId = get().openId;
@@ -1993,9 +2020,13 @@ async function runTabQuery(
     get().activeConnection?.driver === "postgresql"
       ? get().selectedSchema
       : null;
+  // 执行光标语句或 EXPLAIN 时保留编辑器原文，避免脚本被覆盖成单句。
+  const editorSql = options.preserveEditor
+    ? (get().tabs.find((tab) => tab.id === tabId)?.sqlText ?? sql)
+    : sql;
   set((s) => ({
     tabs: patchTab(s.tabs, tabId, {
-      sqlText: sql,
+      sqlText: editorSql,
       selectedTable,
       loadingData: true,
       queryRunning: true,

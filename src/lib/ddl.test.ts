@@ -10,6 +10,7 @@ import {
   buildPostgresCreateTablePreview,
   buildSqliteCreateTablePreview,
   isValidDataType,
+  mysqlMajorFromVersion,
   validateAlterTable,
   validateCreateIndex,
   validateCreateTable,
@@ -404,16 +405,39 @@ describe("buildAlterTableStatements（FR-253 修改表）", () => {
       ),
     ).toContain("不能重命名主键列");
 
-    expect(
-      buildAlterTableSql(
-        mysqlInput({
-          columns: [
-            alterCol("id", { dataType: "int", nullable: false }),
-            alterCol("name", { name: "title", dataType: "varchar(50)", nullable: true }),
-          ],
-        }),
-      ),
-    ).toContain("RENAME COLUMN `name` TO `title`");
+    const renamed = mysqlInput({
+      columns: [
+        alterCol("id", { dataType: "int", nullable: false }),
+        alterCol("name", { name: "title", dataType: "varchar(50)", nullable: true }),
+      ],
+    });
+    // 没拿到版本时按 5.7，避免预览出服务器执行不了的 RENAME COLUMN
+    expect(mysqlMajorFromVersion("5.7.42-log")).toBe(5);
+    expect(mysqlMajorFromVersion("8.0.36")).toBe(8);
+    expect(mysqlMajorFromVersion("not-a-version")).toBeNull();
+    expect(buildAlterTableSql(renamed)).toBe(
+      "ALTER TABLE `app`.`users` CHANGE COLUMN `name` `title` varchar(50);",
+    );
+    expect(buildAlterTableSql({ ...renamed, mysqlMajor: 5 })).toBe(
+      "ALTER TABLE `app`.`users` CHANGE COLUMN `name` `title` varchar(50);",
+    );
+    expect(buildAlterTableSql({ ...renamed, mysqlMajor: 8 })).toContain(
+      "RENAME COLUMN `name` TO `title`",
+    );
+    expect(buildAlterTableSql({ ...renamed, mysqlMajor: 8 })).not.toContain("CHANGE COLUMN");
+
+    const renamedAndRetyped = mysqlInput({
+      columns: [
+        alterCol("id", { dataType: "int", nullable: false }),
+        alterCol("name", { name: "title", dataType: "varchar(80)", nullable: false }),
+      ],
+    });
+    expect(buildAlterTableSql({ ...renamedAndRetyped, mysqlMajor: 5 })).toBe(
+      "ALTER TABLE `app`.`users` CHANGE COLUMN `name` `title` varchar(80) NOT NULL;",
+    );
+    const mysql8 = buildAlterTableSql({ ...renamedAndRetyped, mysqlMajor: 8 });
+    expect(mysql8).toContain("RENAME COLUMN `name` TO `title`");
+    expect(mysql8).toContain("MODIFY COLUMN `title` varchar(80) NOT NULL");
 
     expect(
       validateAlterTable(

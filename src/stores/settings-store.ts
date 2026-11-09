@@ -19,6 +19,9 @@ const STORAGE_KEY = "tiny-sql:settings";
 export const PAGE_SIZE_CHOICES = [100, 500, 1000] as const;
 /** SQL 编辑器字号可选项（px） */
 export const EDITOR_FONT_SIZE_CHOICES = [11, 12, 13, 14, 16] as const;
+/** SQL 编辑器高度拖拽范围（px） */
+export const EDITOR_HEIGHT_MIN = 120;
+export const EDITOR_HEIGHT_MAX = 560;
 export type { ThemePreference };
 /** 代理地址最大长度，防止误粘贴超长内容塞满 localStorage */
 const PROXY_MAX_LENGTH = 512;
@@ -70,9 +73,19 @@ export interface Settings {
   defaultPageSize: number;
   /** SQL 编辑器字号（px） */
   editorFontSize: number;
+  /** SQL 编辑器高度（px），拖拽分隔条后记住 */
+  editorHeight: number;
   /** 界面外观：跟随系统 / 浅色 / 深色 */
   theme: ThemePreference;
 }
+
+/** 把编辑器高度限制在可拖范围内；非法值回落默认高度 */
+export function clampEditorHeight(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_EDITOR_HEIGHT;
+  return Math.min(EDITOR_HEIGHT_MAX, Math.max(EDITOR_HEIGHT_MIN, Math.round(value)));
+}
+
+const DEFAULT_EDITOR_HEIGHT = 240;
 
 export const DEFAULT_SETTINGS: Settings = {
   autoCheckUpdate: true,
@@ -80,6 +93,7 @@ export const DEFAULT_SETTINGS: Settings = {
   confirmWrite: true,
   defaultPageSize: 1000,
   editorFontSize: 12,
+  editorHeight: DEFAULT_EDITOR_HEIGHT,
   theme: "system",
 };
 
@@ -118,6 +132,11 @@ function sanitize(raw: unknown): Settings {
       EDITOR_FONT_SIZE_CHOICES,
       DEFAULT_SETTINGS.editorFontSize as (typeof EDITOR_FONT_SIZE_CHOICES)[number],
     ),
+    editorHeight: clampEditorHeight(
+      typeof value.editorHeight === "number"
+        ? value.editorHeight
+        : DEFAULT_SETTINGS.editorHeight,
+    ),
     theme: isThemePreference(value.theme) ? value.theme : DEFAULT_SETTINGS.theme,
   };
 }
@@ -140,6 +159,7 @@ function snapshot(state: Settings): Settings {
     confirmWrite: state.confirmWrite,
     defaultPageSize: state.defaultPageSize,
     editorFontSize: state.editorFontSize,
+    editorHeight: state.editorHeight,
     theme: state.theme,
   };
 }
@@ -163,6 +183,14 @@ export function applyEditorFontSize(size: number) {
   );
 }
 
+/** 编辑器高度走 CSS 变量，拖拽时不用重建 CodeMirror。 */
+export function applyEditorHeight(height: number) {
+  globalThis.document?.documentElement.style.setProperty(
+    "--tiny-sql-editor-height",
+    `${clampEditorHeight(height)}px`,
+  );
+}
+
 interface SettingsState extends Settings {
   /** 从 localStorage 载入并同步副作用（CSS 变量与外观 class），应用启动时调用一次 */
   hydrate: () => void;
@@ -179,6 +207,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const loaded = loadSettings();
     set(loaded);
     applyEditorFontSize(loaded.editorFontSize);
+    applyEditorHeight(loaded.editorHeight);
     applyAppearance(loaded.theme);
   },
 
@@ -187,6 +216,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const next = snapshot(get());
     persist(next);
     if (patch.editorFontSize !== undefined) applyEditorFontSize(next.editorFontSize);
+    if (patch.editorHeight !== undefined) applyEditorHeight(next.editorHeight);
     if (patch.theme !== undefined) applyAppearance(next.theme);
   },
 
@@ -194,6 +224,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ ...DEFAULT_SETTINGS });
     persist({ ...DEFAULT_SETTINGS });
     applyEditorFontSize(DEFAULT_SETTINGS.editorFontSize);
+    applyEditorHeight(DEFAULT_SETTINGS.editorHeight);
     applyAppearance(DEFAULT_SETTINGS.theme);
   },
 }));

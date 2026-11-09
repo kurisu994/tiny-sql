@@ -38,8 +38,8 @@ next-env.d.ts
 /test-results/
 /.nyc_output/
 
-# ---- 本地运行时数据（dogfooding 日志等，不公开） ----
-docs/dogfooding-log.md
+# ---- 本地运行时数据（dogfooding 日志 / 任务提示词等，不公开） ----
+docs/dogfooding-*.md
 
 # ---- 编辑器 / IDE ----
 # JetBrains（RustRover / WebStorm）

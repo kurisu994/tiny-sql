@@ -133,6 +133,23 @@ pub async fn db_list_databases(
         .map_err(|e| e.i18n_key().to_string())
 }
 
+/// MySQL 返回 `SELECT VERSION()`；其他 driver 返回 null。不写入 SQL 历史。
+#[tauri::command]
+pub async fn db_server_version(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<String>, String> {
+    let driver = driver_of(&state, &id).await?;
+    match driver.as_mysql() {
+        Some(mysql) => mysql
+            .server_version()
+            .await
+            .map(Some)
+            .map_err(|e| e.i18n_key().to_string()),
+        None => Ok(None),
+    }
+}
+
 /// 创建 database，并由 db-driver 负责标识符转义与字符集参数校验。
 #[tauri::command]
 pub async fn db_create_database(

@@ -25,6 +25,8 @@ interface SqlCodeEditorProps {
   value: string;
   onChange: (value: string) => void;
   onRun: () => void;
+  /** 光标或选区变化，供「执行当前语句」读取，不触发父组件重渲染 */
+  onSelectionChange?: (selection: { cursor: number; from: number; to: number }) => void;
   disabled: boolean;
   queryErrorMsg: string | null;
   driver: DriverKind;
@@ -40,7 +42,7 @@ const lintCompartment = new Compartment();
 
 const editorTheme = EditorView.theme({
   "&": {
-    height: "96px",
+    height: "var(--tiny-sql-editor-height, 240px)",
     border: "1px solid var(--tiny-sql-editor-border)",
     borderRadius: "6px",
     backgroundColor: "var(--tiny-sql-editor-bg)",
@@ -58,7 +60,6 @@ const editorTheme = EditorView.theme({
     overflow: "auto",
   },
   ".cm-content": {
-    minHeight: "94px",
     padding: "8px 0",
     caretColor: "var(--tiny-sql-editor-caret)",
   },
@@ -103,6 +104,7 @@ export function SqlCodeEditor({
   value,
   onChange,
   onRun,
+  onSelectionChange,
   disabled,
   queryErrorMsg,
   driver,
@@ -115,6 +117,7 @@ export function SqlCodeEditor({
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const onRunRef = useRef(onRun);
+  const onSelectionRef = useRef(onSelectionChange);
 
   const completionMetadata = useMemo<SqlCompletionMetadata>(
     () => ({
@@ -129,6 +132,16 @@ export function SqlCodeEditor({
 
   onChangeRef.current = onChange;
   onRunRef.current = onRun;
+  onSelectionRef.current = onSelectionChange;
+
+  function publishSelection(state: EditorState) {
+    const selection = state.selection.main;
+    onSelectionRef.current?.({
+      cursor: selection.head,
+      from: selection.from,
+      to: selection.to,
+    });
+  }
 
   useEffect(() => {
     if (!containerRef.current || viewRef.current) return;
@@ -154,14 +167,19 @@ export function SqlCodeEditor({
           languageCompartment.of(sqlExtension(completionMetadata)),
           lintCompartment.of(sqlLintExtension(queryErrorMsg, driver)),
           EditorView.updateListener.of((update) => {
-            if (!update.docChanged) return;
-            onChangeRef.current(update.state.doc.toString());
+            if (update.docChanged) {
+              onChangeRef.current(update.state.doc.toString());
+            }
+            if (update.docChanged || update.selectionSet) {
+              publishSelection(update.state);
+            }
           }),
         ],
       }),
     });
 
     viewRef.current = view;
+    publishSelection(view.state);
     return () => {
       view.destroy();
       viewRef.current = null;

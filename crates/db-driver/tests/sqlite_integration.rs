@@ -132,7 +132,11 @@ async fn sqlite_lists_main_database_and_user_objects() {
         .list_databases()
         .await
         .expect("database metadata 失败");
-    assert!(databases.iter().any(|d| d.name == "main" && d.is_current));
+    assert!(databases
+        .iter()
+        .any(|d| d.name == "main" && d.is_current && !d.temporary));
+    // 没建过临时表时，SQLite 不一定把 temp 放进 database_list
+    assert!(databases.iter().all(|d| d.temporary == (d.name == "temp")));
 
     // SQLite 没有 schema 层级
     assert!(driver

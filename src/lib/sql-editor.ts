@@ -83,7 +83,6 @@ export interface SqlToken {
 
 export interface SqlDiagnostic {
   code:
-    | "multiple_statements"
     | "unclosed_block_comment"
     | "unclosed_identifier"
     | "unclosed_parenthesis"
@@ -108,6 +107,144 @@ export function analyzeSqlEditorText(sql: string): SqlEditorAnalysis {
     diagnostics: collectDiagnostics(tokens),
     lineCount: countSqlLines(sql),
   };
+}
+
+export interface SqlStatementSpan {
+  /** 语句起点（含前导空白），不含结尾分号 */
+  from: number;
+  /** 语句终点，不含结尾分号 */
+  to: number;
+}
+
+/**
+ * 按顶层分号切开语句。字符串、标识符、注释和 PostgreSQL dollar-quote 里的分号不切。
+ * 字面量或块注释没闭合时返回 null，调用方应退回整段文本，避免切出半句去执行。
+ */
+export function splitSqlStatementSpans(sql: string): SqlStatementSpan[] | null {
+  const spans: SqlStatementSpan[] = [];
+  let index = 0;
+  let start = 0;
+  let hasCode = false;
+
+  const push = (end: number) => {
+    if (!hasCode) return;
+    spans.push({ from: start, to: end });
+    hasCode = false;
+  };
+
+  while (index < sql.length) {
+    const ch = sql[index] ?? "";
+    const next = sql[index + 1] ?? "";
+
+    if (ch === "-" && next === "-") {
+      while (index < sql.length && sql[index] !== "\n") index += 1;
+      continue;
+    }
+    if (ch === "#") {
+      while (index < sql.length && sql[index] !== "\n") index += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      index += 2;
+      let closed = false;
+      while (index < sql.length) {
+        if (sql[index] === "*" && sql[index + 1] === "/") {
+          index += 2;
+          closed = true;
+          break;
+        }
+        index += 1;
+      }
+      if (!closed) return null;
+      continue;
+    }
+
+    const dollar = readDollarQuote(sql, index);
+    if (dollar) {
+      const closeAt = sql.indexOf(dollar.tag, dollar.contentFrom);
+      if (closeAt < 0) return null;
+      index = closeAt + dollar.tag.length;
+      hasCode = true;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const quote = ch;
+      index += 1;
+      let closed = false;
+      while (index < sql.length) {
+        if ((quote === "'" || quote === '"') && sql[index] === "\\") {
+          index += index + 1 < sql.length ? 2 : 1;
+          continue;
+        }
+        if (sql[index] === quote) {
+          if (sql[index + 1] === quote) {
+            index += 2;
+            continue;
+          }
+          index += 1;
+          closed = true;
+          break;
+        }
+        index += 1;
+      }
+      if (!closed) return null;
+      hasCode = true;
+      continue;
+    }
+
+    if (ch === ";") {
+      push(index);
+      index += 1;
+      start = index;
+      continue;
+    }
+
+    if (!/\s/.test(ch)) hasCode = true;
+    index += 1;
+  }
+
+  push(sql.length);
+  return spans;
+}
+
+/**
+ * 决定这次要执行的 SQL：有非空选区就执行选区，否则执行光标所在语句。
+ * 切分失败（字面量未闭合）时退回整段，交给后端报错。
+ */
+export function sqlToExecute(
+  sql: string,
+  cursor: number,
+  selectionFrom = cursor,
+  selectionTo = cursor,
+): string {
+  const from = Math.min(selectionFrom, selectionTo);
+  const to = Math.max(selectionFrom, selectionTo);
+  if (to > from) {
+    const selected = sql.slice(from, to).trim();
+    if (selected) return selected;
+  }
+
+  const spans = splitSqlStatementSpans(sql);
+  if (!spans || spans.length === 0) return sql.trim();
+
+  const clamped = Math.max(0, Math.min(cursor, sql.length));
+  const hit =
+    spans.find((span) => clamped >= span.from && clamped <= span.to) ??
+    spans.find((span) => span.from > clamped) ??
+    [...spans].reverse().find((span) => span.to < clamped) ??
+    spans[0];
+  return sql.slice(hit.from, hit.to).trim();
+}
+
+/** `$tag$` / `$$` 起始标签。`$1` 这种占位符不是 dollar-quote。 */
+function readDollarQuote(sql: string, index: number): { tag: string; contentFrom: number } | null {
+  if (sql[index] !== "$") return null;
+  let end = index + 1;
+  while (end < sql.length && /[A-Za-z0-9_]/.test(sql[end] ?? "")) end += 1;
+  if (sql[end] !== "$") return null;
+  const tag = sql.slice(index, end + 1);
+  return { tag, contentFrom: end + 1 };
 }
 
 export function extractSqlErrorLine(message: string | null | undefined) {
@@ -289,8 +426,6 @@ function tokenizeSql(sql: string): SqlToken[] {
 function collectDiagnostics(tokens: SqlToken[]): SqlDiagnostic[] {
   const diagnostics: SqlDiagnostic[] = [];
   const parentheses: SqlToken[] = [];
-  let hasCodeBeforeStatementEnd = false;
-  let statementEnd: SqlToken | null = null;
 
   for (const token of tokens) {
     if (token.kind === "error") {
@@ -300,18 +435,7 @@ function collectDiagnostics(tokens: SqlToken[]): SqlDiagnostic[] {
 
     if (token.kind === "comment" || token.kind === "whitespace") continue;
 
-    if (statementEnd) {
-      diagnostics.push({
-        code: "multiple_statements",
-        line: statementEnd.line,
-        column: statementEnd.column,
-        length: statementEnd.text.length,
-        message: "一次只能执行一条 SQL",
-      });
-      statementEnd = null;
-      continue;
-    }
-
+    // 多条语句已由查询路径拆开执行，编辑器不再把分号后的下一条标成错误。
     if (token.text === "(") {
       parentheses.push(token);
     } else if (token.text === ")") {
@@ -326,10 +450,6 @@ function collectDiagnostics(tokens: SqlToken[]): SqlDiagnostic[] {
       } else {
         parentheses.pop();
       }
-    } else if (token.text === ";" && hasCodeBeforeStatementEnd) {
-      statementEnd = token;
-    } else {
-      hasCodeBeforeStatementEnd = true;
     }
   }
 

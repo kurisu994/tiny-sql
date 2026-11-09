@@ -129,7 +129,11 @@ impl PostgresDriver {
         .map_err(query_failed)?;
         Ok(rows
             .into_iter()
-            .map(|(name, is_current)| DatabaseMeta { name, is_current })
+            .map(|(name, is_current)| DatabaseMeta {
+                name,
+                is_current,
+                temporary: false,
+            })
             .collect())
     }
 

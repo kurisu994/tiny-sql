@@ -1,6 +1,6 @@
 # 当前任务（main）
 
-**最后更新**：2026-09-10
+**最后更新**：2026-10-05
 
 ## 目标
 
@@ -60,9 +60,10 @@
 
 ## 下一步（按优先级）
 
-1. GUI 验收 v0.8（只读 / 环境色 / 复制表 / 检查器 / RENAME / EXPLAIN 提示）+ SQLite 全链路实测。
-2. 验收通过后由用户决定 `[Unreleased]` 三项的发布版本（预计并入下一个小版本）。
-3. 之后才谈双向同步 / BI / AI（挂 v0.9+）。
+1. GUI 验收还没关账。2026-10-05 dogfood 写在 gitignore 的 `docs/dogfooding-log.md`。已按日志修：MySQL 5.7 改列名改走 `CHANGE COLUMN`（8+ 仍是 `RENAME COLUMN`）、SQLite `temp` 标成临时库且对比默认选当前库、`SCAN CONSTANT` 不再提示全表扫描、updater Rust 侧对齐 2.11。拖拽、只读、导出、MySQL 工作台、主密码、多跳 SSH 仍未测。
+2. GUI 验收 v0.8（只读 / 环境色 / 复制表 / 检查器 / RENAME / EXPLAIN 提示）+ 上面没点完的 SQLite / MySQL 窗口路径。
+3. 验收通过后由用户决定 `[Unreleased]` 三项的发布版本（预计并入下一个小版本）。
+4. 之后才谈双向同步 / BI / AI（挂 v0.9+）。
 
 ## 阻塞 / 风险
 

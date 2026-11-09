@@ -241,6 +241,8 @@ pub struct DatabaseMeta {
     pub name: String,
     /// 是否为当前连接所在 database。
     pub is_current: bool,
+    /// SQLite 的 `temp` 库，只放 TEMPORARY 对象。MySQL / PostgreSQL 恒为 false。
+    pub temporary: bool,
 }
 
 /// 单个 schema。MySQL 中 schema 与 database 同义，PostgreSQL 中是独立层级。
@@ -985,6 +987,15 @@ impl MySqlDriver {
         Ok(row.0)
     }
 
+    /// 读 `SELECT VERSION()`，供前端区分 5.7 / 8.0 改列名语法。不走查询历史。
+    pub async fn server_version(&self) -> Result<String, DriverError> {
+        let version: String = sqlx::query_scalar("SELECT VERSION()")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(query_failed)?;
+        Ok(version)
+    }
+
     /// 列出所有可见 database。
     pub async fn list_databases(&self) -> Result<Vec<DatabaseMeta>, DriverError> {
         let current: Option<String> = sqlx::query_scalar("SELECT DATABASE()")
@@ -1001,6 +1012,7 @@ impl MySqlDriver {
             .into_iter()
             .map(|(name,)| DatabaseMeta {
                 is_current: current.as_deref() == Some(name.as_str()),
+                temporary: false,
                 name,
             })
             .collect())

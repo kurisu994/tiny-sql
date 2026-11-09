@@ -395,6 +395,8 @@ export interface SharePreviewResult {
 export interface DatabaseMeta {
   name: string;
   isCurrent: boolean;
+  /** SQLite 的 temp 库。旧响应缺这个字段时当作普通库。 */
+  temporary?: boolean;
 }
 
 /** schema 元信息；MySQL 返回与 database 同名项，PostgreSQL 为独立层级，SQLite 返回空 */
@@ -474,6 +476,9 @@ export interface CreateDatabaseInput {
 export const dbApi = {
   listDatabases: (id: string) =>
     invoke<DatabaseMeta[]>("db_list_databases", { id }),
+  /** MySQL 的 VERSION()；其他 driver 为 null。不进 SQL 历史。 */
+  serverVersion: (id: string) =>
+    invoke<string | null>("db_server_version", { id }),
   listSchemas: (id: string, database: string) =>
     invoke<SchemaMeta[]>("db_list_schemas", { id, database }),
   createDatabase: (id: string, input: CreateDatabaseInput) =>

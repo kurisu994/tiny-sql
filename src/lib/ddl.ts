@@ -262,7 +262,7 @@ export function buildSqliteCreateTablePreview(
 
 // === 修改表 SQL 生成（FR-253）===
 
-/** 修改表单中的一列。v0.8 支持非主键 RENAME COLUMN。 */
+/** 修改表单中的一列。非主键可改名：MySQL 8+ / PostgreSQL / SQLite 用 RENAME COLUMN，MySQL 5.7 用 CHANGE COLUMN。 */
 export interface AlterColumnInput {
   /** 原列名；新增列为 null */
   originName: string | null;
@@ -276,6 +276,11 @@ export interface AlterColumnInput {
 /** 修改表输入：original 为当前服务端列，columns 为表单目标态 */
 export interface AlterTableInput {
   driver: DriverKind;
+  /**
+   * MySQL 主版本。8 及以上用 `RENAME COLUMN`；
+   * 缺省或小于 8 用 `CHANGE COLUMN`（5.7 不认识 RENAME COLUMN）。
+   */
+  mysqlMajor?: number | null;
   database: string;
   schema?: string | null;
   table: string;
@@ -407,6 +412,17 @@ function mysqlColumnDef(
 }
 
 /**
+ * 从 `SELECT VERSION()` 取 MySQL 主版本。
+ * 解析失败返回 null，调用方按 5.7 生成 `CHANGE COLUMN`。
+ */
+export function mysqlMajorFromVersion(version: string | null | undefined): number | null {
+  const match = /^(\d+)/.exec(version?.trim() ?? "");
+  if (!match) return null;
+  const major = Number(match[1]);
+  return Number.isInteger(major) ? major : null;
+}
+
+/**
  * 按 MySQL / PostgreSQL / SQLite 生成列级 ALTER 语句序列（FR-253）。
  * 每条危险语义独立成句，不与 ADD COLUMN 合并。调用前须先过 [`validateAlterTable`]。
  */
@@ -458,22 +474,41 @@ export function buildAlterTableStatements(input: AlterTableInput): AlterStatemen
     if (!original) continue;
     kept.add(key);
 
-    const renamed = original.name !== column.name.trim();
-    if (renamed && !isPrimaryColumn(original)) {
-      push(
-        changes,
-        "rename",
-        `RENAME COLUMN ${quote(original.name)} TO ${quote(column.name.trim())}`,
-        false,
-      );
-    }
-
+    const newName = column.name.trim();
+    const renamed = original.name !== newName;
     const typeChanged =
       normalizeType(original.dataType) !== normalizeType(column.dataType);
     const nullChanged = original.nullable !== column.nullable;
     const oldDefault = normalizeDefault(original.defaultValue);
     const newDefault = normalizeDefault(column.defaultValue);
     const defaultChanged = oldDefault !== newDefault;
+    // 未知版本也走 CHANGE：5.7 上 RENAME COLUMN 会 1064，而 CHANGE 在 5.7 和 8.0 都能执行。
+    const mysqlLegacyRename =
+      input.driver === "mysql" &&
+      renamed &&
+      !isPrimaryColumn(original) &&
+      (input.mysqlMajor == null || input.mysqlMajor < 8);
+
+    if (mysqlLegacyRename) {
+      const defChanged = typeChanged || nullChanged || defaultChanged;
+      push(
+        changes,
+        "rename",
+        `CHANGE COLUMN ${quote(original.name)} ${quote(newName)} ${mysqlColumnDef(column)}`,
+        defChanged,
+      );
+      // 列定义已经写进 CHANGE，不再跟 MODIFY / ALTER COLUMN
+      continue;
+    }
+
+    if (renamed && !isPrimaryColumn(original)) {
+      push(
+        changes,
+        "rename",
+        `RENAME COLUMN ${quote(original.name)} TO ${quote(newName)}`,
+        false,
+      );
+    }
 
     if (input.driver === "sqlite") {
       // 类型 / 空性 / 默认值的差异已在 validateAlterTable 里拒绝，这里只做 rename + add/drop

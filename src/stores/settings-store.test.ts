@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { resetAppearanceForTests } from "@/lib/appearance";
 import {
+  clampEditorHeight,
   DEFAULT_SETTINGS,
+  EDITOR_HEIGHT_MAX,
+  EDITOR_HEIGHT_MIN,
   effectiveProxy,
   isValidProxyUrl,
   loadSettings,
@@ -31,6 +34,7 @@ beforeEach(() => {
   localStorage.clear();
   useSettingsStore.setState({ ...DEFAULT_SETTINGS });
   document.documentElement.style.removeProperty("--tiny-sql-editor-font-size");
+  document.documentElement.style.removeProperty("--tiny-sql-editor-height");
   resetAppearanceForTests();
   mockMatchMedia(false);
 });
@@ -72,6 +76,22 @@ describe("settings-store", () => {
   it("存储内容损坏时回落默认值", () => {
     localStorage.setItem(STORAGE_KEY, "{ 不是 JSON");
     expect(loadSettings()).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it("编辑器高度越界时夹紧，hydrate 同步 CSS 变量", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_SETTINGS, editorHeight: 9999 }),
+    );
+
+    expect(loadSettings().editorHeight).toBe(EDITOR_HEIGHT_MAX);
+    expect(clampEditorHeight(Number.NaN)).toBe(DEFAULT_SETTINGS.editorHeight);
+    expect(clampEditorHeight(10)).toBe(EDITOR_HEIGHT_MIN);
+
+    useSettingsStore.getState().hydrate();
+    expect(document.documentElement.style.getPropertyValue("--tiny-sql-editor-height")).toBe(
+      `${EDITOR_HEIGHT_MAX}px`,
+    );
   });
 
   it("hydrate 载入偏好并同步编辑器字号 CSS 变量", () => {

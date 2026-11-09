@@ -57,7 +57,7 @@ control pool 是「同一连接参数独立连接池」，**不是**独立本地
 ## SQLite 专属
 
 - 连接模型：`DriverKind::is_file_based()` 是新判据；`StoredConnection.database` 承载 `.db` 文件路径，host / port / 账号与 SSH 隧道、SSL 全部旁路。
-- 无 schema 层级：`MetadataScope.schema` 恒为 `None`、`list_schemas` 返回空。
+- 无 schema 层级：`MetadataScope.schema` 恒为 `None`、`list_schemas` 返回空。`PRAGMA database_list` 里的 `temp` 要标 `temporary`，它是 TEMPORARY 表的宿主，不是用户库。
 - **动态类型按取值真实类型解码**：`SqliteColumn::type_info()` 给的是**列声明类型**，表达式列（`COUNT(*)`、`a + b`）没有声明类型 → 按它分派会把非空值一律解码成 NULL；必须按 `ValueRef` 的取值真实类型（INTEGER / REAL / TEXT / BLOB / NULL）分派。
 - 数据库文件不存在时连接失败（不自动建库）；外键约束默认开启（SQLite 自身默认关闭）；改写数据库的 `PRAGMA`（如 `PRAGMA journal_mode = WAL`）按写操作处理。
 - 备份 / 恢复依赖用户机器上有 `sqlite3` 命令行（`.dump` / stdin 灌入），与 mysqldump / pg_dump 同一套外部工具链路。

@@ -393,7 +393,7 @@ tiny-sql 同时服务三类用户。三类用户的功能需求高度重叠，�
 - **FR-271** 连接环境色 / 标签（P1）：`none | prod | staging | dev` 展示在列表、标题、tab 与破坏性确认框。不做自定义调色板，不按环境自动只读。
 - **FR-272** 同库复制为新表（P1）：当前连接上预览建表 SQL（MySQL `CREATE TABLE … LIKE`，PG 用结构重建并改名），手输新表名后执行；可选再灌数据（复用表拷贝内核）。不做整库克隆。
 - **FR-273** 单元格检查器与外键跳转（P1）：结果格查看完整值（NULL/空串可区分，JSON 尝试格式化）。单列 FK 可打开引用表并等值筛选。检查器不直接写回。跨连接 FK 不做。
-- **FR-274** RENAME COLUMN 预览（P1）：修改表对话框可重命名列，生成双方言 `RENAME COLUMN` 并确认。仍不换主键。可整项降级。
+- **FR-274** RENAME COLUMN 预览（P1）：修改表对话框可重命名列。PostgreSQL、SQLite 与 MySQL 8.0+ 生成 `RENAME COLUMN`；MySQL 5.7（以及还没读到版本时）生成等价的 `CHANGE COLUMN`，因为 5.7 不支持 `RENAME COLUMN`。仍不换主键。可整项降级。
 - **FR-275** EXPLAIN 读后提示（P1）：在已有计划树上标注全表扫描 / filesort / Seq Scan 等，不改写 SQL，不做采集。可整项降级。
 
 验收见 [PLAN](./PLAN.md) 与 [RELEASE_CHECKLIST v0.8](./RELEASE_CHECKLIST.md#v08-发布检查清单)。
